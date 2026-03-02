@@ -252,6 +252,14 @@ assert_eq "deploy: hook allows sandbox commands" \
     "" \
     "$(echo '{"tool_name": "Bash", "tool_input": {"command": "lumon --working-dir sandbox browse"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
 
+assert_contains "deploy: hook blocks chained commands" \
+    "BLOCKED" \
+    "$(echo '{"tool_name": "Bash", "tool_input": {"command": "lumon --working-dir sandbox browse && echo pwned"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
+
+assert_contains "deploy: hook blocks piped commands" \
+    "BLOCKED" \
+    "$(echo '{"tool_name": "Bash", "tool_input": {"command": "lumon --working-dir sandbox browse | cat"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
+
 # ---------------------------------------------------------------------------
 # IO sandbox (--working-dir constrains io.read / io.write)
 # ---------------------------------------------------------------------------
