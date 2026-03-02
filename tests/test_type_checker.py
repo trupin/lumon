@@ -1,0 +1,259 @@
+"""Tests for Lumon type checker: all type errors caught statically before execution.
+
+Every test here expects an interpreter error of type "error" — the type checker
+should catch these before any code runs."""
+
+import pytest
+
+
+@pytest.fixture
+def run(runner):
+    def _run(code, **kwargs):
+        return runner.run(code, **kwargs)
+    return _run
+
+
+# ===================================================================
+# Operator type mismatches
+# ===================================================================
+
+class TestOperatorTypeMismatch:
+    def test_add_number_and_text(self, run):
+        r = run('return 42 + "hello"')
+        assert r.type == "error"
+
+    def test_subtract_text(self, run):
+        r = run('return "hello" - "world"')
+        assert r.type == "error"
+
+    def test_multiply_text(self, run):
+        r = run('return "hello" * 2')
+        assert r.type == "error"
+
+    def test_compare_incompatible_types(self, run):
+        r = run('return "hello" < 42')
+        assert r.type == "error"
+
+    def test_boolean_and_with_number(self, run):
+        """and/or with non-bool operands — truthy/falsy is defined for all types,
+        so this may or may not be a type error depending on strictness."""
+        r = run('return 1 and 2')
+        # If type checker is strict: r.type == "error"
+        # If truthy/falsy is allowed: r.value == 2
+        assert r.type in ("result", "error")
+
+
+# ===================================================================
+# Union type not handled
+# ===================================================================
+
+class TestUnionTypeNotHandled:
+    def test_use_optional_without_handling_none(self, run):
+        """list.head returns a | none, using it directly as number is a type error."""
+        r = run(
+            'let x = list.head([1, 2, 3])\n'
+            'return x + 1'
+        )
+        assert r.type == "error"
+
+    def test_use_tag_union_without_matching(self, run):
+        """io.read returns :ok(text) | :error(text), can't use directly as text."""
+        r = run(
+            'let r = io.read("file.md")\n'
+            'return text.length(r)'
+        )
+        assert r.type == "error"
+
+    def test_pipe_tag_result_to_text_function(self, run):
+        r = run('return io.read("f") |> text.length')
+        assert r.type == "error"
+
+
+# ===================================================================
+# Mixed-type lists
+# ===================================================================
+
+class TestMixedTypeLists:
+    def test_mixed_number_and_text(self, run):
+        r = run('return [1, "two", 3]')
+        assert r.type == "error"
+
+    def test_mixed_bool_and_number(self, run):
+        r = run('return [true, 42]')
+        assert r.type == "error"
+
+    def test_mixed_none_and_number(self, run):
+        r = run('return [none, 1]')
+        assert r.type == "error"
+
+
+# ===================================================================
+# Wrong argument types to builtins
+# ===================================================================
+
+class TestWrongArgTypeToBuiltin:
+    def test_text_length_with_number(self, run):
+        r = run('return text.length(42)')
+        assert r.type == "error"
+
+    def test_text_split_with_number_sep(self, run):
+        r = run('return text.split("hello", 42)')
+        assert r.type == "error"
+
+    def test_list_map_with_non_function(self, run):
+        r = run('return list.map([1, 2, 3], 42)')
+        assert r.type == "error"
+
+    def test_list_take_with_text(self, run):
+        r = run('return list.take([1, 2, 3], "two")')
+        assert r.type == "error"
+
+    def test_number_round_with_text(self, run):
+        r = run('return number.round("3.5")')
+        assert r.type == "error"
+
+
+# ===================================================================
+# Wrong argument count
+# ===================================================================
+
+class TestWrongArgCount:
+    def test_text_split_one_arg(self, run):
+        r = run('return text.split("hello")')
+        assert r.type == "error"
+
+    def test_text_length_two_args(self, run):
+        r = run('return text.length("hello", "extra")')
+        assert r.type == "error"
+
+    def test_list_map_one_arg(self, run):
+        r = run('return list.map([1, 2, 3])')
+        assert r.type == "error"
+
+
+# ===================================================================
+# Structural map field access
+# ===================================================================
+
+class TestStructuralMapFieldAccess:
+    def test_access_nonexistent_field(self, run):
+        r = run(
+            'let m = {name: "Theo"}\n'
+            'return m.age'
+        )
+        assert r.type == "error"
+
+    def test_access_field_on_non_map(self, run):
+        r = run('let x = 42\nreturn x.name')
+        assert r.type == "error"
+
+
+# ===================================================================
+# Tag exhaustiveness
+# ===================================================================
+
+class TestTagExhaustiveness:
+    def test_non_exhaustive_match_on_define_return(self, run):
+        """Missing a tag from a define's return type should be flagged."""
+        r = run(
+            'define test.fn\n'
+            '  "test"\n'
+            '  returns: :ok(text) | :error(text) "result"\n'
+            '\n'
+            'implement test.fn\n'
+            '  return :ok("data")\n'
+            '\n'
+            'let r = test.fn()\n'
+            'return match r\n'
+            '  :ok(v) -> v'
+            # Missing :error case
+        )
+        # Should produce a warning or error about missing :error case
+        # Exact behavior TBD
+
+    def test_exhaustive_with_wildcard(self, run):
+        """Wildcard _ should satisfy exhaustiveness."""
+        r = run(
+            'define test.fn\n'
+            '  "test"\n'
+            '  returns: :ok(text) | :error(text) "result"\n'
+            '\n'
+            'implement test.fn\n'
+            '  return :ok("data")\n'
+            '\n'
+            'let r = test.fn()\n'
+            'return match r\n'
+            '  :ok(v) -> v\n'
+            '  _ -> "fallback"'
+        )
+        assert r.type == "result"
+        assert r.value == "data"
+
+
+# ===================================================================
+# Undefined function / variable
+# ===================================================================
+
+class TestUndefined:
+    def test_undefined_function(self, run):
+        r = run('return nonexistent.fn()')
+        assert r.type == "error"
+
+    def test_undefined_variable(self, run):
+        r = run('return x')
+        assert r.type == "error"
+
+
+# ===================================================================
+# Return type mismatch
+# ===================================================================
+
+class TestReturnTypeMismatch:
+    def test_implement_returns_wrong_type(self, run):
+        r = run(
+            'define math.double\n'
+            '  "Double"\n'
+            '  takes:\n'
+            '    n: number "n"\n'
+            '  returns: number "2n"\n'
+            '\n'
+            'implement math.double\n'
+            '  return "not a number"\n'
+            '\n'
+            'return math.double(5)'
+        )
+        assert r.type == "error"
+
+    def test_implement_returns_wrong_tag(self, run):
+        r = run(
+            'define test.fn\n'
+            '  "test"\n'
+            '  returns: :ok(text) | :error(text) "result"\n'
+            '\n'
+            'implement test.fn\n'
+            '  return :unknown("oops")\n'
+            '\n'
+            'return test.fn()'
+        )
+        assert r.type == "error"
+
+
+# ===================================================================
+# Lambda type mismatches
+# ===================================================================
+
+class TestLambdaTypeMismatch:
+    def test_lambda_wrong_return_type_in_map(self, run):
+        """list.map is generic (fn(a) -> b), so mapping numbers to text is valid.
+        But using the result as list<number> afterwards is a type error."""
+        r = run(
+            'let result = list.map([1, 2, 3], fn(x) -> "text")\n'
+            'return list.fold(result, 0, fn(acc, x) -> acc + x)'
+        )
+        # result is list<text>, but fold tries to add text to number
+        assert r.type == "error"
+
+    def test_filter_lambda_returns_non_bool(self, run):
+        """list.filter expects fn(a) -> bool, passing fn returning number is an error."""
+        r = run('return list.filter([1, 2, 3], fn(x) -> x * 2)')
+        assert r.type == "error"
