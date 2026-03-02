@@ -1,0 +1,12 @@
+define type.of
+  "Get the type name of a value"
+  takes:
+    value: any "The value to inspect"
+  returns: text "Type name (text, number, bool, list, map, tag, none, function)"
+
+define type.is
+  "Check if value is of a specific type"
+  takes:
+    value: any "The value to check"
+    t: text "The type name to check against"
+  returns: bool "Whether value matches the type"

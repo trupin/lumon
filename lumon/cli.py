@@ -84,7 +84,13 @@ def cmd_run_code(code: str) -> int:
         responses = []
 
     io_backend = RealFS(".")
-    result = interpret(code, io_backend=io_backend, responses=responses if responses else None)
+    result = interpret(
+        code,
+        io_backend=io_backend,
+        responses=responses if responses else None,
+        working_dir=".",
+        persist=True,
+    )
     print(json.dumps(result, ensure_ascii=False))
 
     if result.get("type") in ("ask", "spawn_batch"):
@@ -118,7 +124,7 @@ def cmd_respond(args: argparse.Namespace) -> int:
     prev_responses: list[object] = [deserialize(r) for r in state.get("responses", [])]
     responses = prev_responses + [response]
 
-    result = interpret(state["code"], responses=responses)
+    result = interpret(state["code"], responses=responses, working_dir=".")
     print(json.dumps(result, ensure_ascii=False))
 
     if result.get("type") in ("ask", "spawn_batch"):
@@ -129,23 +135,46 @@ def cmd_respond(args: argparse.Namespace) -> int:
     return 0 if result.get("type") != "error" else 1
 
 
+def _bundled_manifest(name: str) -> str | None:
+    """Read a bundled manifest file from lumon._manifests, or None if missing."""
+    pkg = importlib.resources.files("lumon._manifests")
+    resource = pkg / name
+    try:
+        return resource.read_text(encoding="utf-8")
+    except (FileNotFoundError, TypeError):
+        return None
+
+
 def cmd_browse(args: argparse.Namespace) -> int:
     """Display the namespace index or a specific namespace manifest."""
     namespace: str | None = getattr(args, "namespace", None)
 
     if namespace:
+        # Try disk first, then bundled manifests
         path = Path("lumon") / "manifests" / f"{namespace}.lumon"
-        label = f"manifest for '{namespace}'"
-    else:
-        path = Path("lumon") / "index.lumon"
-        label = "namespace index"
-
-    if not path.exists():
-        print(f"error: {label} not found ({path})", file=sys.stderr)
+        if path.exists():
+            print(path.read_text(encoding="utf-8"), end="")
+            return 0
+        bundled = _bundled_manifest(f"{namespace}.lumon")
+        if bundled is not None:
+            print(bundled, end="")
+            return 0
+        print(f"error: manifest for '{namespace}' not found ({path})", file=sys.stderr)
         return 1
-
-    print(path.read_text(encoding="utf-8"), end="")
-    return 0
+    else:
+        # Index: show bundled index, then append user namespaces from disk
+        parts: list[str] = []
+        bundled = _bundled_manifest("index.lumon")
+        if bundled is not None:
+            parts.append(bundled.rstrip("\n"))
+        disk_index = Path("lumon") / "index.lumon"
+        if disk_index.exists():
+            parts.append(disk_index.read_text(encoding="utf-8").rstrip("\n"))
+        if not parts:
+            print("error: namespace index not found (lumon/index.lumon)", file=sys.stderr)
+            return 1
+        print("\n".join(parts))
+        return 0
 
 
 def cmd_test(args: argparse.Namespace) -> int:
@@ -175,7 +204,7 @@ def cmd_test(args: argparse.Namespace) -> int:
             print(f"  SKIP  {f.stem} (file not found)")
             continue
         code = f.read_text(encoding="utf-8")
-        result = interpret(code)
+        result = interpret(code, working_dir=".")
         if result.get("type") == "error":
             print(f"  FAIL  {f.stem}: {result.get('message', 'unknown error')}")
             failed += 1

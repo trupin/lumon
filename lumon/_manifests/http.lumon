@@ -1,0 +1,5 @@
+define http.get
+  "Fetch a URL's content (read-only, blacklist-filtered)"
+  takes:
+    url: text "The URL to fetch"
+  returns: :ok(text) | :error(text) "The response body or error"

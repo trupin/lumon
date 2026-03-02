@@ -1,0 +1,53 @@
+define map.get
+  "Get value by key (or none if not found)"
+  takes:
+    m: map<a> "The map"
+    key: text "The key to look up"
+  returns: a | none "The value or none"
+
+define map.set
+  "Return new map with key set"
+  takes:
+    m: map<a> "The map"
+    key: text "The key to set"
+    value: a "The value to set"
+  returns: map<a> "New map with key set"
+
+define map.keys
+  "Get all keys as list"
+  takes:
+    m: map<a> "The map"
+  returns: list<text> "List of keys"
+
+define map.values
+  "Get all values as list"
+  takes:
+    m: map<a> "The map"
+  returns: list<a> "List of values"
+
+define map.merge
+  "Merge two maps (second overwrites first)"
+  takes:
+    first: map<a> "First map"
+    second: map<a> "Second map"
+  returns: map<a> "Merged map"
+
+define map.has
+  "Check if key exists"
+  takes:
+    m: map<a> "The map"
+    key: text "The key to check"
+  returns: bool "Whether key exists"
+
+define map.remove
+  "Return new map without key"
+  takes:
+    m: map<a> "The map"
+    key: text "The key to remove"
+  returns: map<a> "New map without key"
+
+define map.entries
+  "Get list of {key, value} maps"
+  takes:
+    m: map<a> "The map"
+  returns: list<{key: text, value: a}> "List of entries"

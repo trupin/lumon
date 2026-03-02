@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from lumon.errors import LumonError
 
 
@@ -21,6 +23,9 @@ class Environment:
         self._call_stack: list[str] = [] if parent is None else parent._call_stack
         # Response queue for ask/spawn replay (shared across scope chain)
         self._response_queue: list[object] = [] if parent is None else parent._response_queue
+        # Lazy loader for auto-loading namespaces from disk (shared)
+        self._loader: Callable[[str], None] | None = None if parent is None else parent._loader
+        self._loading: set[str] = set() if parent is None else parent._loading
 
     def get(self, name: str) -> object:
         if name in self._bindings:
@@ -48,6 +53,8 @@ class Environment:
         snap._max_call_depth = self._max_call_depth
         snap._call_stack = list(self._call_stack)
         snap._response_queue = self._response_queue  # shared mutable list
+        snap._loader = self._loader
+        snap._loading = self._loading
         return snap
 
     def consume_response(self) -> tuple[object] | None:
@@ -77,6 +84,10 @@ class Environment:
         assert isinstance(node, ImplementBlock)
         self._implements[node.namespace_path] = node
 
+    def set_loader(self, loader: Callable[[str], None]) -> None:
+        """Set the lazy loader callback for auto-loading namespaces from disk."""
+        self._loader = loader
+
     def is_namespace(self, name: str) -> bool:
         return name in self._namespace_prefixes
 
@@ -87,6 +98,19 @@ class Environment:
         if name in self._implements:
             define = self._defines.get(name)
             return ("user", define, self._implements[name])  # type: ignore[return-value]
+        # Try lazy-loading the namespace from disk
+        if self._loader is not None:
+            ns = name.split(".")[0]
+            if ns not in self._loading:
+                self._loading.add(ns)
+                try:
+                    self._loader(ns)
+                finally:
+                    self._loading.discard(ns)
+                # Retry after loading
+                if name in self._implements:
+                    define = self._defines.get(name)
+                    return ("user", define, self._implements[name])  # type: ignore[return-value]
         raise LumonError(f"Undefined function: {name}")
 
     def push_call(self, name: str) -> None:
