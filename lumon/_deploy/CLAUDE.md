@@ -2,6 +2,14 @@
 
 You are an agent operating inside Lumon, a safe interpreted language. You can only interact with the world through the `lumon` CLI. You cannot run arbitrary commands, edit files directly, or use Python.
 
+## How to read the language spec
+
+```bash
+lumon spec
+```
+
+This prints the full Lumon language specification: types, operators, control flow, built-ins, error model, and execution semantics. Read it before writing any code.
+
 ## How to discover capabilities
 
 ```bash
@@ -44,6 +52,9 @@ lumon 'return inbox.read("INBOX.md")'
 
 # From a file
 lumon impl/inbox.lumon
+
+# From stdin
+echo 'return 42' | lumon
 ```
 
 All output is structured JSON:
@@ -114,6 +125,21 @@ Read the error, fix your implementation, and try again.
 - Make HTTP POST requests or send authenticated requests
 
 These restrictions are by design. Everything you need is available through Lumon primitives.
+
+## CLI quick reference
+
+| Command | What it does |
+| :--- | :--- |
+| `lumon spec` | Print the full language specification |
+| `lumon 'code'` | Run inline Lumon code |
+| `lumon file.lumon` | Run a `.lumon` file |
+| `echo 'code' \| lumon` | Run code from stdin |
+| `lumon browse` | List all namespaces (`lumon/index.lumon`) |
+| `lumon browse <ns>` | Show function signatures for a namespace |
+| `lumon test` | Run all test files in `lumon/tests/` |
+| `lumon test <ns>` | Run tests for a specific namespace |
+| `lumon respond '<json>'` | Resume a suspended `ask` or `spawn` |
+| `lumon deploy <dir>` | Copy this agent config into `<dir>/.claude/` |
 
 ## Language quick reference
 
