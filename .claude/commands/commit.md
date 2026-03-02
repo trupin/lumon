@@ -18,8 +18,15 @@ Commit the current changes following these rules:
    - Focus on the "why", not the "what"
    - End with: `Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>`
 
-5. **Stage only relevant files.** Don't `git add -A` blindly — exclude secrets, build artifacts, and unrelated changes.
+5. **Staging rules — read carefully:**
+   - Use `git add -u` to stage all tracked changes (modifications + deletions). This is safe and handles deleted files correctly.
+   - Then `git add <path>` for any new untracked files you want to include.
+   - Never use `git add` on deleted files by name — it will fail. Use `git add -u` instead.
+   - Include `.claude/commands/` changes when relevant (slash commands are project config).
+   - Exclude secrets, build artifacts, and unrelated changes.
 
-6. **After committing**, report what was committed and the branch name.
+6. **If `git commit` fails with `index.lock` exists**, wait a moment and retry once. If it still fails, report the error.
+
+7. **After committing**, push to the remote with `git push`. Never use `--force` or `--force-with-lease`. Report what was committed and pushed, including the branch name.
 
 If $ARGUMENTS is provided, use it as guidance for the commit message.
