@@ -238,6 +238,20 @@ assert_eq "deploy: sandbox/ directory created" \
     "yes" \
     "$([ -d "$DEPLOY_ROOT/sandbox" ] && echo yes || echo no)"
 
+assert_eq "deploy: sandbox-guard hook deployed" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" ] && echo yes || echo no)"
+
+# Verify the hook blocks non-lumon commands
+assert_contains "deploy: hook blocks bad commands" \
+    "BLOCKED" \
+    "$(echo '{"tool_name": "Bash", "tool_input": {"command": "rm -rf /"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
+
+# Verify the hook allows lumon sandbox commands
+assert_eq "deploy: hook allows sandbox commands" \
+    "" \
+    "$(echo '{"tool_name": "Bash", "tool_input": {"command": "lumon --working-dir sandbox browse"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
 # ---------------------------------------------------------------------------
 # IO sandbox (--working-dir constrains io.read / io.write)
 # ---------------------------------------------------------------------------

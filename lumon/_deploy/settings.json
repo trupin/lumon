@@ -1,17 +1,25 @@
 {
   "permissions": {
     "defaultMode": "acceptEdits",
-    "allow": [
-      "Bash(lumon --working-dir ./sandbox *)",
-      "Edit(./sandbox/**)",
-      "Read(./**)"
-    ],
     "deny": [
-      "Bash",
+      "Bash(*)",
       "WebFetch",
       "Read",
       "Edit",
       "NotebookEdit"
+    ],
+    "allow": [
+      "Bash(lumon --working-dir sandbox:*)",
+      "Edit(./sandbox/**)",
+      "Read(./**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": ["python3 .claude/hooks/sandbox-guard.py"]
+      }
     ]
   }
 }
