@@ -10,7 +10,7 @@ from pathlib import Path
 
 _STATE_FILE = Path(".lumon_state.json")
 
-_SUBCOMMANDS = {"deploy", "browse", "test", "respond", "spec"}
+_SUBCOMMANDS = {"deploy", "browse", "test", "respond", "spec", "version"}
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +45,7 @@ def _deploy_files() -> dict[str, str]:
     """Return {filename: text_content} for all bundled deploy templates."""
     pkg = importlib.resources.files("lumon._deploy")
     result: dict[str, str] = {}
-    for name in ("CLAUDE.md", "settings.json"):
+    for name in ("CLAUDE.md", "settings.json", "sandbox-guard.py"):
         result[name] = (pkg / name).read_text(encoding="utf-8")
     return result
 
@@ -53,6 +53,14 @@ def _deploy_files() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 # Command implementations
 # ---------------------------------------------------------------------------
+
+
+def cmd_version() -> int:
+    """Print the Lumon version."""
+    from lumon import __version__
+
+    print(f"lumon {__version__}")
+    return 0
 
 
 def cmd_spec(args: argparse.Namespace) -> int:
@@ -64,6 +72,7 @@ def cmd_spec(args: argparse.Namespace) -> int:
 
 def cmd_run_code(code: str) -> int:
     """Execute Lumon code and print the JSON result to stdout."""
+    from lumon.backends import RealFS
     from lumon.interpreter import interpret
     from lumon.serializer import deserialize
 
@@ -74,7 +83,8 @@ def cmd_run_code(code: str) -> int:
     else:
         responses = []
 
-    result = interpret(code, responses=responses if responses else None)
+    io_backend = RealFS(".")
+    result = interpret(code, io_backend=io_backend, responses=responses if responses else None)
     print(json.dumps(result, ensure_ascii=False))
 
     if result.get("type") in ("ask", "spawn_batch"):
@@ -188,15 +198,22 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         return 1
 
     claude_dir.mkdir(exist_ok=True)
+    sandbox_dir = target / "sandbox"
+    sandbox_dir.mkdir(exist_ok=True)
 
     files = _deploy_files()
     deployed: list[str] = []
     skipped: list[str] = []
 
+    hooks_dir = claude_dir / "hooks"
+    hooks_dir.mkdir(exist_ok=True)
+
     for filename, content in files.items():
-        # CLAUDE.md goes at the project root, everything else in .claude/
+        # CLAUDE.md → project root, hooks → .claude/hooks/, rest → .claude/
         if filename == "CLAUDE.md":
             dest = target / filename
+        elif filename.endswith(".py"):
+            dest = hooks_dir / filename
         else:
             dest = claude_dir / filename
         if dest.exists() and not args.force:
@@ -226,7 +243,27 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _apply_working_dir() -> None:
+    """Extract and apply --working-dir before argparse runs."""
+    import os
+
+    for i, arg in enumerate(sys.argv[1:], start=1):
+        if arg == "--working-dir" and i + 1 < len(sys.argv):
+            wd = sys.argv[i + 1]
+            os.chdir(wd)
+            del sys.argv[i : i + 2]
+            return
+        if arg.startswith("--working-dir="):
+            wd = arg.split("=", 1)[1]
+            os.chdir(wd)
+            del sys.argv[i]
+            return
+
+
 def main() -> None:
+    # Handle --working-dir before anything else (including the fast path).
+    _apply_working_dir()
+
     # Fast path: if first arg is not a known subcommand, treat it as code/file.
     if len(sys.argv) == 1:
         # No args: read from stdin
@@ -261,6 +298,8 @@ def main() -> None:
         sys.exit(cmd_deploy(args))
     elif args.command == "spec":
         sys.exit(cmd_spec(args))
+    elif args.command == "version":
+        sys.exit(cmd_version())
     else:
         parser.print_help()
         sys.exit(0)
@@ -281,6 +320,11 @@ def _build_parser() -> argparse.ArgumentParser:
             "Spec:        lumon spec"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--working-dir",
+        metavar="<path>",
+        help="Use <path> as the base directory (applied before any command).",
     )
     sub = parser.add_subparsers(dest="command", metavar="<command>")
 
@@ -346,6 +390,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "spec",
         help="Print the Lumon language specification.",
         description="Print the full Lumon language specification to stdout.",
+    )
+
+    # version
+    sub.add_parser(
+        "version",
+        help="Print the Lumon version.",
     )
 
     return parser

@@ -214,6 +214,175 @@ assert_contains "spec: contains types section" \
     "$(run spec)"
 
 # ---------------------------------------------------------------------------
+# Deploy
+# ---------------------------------------------------------------------------
+
+DEPLOY_ROOT="$TMPDIR_ROOT/deploy_target"
+mkdir -p "$DEPLOY_ROOT"
+
+run deploy "$DEPLOY_ROOT" > /dev/null 2>&1
+
+assert_eq "deploy: CLAUDE.md at project root" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/CLAUDE.md" ] && echo yes || echo no)"
+
+assert_eq "deploy: settings.json in .claude/" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/.claude/settings.json" ] && echo yes || echo no)"
+
+assert_eq "deploy: CLAUDE.md NOT in .claude/" \
+    "no" \
+    "$([ -f "$DEPLOY_ROOT/.claude/CLAUDE.md" ] && echo yes || echo no)"
+
+assert_eq "deploy: sandbox/ directory created" \
+    "yes" \
+    "$([ -d "$DEPLOY_ROOT/sandbox" ] && echo yes || echo no)"
+
+assert_eq "deploy: sandbox-guard hook deployed" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" ] && echo yes || echo no)"
+
+# Verify the hook blocks non-lumon commands
+assert_contains "deploy: hook blocks bad commands" \
+    "BLOCKED" \
+    "$(echo '{"tool_name": "Bash", "tool_input": {"command": "rm -rf /"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
+
+# Verify the hook allows lumon sandbox commands
+assert_eq "deploy: hook allows sandbox commands" \
+    "" \
+    "$(echo '{"tool_name": "Bash", "tool_input": {"command": "lumon --working-dir sandbox browse"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
+assert_contains "deploy: hook blocks chained commands" \
+    "BLOCKED" \
+    "$(echo '{"tool_name": "Bash", "tool_input": {"command": "lumon --working-dir sandbox browse && echo pwned"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
+
+assert_contains "deploy: hook blocks piped to unsafe commands" \
+    "BLOCKED" \
+    "$(echo '{"tool_name": "Bash", "tool_input": {"command": "lumon --working-dir sandbox browse | bash"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
+
+# Hook allows piping to safe read-only commands
+assert_eq "deploy: hook allows pipe to head" \
+    "" \
+    "$(echo '{"tool_name": "Bash", "tool_input": {"command": "lumon spec | head -200"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
+assert_eq "deploy: hook allows pipe to grep" \
+    "" \
+    "$(echo '{"tool_name": "Bash", "tool_input": {"command": "lumon --working-dir sandbox browse | grep inbox"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
+assert_eq "deploy: hook allows 2>&1 with pipe" \
+    "" \
+    "$(echo '{"tool_name": "Bash", "tool_input": {"command": "lumon spec 2>&1 | head -200"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
+# Hook allows lumon code containing |> and -> inside quotes
+assert_eq "deploy: hook allows lumon code with pipes and arrows" \
+    "" \
+    "$(printf '{"tool_name": "Bash", "tool_input": {"command": "lumon --working-dir sandbox '"'"'return [1,2,3] |> list.map(fn(x) -> x * 2)'"'"'"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
+# Edit hook: allowed inside sandbox
+assert_eq "deploy: hook allows Edit in sandbox" \
+    "" \
+    "$(echo '{"tool_name": "Edit", "tool_input": {"file_path": "sandbox/foo.lumon"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
+# Edit hook: blocked outside sandbox
+assert_contains "deploy: hook blocks Edit outside sandbox" \
+    "BLOCKED" \
+    "$(echo '{"tool_name": "Edit", "tool_input": {"file_path": "CLAUDE.md"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
+
+# Edit hook: blocked traversal out of sandbox
+assert_contains "deploy: hook blocks Edit traversal" \
+    "BLOCKED" \
+    "$(echo '{"tool_name": "Edit", "tool_input": {"file_path": "sandbox/../secret.txt"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
+
+# Read hook: allowed inside current directory
+assert_eq "deploy: hook allows Read in current dir" \
+    "" \
+    "$(echo '{"tool_name": "Read", "tool_input": {"file_path": "CLAUDE.md"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
+assert_eq "deploy: hook allows Read in sandbox subdir" \
+    "" \
+    "$(echo '{"tool_name": "Read", "tool_input": {"file_path": "sandbox/foo.lumon"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
+# Read hook: blocked outside current directory
+assert_contains "deploy: hook blocks Read outside current dir" \
+    "BLOCKED" \
+    "$(echo '{"tool_name": "Read", "tool_input": {"file_path": "../outside/secret.txt"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
+
+# ---------------------------------------------------------------------------
+# IO sandbox (--working-dir constrains io.read / io.write)
+# ---------------------------------------------------------------------------
+
+SANDBOX="$TMPDIR_ROOT/sandbox"
+OUTSIDE="$TMPDIR_ROOT/outside"
+mkdir -p "$SANDBOX" "$OUTSIDE"
+echo "secret" > "$OUTSIDE/secret.txt"
+echo "safe" > "$SANDBOX/safe.txt"
+
+# Read inside working dir should succeed
+assert_contains "sandbox: io.read inside working dir" \
+    '"tag": "ok"' \
+    "$(run --working-dir "$SANDBOX" 'return io.read("safe.txt")')"
+
+# Read outside working dir via traversal should fail
+assert_contains "sandbox: io.read traversal blocked" \
+    '"tag": "error"' \
+    "$(run --working-dir "$SANDBOX" 'return io.read("../outside/secret.txt")')"
+
+# Write inside working dir should succeed
+assert_contains "sandbox: io.write inside working dir" \
+    '"tag": "ok"' \
+    "$(run --working-dir "$SANDBOX" 'return io.write("new.txt", "hello")')"
+
+# Write outside working dir via traversal should fail
+assert_contains "sandbox: io.write traversal blocked" \
+    '"tag": "error"' \
+    "$(run --working-dir "$SANDBOX" 'return io.write("../outside/evil.txt", "pwned")')"
+
+# Verify the outside file was not created
+assert_eq "sandbox: evil file was not written" \
+    "no" \
+    "$([ -f "$OUTSIDE/evil.txt" ] && echo yes || echo no)"
+
+# Read via absolute path outside working dir should fail
+assert_contains "sandbox: io.read absolute path blocked" \
+    '"tag": "error"' \
+    "$(run --working-dir "$SANDBOX" "return io.read(\"$OUTSIDE/secret.txt\")")"
+
+# ---------------------------------------------------------------------------
+# --working-dir
+# ---------------------------------------------------------------------------
+
+WD_ROOT="$TMPDIR_ROOT/wd_project"
+mkdir -p "$WD_ROOT/lumon/manifests"
+cat > "$WD_ROOT/lumon/index.lumon" <<'EOF'
+wd_test -- working dir test
+EOF
+
+assert_eq "working-dir: browse uses working dir" \
+    "$(cat "$WD_ROOT/lumon/index.lumon")" \
+    "$(run --working-dir "$WD_ROOT" browse)"
+
+assert_eq "working-dir: inline code works with flag" \
+    '{"type": "result", "value": 1}' \
+    "$(run --working-dir "$WD_ROOT" 'return 1')"
+
+# File path should resolve relative to working dir
+WD_FILE_ROOT="$TMPDIR_ROOT/wd_file"
+mkdir -p "$WD_FILE_ROOT"
+echo 'return "from sandbox file"' > "$WD_FILE_ROOT/run.lumon"
+
+assert_eq "working-dir: file path relative to working dir" \
+    '{"type": "result", "value": "from sandbox file"}' \
+    "$(run --working-dir "$WD_FILE_ROOT" run.lumon)"
+
+# ---------------------------------------------------------------------------
+# Version
+# ---------------------------------------------------------------------------
+
+assert_contains "version: prints version" \
+    "lumon 0.1." \
+    "$(run version)"
+
+# ---------------------------------------------------------------------------
 # Help flag
 # ---------------------------------------------------------------------------
 

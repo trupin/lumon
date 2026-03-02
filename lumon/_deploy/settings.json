@@ -1,16 +1,45 @@
 {
   "permissions": {
-    "allow": [
-      "Bash(lumon:*)",
-      "Read",
-      "Glob",
-      "Grep"
-    ],
+    "defaultMode": "acceptEdits",
     "deny": [
-      "Edit",
-      "Write",
-      "NotebookEdit",
-      "Bash"
+      "WebFetch",
+      "NotebookEdit"
+    ],
+    "allow": [
+      "Bash",
+      "Read",
+      "Edit"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/sandbox-guard.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/sandbox-guard.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/sandbox-guard.py"
+          }
+        ]
+      }
     ]
   }
 }
