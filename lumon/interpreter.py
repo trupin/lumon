@@ -8,6 +8,7 @@ from lumon.errors import AskSignal, LumonError, ReturnSignal, SpawnSignal
 from lumon.evaluator import eval_node
 from lumon.parser import parse
 from lumon.serializer import serialize
+from lumon.type_checker import type_check
 
 
 def interpret(code: str, *, io_backend: object = None, http_backend: object = None) -> dict:
@@ -21,6 +22,7 @@ def interpret(code: str, *, io_backend: object = None, http_backend: object = No
     """
     try:
         ast = parse(code)
+        type_check(ast, io_backend=io_backend, http_backend=http_backend)
         env = Environment()
         register_builtins(env, io_backend, http_backend)
         result = eval_node(ast, env)
