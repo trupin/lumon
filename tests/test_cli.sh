@@ -234,6 +234,10 @@ assert_eq "deploy: CLAUDE.md NOT in .claude/" \
     "no" \
     "$([ -f "$DEPLOY_ROOT/.claude/CLAUDE.md" ] && echo yes || echo no)"
 
+assert_eq "deploy: sandbox/ directory created" \
+    "yes" \
+    "$([ -d "$DEPLOY_ROOT/sandbox" ] && echo yes || echo no)"
+
 # ---------------------------------------------------------------------------
 # IO sandbox (--working-dir constrains io.read / io.write)
 # ---------------------------------------------------------------------------
@@ -291,6 +295,23 @@ assert_eq "working-dir: browse uses working dir" \
 assert_eq "working-dir: inline code works with flag" \
     '{"type": "result", "value": 1}' \
     "$(run --working-dir "$WD_ROOT" 'return 1')"
+
+# File path should resolve relative to working dir
+WD_FILE_ROOT="$TMPDIR_ROOT/wd_file"
+mkdir -p "$WD_FILE_ROOT"
+echo 'return "from sandbox file"' > "$WD_FILE_ROOT/run.lumon"
+
+assert_eq "working-dir: file path relative to working dir" \
+    '{"type": "result", "value": "from sandbox file"}' \
+    "$(run --working-dir "$WD_FILE_ROOT" run.lumon)"
+
+# ---------------------------------------------------------------------------
+# Version
+# ---------------------------------------------------------------------------
+
+assert_contains "version: prints version" \
+    "lumon 0.1." \
+    "$(run version)"
 
 # ---------------------------------------------------------------------------
 # Help flag

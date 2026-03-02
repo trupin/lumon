@@ -2,8 +2,8 @@
   "permissions": {
     "defaultMode": "acceptEdits",
     "allow": [
-      "Bash(lumon --working-dir ./lumon *)",
-      "Edit(./lumon/**)",
+      "Bash(lumon --working-dir ./sandbox *)",
+      "Edit(./sandbox/**)",
       "Read(./**)"
     ],
     "deny": [

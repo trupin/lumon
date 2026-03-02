@@ -2,6 +2,8 @@
 
 You are an agent operating inside Lumon, a safe interpreted language. You can only interact with the world through the `lumon` CLI. You cannot run arbitrary commands, edit files directly, or use Python.
 
+**IMPORTANT**: All `lumon` commands MUST use `--working-dir sandbox` to stay sandboxed inside the `sandbox/` directory. Never omit this flag.
+
 ## How to read the language spec
 
 ```bash
@@ -14,11 +16,11 @@ This prints the full Lumon language specification: types, operators, control flo
 
 ```bash
 # List all namespaces (always start here)
-lumon browse
+lumon --working-dir sandbox browse
 
 # Show function signatures for a namespace
-lumon browse inbox
-lumon browse io
+lumon --working-dir sandbox browse inbox
+lumon --working-dir sandbox browse io
 ```
 
 Read the signatures carefully — they include parameter types, descriptions, and return types. This is your API reference.
@@ -28,7 +30,7 @@ Read the signatures carefully — they include parameter types, descriptions, an
 Write `implement` blocks by passing Lumon code to the CLI. The interpreter saves them to disk automatically.
 
 ```bash
-lumon 'implement inbox.read
+lumon --working-dir sandbox 'implement inbox.read
   let result = io.read(path)
   match result
     :error(m) -> return :error(m)
@@ -45,16 +47,16 @@ lumon 'implement inbox.read
 
 ```bash
 # Inline expression
-lumon 'return list.sort([3, 1, 2])'
+lumon --working-dir sandbox 'return list.sort([3, 1, 2])'
 
 # Call a function you implemented
-lumon 'return inbox.read("INBOX.md")'
+lumon --working-dir sandbox 'return inbox.read("INBOX.md")'
 
 # From a file
-lumon impl/inbox.lumon
+lumon --working-dir sandbox impl/inbox.lumon
 
 # From stdin
-echo 'return 42' | lumon
+echo 'return 42' | lumon --working-dir sandbox
 ```
 
 All output is structured JSON:
@@ -67,16 +69,16 @@ All output is structured JSON:
 
 ```bash
 # Run all tests for a namespace
-lumon test inbox
+lumon --working-dir sandbox test inbox
 
 # Run all tests
-lumon test
+lumon --working-dir sandbox test
 ```
 
 Write `test` blocks the same way you write `implement` blocks:
 
 ```bash
-lumon 'test inbox.read
+lumon --working-dir sandbox 'test inbox.read
   let result = inbox.read("test/inbox.md")
   match result
     :ok(items) -> assert list.length(items) == 2
@@ -95,7 +97,7 @@ When execution suspends for agent judgment, the output will be:
 Respond with:
 
 ```bash
-lumon respond '{"action": "process", "item": "Pay bill"}'
+lumon --working-dir sandbox respond '{"action": "process", "item": "Pay bill"}'
 ```
 
 ## Error handling
@@ -118,10 +120,10 @@ Read the error, fix your implementation, and try again.
 
 ## What you cannot do
 
-- Run arbitrary shell commands (only `lumon` is available)
-- Edit files directly (use `lumon 'implement ...'` or `lumon 'test ...'` instead)
+- Run arbitrary shell commands (only `lumon --working-dir sandbox` is available)
+- Edit files outside the `sandbox/` directory
 - Access Python, pip, or any other tooling
-- Access files outside the project root (the interpreter enforces this invisibly)
+- Access files outside the `sandbox/` directory (the interpreter enforces this)
 - Make HTTP POST requests or send authenticated requests
 
 These restrictions are by design. Everything you need is available through Lumon primitives.
@@ -131,15 +133,14 @@ These restrictions are by design. Everything you need is available through Lumon
 | Command | What it does |
 | :--- | :--- |
 | `lumon spec` | Print the full language specification |
-| `lumon 'code'` | Run inline Lumon code |
-| `lumon file.lumon` | Run a `.lumon` file |
-| `echo 'code' \| lumon` | Run code from stdin |
-| `lumon browse` | List all namespaces (`lumon/index.lumon`) |
-| `lumon browse <ns>` | Show function signatures for a namespace |
-| `lumon test` | Run all test files in `lumon/tests/` |
-| `lumon test <ns>` | Run tests for a specific namespace |
-| `lumon respond '<json>'` | Resume a suspended `ask` or `spawn` |
-| `lumon deploy <dir>` | Copy this agent config into `<dir>/.claude/` |
+| `lumon --working-dir sandbox 'code'` | Run inline Lumon code |
+| `lumon --working-dir sandbox file.lumon` | Run a `.lumon` file |
+| `echo 'code' \| lumon --working-dir sandbox` | Run code from stdin |
+| `lumon --working-dir sandbox browse` | List all namespaces |
+| `lumon --working-dir sandbox browse <ns>` | Show function signatures for a namespace |
+| `lumon --working-dir sandbox test` | Run all test files |
+| `lumon --working-dir sandbox test <ns>` | Run tests for a specific namespace |
+| `lumon --working-dir sandbox respond '<json>'` | Resume a suspended `ask` or `spawn` |
 
 ## Language quick reference
 

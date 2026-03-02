@@ -10,7 +10,7 @@ from pathlib import Path
 
 _STATE_FILE = Path(".lumon_state.json")
 
-_SUBCOMMANDS = {"deploy", "browse", "test", "respond", "spec"}
+_SUBCOMMANDS = {"deploy", "browse", "test", "respond", "spec", "version"}
 
 
 # ---------------------------------------------------------------------------
@@ -53,6 +53,14 @@ def _deploy_files() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 # Command implementations
 # ---------------------------------------------------------------------------
+
+
+def cmd_version() -> int:
+    """Print the Lumon version."""
+    from lumon import __version__
+
+    print(f"lumon {__version__}")
+    return 0
 
 
 def cmd_spec(args: argparse.Namespace) -> int:
@@ -190,6 +198,8 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         return 1
 
     claude_dir.mkdir(exist_ok=True)
+    sandbox_dir = target / "sandbox"
+    sandbox_dir.mkdir(exist_ok=True)
 
     files = _deploy_files()
     deployed: list[str] = []
@@ -283,6 +293,8 @@ def main() -> None:
         sys.exit(cmd_deploy(args))
     elif args.command == "spec":
         sys.exit(cmd_spec(args))
+    elif args.command == "version":
+        sys.exit(cmd_version())
     else:
         parser.print_help()
         sys.exit(0)
@@ -373,6 +385,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "spec",
         help="Print the Lumon language specification.",
         description="Print the full Lumon language specification to stdout.",
+    )
+
+    # version
+    sub.add_parser(
+        "version",
+        help="Print the Lumon version.",
     )
 
     return parser
