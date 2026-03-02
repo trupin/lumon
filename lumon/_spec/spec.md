@@ -647,16 +647,17 @@ health.check_plan
 
 ### File structure
 
-Four layers, optimized for incremental discovery:
+Five layers, optimized for incremental discovery:
 
 ```
 lumon/
   index.lumon              -- namespace names + one-line descriptions (always in context)
+  bridges.lumon            -- bridge declarations mapping functions to external executables
   manifests/
     io.lumon               -- define blocks for io.*
     text.lumon             -- define blocks for text.*
     inbox.lumon            -- define blocks for inbox.* (agent-authored)
-    health.lumon           -- define blocks for health.* (agent-authored)
+    browser.lumon          -- define blocks for browser.* (bridged plugin)
   impl/
     inbox.lumon            -- implement blocks for inbox.*
     health.lumon           -- implement blocks for health.*
@@ -667,7 +668,8 @@ lumon/
 
 - **index.lumon** — one line per namespace (name + description). Always in context. Stays small regardless of how many functions exist.
 - **manifests/** — complete function signatures (`define` blocks) per namespace. Loaded on demand when the agent needs to understand what a namespace offers.
-- **impl/** — implementation code. Loaded on demand when calling a function. Built-in namespaces (`io`, `text`, `list`, `map`, `number`, `type`) are implemented in the host language and have no files here.
+- **impl/** — implementation code. Loaded on demand when calling a function. Built-in namespaces (`io`, `text`, `list`, `map`, `number`, `type`, `http`) are implemented in the host language and have no files here.
+- **bridges.lumon** — bridge declarations that map `define` signatures to external executables. See [Bridges](#bridges) below.
 - **tests/** — test blocks. Loaded when running tests, not during normal execution.
 
 ### Browsing
@@ -680,6 +682,70 @@ The agent discovers capabilities in three steps:
 ### Nesting
 
 Namespaces can nest: `health.labs.latest`, `news.sources.tech`. No limit on depth, but convention is 2-3 levels max.
+
+### Bridges
+
+Bridges connect Lumon `define` signatures to external executables. They enable capabilities that can't be expressed in Lumon itself — browser automation, database access, third-party APIs — while preserving type safety and auditability.
+
+**Authorship**: bridge declarations are project-author only. They live in `lumon/bridges.lumon`, which agents cannot create or modify. The agent can call bridged functions, but cannot grant itself new capabilities.
+
+**Declaration** (`lumon/bridges.lumon`):
+
+```
+bridge browser.search
+  run: "python3 plugins/browser_search.py"
+
+bridge db.query
+  run: "./plugins/db_query"
+```
+
+Each function referenced in a `bridge` block must have a corresponding `define` in `lumon/manifests/`. The bridge only provides the `run:` directive — the type signature comes from the define.
+
+**Process lifecycle**: one-shot. Each call spawns the executable, pipes JSON to stdin, reads stdout, and lets the process exit. No persistent connections, no daemon.
+
+**Input protocol**: the interpreter resolves default values and serializes arguments as a named map using parameter names from the `define` block:
+
+```json
+{
+  "function": "browser.search",
+  "args": {
+    "query": "Austin TX",
+    "max_results": 10
+  }
+}
+```
+
+Written to the plugin's stdin as a single line, followed by EOF (stdin close).
+
+**Output protocol** (exit-code wrapper):
+
+| Scenario | Result |
+| :---- | :---- |
+| Exit 0 + valid JSON | Value returned to Lumon code |
+| Exit 0 + invalid JSON | Interpreter error (`{"type": "error", ...}`) |
+| Non-zero exit | `:error(stderr_message)` returned to Lumon code |
+| Executable not found | Interpreter error |
+| No matching `define` | Interpreter error at load time |
+
+On exit 0, stdout is parsed as JSON and returned as-is. The value should match the `define` return type (e.g. `{"tag": "ok", "value": [...]}` for `:ok(list<...>) | :error(text)`). On non-zero exit, the interpreter wraps stderr (trimmed, capped at 1KB) as `:error(message)`.
+
+**Resolution order**: when a function is called, the interpreter resolves it in this order:
+
+1. **Built-in** — `text.*`, `list.*`, `io.*`, etc.
+2. **User-defined** — `implement` blocks (in-memory or auto-loaded from `lumon/impl/`)
+3. **Bridge** — external executable (loaded from `lumon/bridges.lumon`)
+4. **Fail** — `Undefined function` error
+
+If a function has both an `implement` and a `bridge`, the `implement` takes precedence. This lets agents override a bridge with a Lumon implementation during development.
+
+**Discovery**: bridged functions are discovered the same way as all functions. Their `define` blocks live in `lumon/manifests/<ns>.lumon`, their namespaces are listed in `lumon/index.lumon`, and `lumon browse <ns>` shows them alongside native functions. The bridge directive is invisible to the agent.
+
+**Security properties**:
+
+- Agent cannot register bridges — `lumon/bridges.lumon` is author-controlled
+- Inputs validated against `define` before calling plugin; invalid output on exit 0 is an interpreter error
+- Bridge executables run with the same filesystem/network constraints as the host process
+- Every bridged capability has a `define` in the manifest — `lumon browse` reveals the full surface area
 
 ---
 
@@ -1052,7 +1118,7 @@ The agent reads interpreter errors like a developer reads a traceback — functi
 ## 11. Reserved Words
 
 ```
-let, define, implement, test, takes, returns, return, match, if, else,
+let, define, implement, test, bridge, takes, returns, return, match, if, else,
 with, then, ask, spawn, fork, context, expects, async, await, await_all,
 fn, assert, true, false, none, and, or, not
 ```
@@ -1062,13 +1128,15 @@ fn, assert, true, false, none, and, or, not
 ## Appendix: Grammar (informal)
 
 ```
-program      = (define | implement | test | expression)*
+program      = (define | implement | bridge | test | expression)*
 
 define       = "define" namespace_path description
                ["takes:" parameter+]
                "returns:" type description
 
 implement    = "implement" namespace_path body
+
+bridge       = "bridge" namespace_path "run:" text
 
 test         = "test" namespace_path body
 
@@ -1412,4 +1480,48 @@ implement news.analyze_and_curate
             kept: list.length(curated),
             removed: list.length(analyses) - list.length(curated)
           })
+```
+
+### 10. Bridge plugin
+
+A bridged function backed by an external Python script. The project author defines the function signature and bridge wiring; the agent calls it like any other function.
+
+`lumon/manifests/browser.lumon`:
+```
+define browser.search
+  "Search for homes on a real estate site"
+  takes:
+    query: text "Search query"
+    max_results: number "Maximum listings to return" = 10
+  returns: :ok(list<{address: text, price: number}>) | :error(text)
+    "Search results or error"
+```
+
+`lumon/bridges.lumon`:
+```
+bridge browser.search
+  run: "python3 plugins/browser_search.py"
+```
+
+`plugins/browser_search.py` (external, any language):
+```python
+import json, sys
+
+request = json.load(sys.stdin)
+query = request["args"]["query"]
+max_results = request["args"]["max_results"]
+
+# ... do actual work ...
+results = [{"address": "123 Main St", "price": 450000}]
+
+json.dump({"tag": "ok", "value": results}, sys.stdout)
+```
+
+Agent-authored Lumon code that calls the bridge:
+```
+implement search.homes
+  let results = browser.search(query, max_results)
+  match results
+    :ok(listings) -> return listings |> list.take(5)
+    :error(msg) -> return :error("search failed: " + msg)
 ```

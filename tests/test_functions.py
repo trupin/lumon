@@ -1,6 +1,12 @@
 """Tests for Lumon functions: define/implement, lambdas, closures, recursion."""
 
+import os
+import tempfile
+
 import pytest
+
+from lumon.interpreter import interpret
+from tests.conftest import RunResult
 
 
 @pytest.fixture
@@ -242,6 +248,89 @@ class TestLambdas:
 
 
 # ===================================================================
+# Multi-line lambdas inside function arguments
+# ===================================================================
+
+class TestMultiLineLambdaArgs:
+    def test_multiline_lambda_in_list_map(self, run):
+        """Multi-line lambda with let binding passed to list.map."""
+        r = run(
+            'let result = list.map([1, 2, 3], fn(x) ->\n'
+            '  let doubled = x * 2\n'
+            '  doubled + 1\n'
+            ')\n'
+            'return result'
+        )
+        assert r.value == [3, 5, 7]
+
+    def test_multiline_lambda_in_list_fold(self, run):
+        """Multi-line lambda with let binding passed to list.fold."""
+        r = run(
+            'let result = list.fold([1, 2, 3], [], fn(acc, x) ->\n'
+            '  let doubled = x * 2\n'
+            '  list.concat(acc, [doubled])\n'
+            ')\n'
+            'return result'
+        )
+        assert r.value == [2, 4, 6]
+
+    def test_nested_multiline_lambdas(self, run):
+        """Nested multi-line lambdas inside function call arguments."""
+        r = run(
+            'let result = list.map([1, 2, 3], fn(x) ->\n'
+            '  let inner = list.map([10, 20], fn(y) ->\n'
+            '    let sum = x + y\n'
+            '    sum\n'
+            '  )\n'
+            '  list.fold(inner, 0, fn(a, b) -> a + b)\n'
+            ')\n'
+            'return result'
+        )
+        assert r.value == [32, 34, 36]
+
+    def test_multiline_lambda_trailing_arg(self, run):
+        """Multi-line lambda as trailing argument after other args."""
+        r = run(
+            'let result = list.fold([1, 2, 3], 0, fn(sum, x) ->\n'
+            '  let sq = x * x\n'
+            '  sum + sq\n'
+            ')\n'
+            'return result'
+        )
+        assert r.value == 14
+
+    def test_inline_lambda_in_function_call_still_works(self, run):
+        """Inline lambda inside function call (regression check)."""
+        r = run(
+            'let result = list.map([1, 2, 3], fn(x) -> x * 2)\n'
+            'return result'
+        )
+        assert r.value == [2, 4, 6]
+
+
+# ===================================================================
+# Wildcard _ in lambda parameters
+# ===================================================================
+
+class TestWildcardLambdaParam:
+    def test_underscore_ignores_param_in_fold(self, run):
+        """fn(acc, _) -> acc + 1 in a fold (ignore second param)."""
+        r = run(
+            'let result = [10, 20, 30] |> list.fold(0, fn(acc, _) -> acc + 1)\n'
+            'return result'
+        )
+        assert r.value == 3
+
+    def test_underscore_ignores_sole_param_in_map(self, run):
+        """fn(_) -> 42 in a map (ignore sole param)."""
+        r = run(
+            'let result = [1, 2, 3] |> list.map(fn(_) -> 42)\n'
+            'return result'
+        )
+        assert r.value == [42, 42, 42]
+
+
+# ===================================================================
 # Closures
 # ===================================================================
 
@@ -312,3 +401,66 @@ class TestRecursion:
             'return inf.loop(0)'
         )
         assert r.type == "error"
+
+
+# ===================================================================
+# Auto-loading from disk
+# ===================================================================
+
+class TestAutoLoading:
+    def test_function_auto_loaded_from_disk(self):
+        """Function in manifest+impl on disk is auto-loaded on call."""
+        with tempfile.TemporaryDirectory() as wd:
+            manifests = os.path.join(wd, "lumon", "manifests")
+            impl = os.path.join(wd, "lumon", "impl")
+            os.makedirs(manifests)
+            os.makedirs(impl)
+
+            with open(os.path.join(manifests, "math.lumon"), "w") as f:
+                f.write(
+                    'define math.double\n'
+                    '  "Double a number"\n'
+                    '  takes:\n'
+                    '    n: number "The number"\n'
+                    '  returns: number "The doubled number"\n'
+                )
+            with open(os.path.join(impl, "math.lumon"), "w") as f:
+                f.write(
+                    'implement math.double\n'
+                    '  return n * 2\n'
+                )
+
+            result = interpret('return math.double(21)', working_dir=wd)
+            assert result == {"type": "result", "value": 42}
+
+    def test_parameters_bound_from_disk_loaded_define(self):
+        """Parameters from disk-loaded define are correctly bound (issue 3)."""
+        with tempfile.TemporaryDirectory() as wd:
+            manifests = os.path.join(wd, "lumon", "manifests")
+            impl = os.path.join(wd, "lumon", "impl")
+            os.makedirs(manifests)
+            os.makedirs(impl)
+
+            with open(os.path.join(manifests, "greet.lumon"), "w") as f:
+                f.write(
+                    'define greet.hello\n'
+                    '  "Greet someone"\n'
+                    '  takes:\n'
+                    '    name: text "Name"\n'
+                    '  returns: text "Greeting"\n'
+                )
+            with open(os.path.join(impl, "greet.lumon"), "w") as f:
+                f.write(
+                    'implement greet.hello\n'
+                    '  return "Hello, " + name\n'
+                )
+
+            result = interpret('return greet.hello("World")', working_dir=wd)
+            assert result == {"type": "result", "value": "Hello, World"}
+
+    def test_undefined_function_no_files_on_disk(self):
+        """Without files on disk, undefined function error is raised."""
+        with tempfile.TemporaryDirectory() as wd:
+            result = interpret('return missing.func()', working_dir=wd)
+            r = RunResult(output=result)
+            assert r.type == "error"

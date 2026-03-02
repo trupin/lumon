@@ -133,7 +133,8 @@ list_pattern: "[" (list_pattern_element ("," list_pattern_element)*)? "]"
 
 // === Lambda ===
 lambda_expr: FN_KW "(" params? ")" ARROW lambda_body
-params: IDENT ("," IDENT)*
+params: param_name ("," param_name)*
+?param_name: IDENT | "_"
 ?lambda_body: _NL _INDENT block _DEDENT -> lambda_block
             | expression -> lambda_inline
 

@@ -115,8 +115,8 @@ define inbox.read
 EOF
 
 # Run browse from the project directory
-assert_eq "browse: index" \
-    "$(cat "$BROWSE_ROOT/lumon/index.lumon")" \
+assert_contains "browse: index includes user namespaces" \
+    "inbox" \
     "$(cd "$BROWSE_ROOT" && run browse)"
 
 assert_eq "browse: namespace manifest" \
@@ -127,9 +127,51 @@ assert_contains "browse: missing namespace returns error" \
     "error:" \
     "$(cd "$BROWSE_ROOT" && run browse nonexistent 2>&1 || true)"
 
-assert_contains "browse: missing index returns error" \
-    "error:" \
-    "$(cd "$TMPDIR_ROOT" && run browse 2>&1 || true)"
+# ---------------------------------------------------------------------------
+# Browse: built-in namespaces (bundled manifests)
+# ---------------------------------------------------------------------------
+
+assert_contains "browse: built-in namespace io" \
+    "io.read" \
+    "$(run browse io)"
+
+assert_contains "browse: built-in namespace text" \
+    "text.split" \
+    "$(run browse text)"
+
+assert_contains "browse: built-in namespace list" \
+    "list.map" \
+    "$(run browse list)"
+
+assert_contains "browse: built-in namespace map" \
+    "map.get" \
+    "$(run browse map)"
+
+assert_contains "browse: built-in namespace number" \
+    "number.round" \
+    "$(run browse number)"
+
+assert_contains "browse: built-in namespace type" \
+    "type.of" \
+    "$(run browse type)"
+
+assert_contains "browse: built-in namespace http" \
+    "http.get" \
+    "$(run browse http)"
+
+# Index includes built-in namespaces even without lumon/index.lumon on disk
+assert_contains "browse: index includes built-in io" \
+    "io" \
+    "$(run browse)"
+
+assert_contains "browse: index includes built-in text" \
+    "text" \
+    "$(run browse)"
+
+# Index merges built-in and user namespaces
+assert_contains "browse: index includes user namespace from disk" \
+    "inbox" \
+    "$(cd "$BROWSE_ROOT" && run browse)"
 
 # ---------------------------------------------------------------------------
 # Test command
@@ -357,8 +399,8 @@ cat > "$WD_ROOT/lumon/index.lumon" <<'EOF'
 wd_test -- working dir test
 EOF
 
-assert_eq "working-dir: browse uses working dir" \
-    "$(cat "$WD_ROOT/lumon/index.lumon")" \
+assert_contains "working-dir: browse uses working dir" \
+    "wd_test" \
     "$(run --working-dir "$WD_ROOT" browse)"
 
 assert_eq "working-dir: inline code works with flag" \

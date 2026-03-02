@@ -1,0 +1,80 @@
+define text.split
+  "Split text by separator"
+  takes:
+    s: text "The text to split"
+    sep: text "The separator string"
+  returns: list<text> "List of text segments"
+
+define text.join
+  "Join list items with separator"
+  takes:
+    items: list<text> "The items to join"
+    sep: text "The separator string"
+  returns: text "The joined text"
+
+define text.contains
+  "Check if text contains substring"
+  takes:
+    s: text "The text to search in"
+    sub: text "The substring to find"
+  returns: bool "Whether substring was found"
+
+define text.replace
+  "Replace occurrences of a substring"
+  takes:
+    s: text "The text to modify"
+    old: text "The substring to find"
+    new: text "The replacement string"
+  returns: text "Text with replacements applied"
+
+define text.slice
+  "Extract substring (0-based, end exclusive, out-of-bounds clamped)"
+  takes:
+    s: text "The text to slice"
+    start: number "Start index (inclusive)"
+    end: number "End index (exclusive)"
+  returns: text "The substring"
+
+define text.length
+  "Get character count"
+  takes:
+    s: text "The text to measure"
+  returns: number "The character count"
+
+define text.upper
+  "Convert to uppercase"
+  takes:
+    s: text "The text to convert"
+  returns: text "Uppercase text"
+
+define text.lower
+  "Convert to lowercase"
+  takes:
+    s: text "The text to convert"
+  returns: text "Lowercase text"
+
+define text.trim
+  "Remove leading and trailing whitespace"
+  takes:
+    s: text "The text to trim"
+  returns: text "Trimmed text"
+
+define text.starts_with
+  "Check if text starts with prefix"
+  takes:
+    s: text "The text to check"
+    prefix: text "The prefix to look for"
+  returns: bool "Whether text starts with prefix"
+
+define text.ends_with
+  "Check if text ends with suffix"
+  takes:
+    s: text "The text to check"
+    suffix: text "The suffix to look for"
+  returns: bool "Whether text ends with suffix"
+
+define text.from
+  "Convert any value to text"
+  takes:
+    value: any "The value to convert"
+  returns: text "Text representation"

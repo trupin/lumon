@@ -21,6 +21,7 @@ include = ["lumon*"]
 [tool.setuptools.package-data]
 "lumon._spec" = ["*.md"]
 "lumon._deploy" = ["*.md", "*.json", "*.py"]
+"lumon._manifests" = ["*.lumon"]
 
 [tool.pyright]
 venvPath = "."

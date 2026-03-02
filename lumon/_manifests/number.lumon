@@ -1,0 +1,43 @@
+define number.round
+  "Round to nearest integer"
+  takes:
+    n: number "The number to round"
+  returns: number "Rounded value"
+
+define number.floor
+  "Round down"
+  takes:
+    n: number "The number to floor"
+  returns: number "Floored value"
+
+define number.ceil
+  "Round up"
+  takes:
+    n: number "The number to ceil"
+  returns: number "Ceiled value"
+
+define number.abs
+  "Absolute value"
+  takes:
+    n: number "The number"
+  returns: number "Absolute value"
+
+define number.min
+  "Smaller of two numbers"
+  takes:
+    a: number "First number"
+    b: number "Second number"
+  returns: number "The smaller value"
+
+define number.max
+  "Larger of two numbers"
+  takes:
+    a: number "First number"
+    b: number "Second number"
+  returns: number "The larger value"
+
+define number.parse
+  "Parse text to number (or none if invalid)"
+  takes:
+    s: text "The text to parse"
+  returns: number | none "Parsed number or none"

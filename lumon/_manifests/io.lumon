@@ -1,0 +1,18 @@
+define io.read
+  "Read a file's contents"
+  takes:
+    path: text "The file to read"
+  returns: :ok(text) | :error(text) "The file contents or error"
+
+define io.write
+  "Write content to a file"
+  takes:
+    path: text "The file to write to"
+    content: text "The content to write"
+  returns: :ok | :error(text) "Success or error with message"
+
+define io.list_dir
+  "List files in a directory"
+  takes:
+    path: text "The directory path"
+  returns: :ok(list<text>) | :error(text) "List of file names or error"

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
+from collections.abc import Generator, Iterator
 
 from lark import Lark, Token, Transformer, v_args
 from lark.indenter import Indenter
@@ -63,14 +63,125 @@ class LumonIndenter(Indenter):
     DEDENT_type = "_DEDENT"  # type: ignore[assignment]
     tab_len = 2  # type: ignore[assignment]
 
+    def __init__(self) -> None:
+        super().__init__()
+        # True after seeing ARROW while paren_level > 0 — next _NL may start a lambda body
+        self._arrow_pending: bool = False
+        # Stack of (base_indent, paren_level_at_entry) for lambda bodies inside parens
+        self._lambda_body_stack: list[tuple[int, int]] = []
+
+    def process(self, stream: Iterator[Token]) -> Generator[Token, None, None]:  # type: ignore[override]
+        self.paren_level = 0
+        self.indent_level = [0]
+        self._arrow_pending = False
+        self._lambda_body_stack = []
+        return self._process(stream)
+
+    def _process(self, stream: Iterator[Token]) -> Generator[Token, None, None]:  # type: ignore[override]
+        token = None
+        for token in stream:
+            if token.type == self.NL_type:
+                yield from self.handle_NL(token)
+            else:
+                # If we were waiting for a lambda body but got a non-NL token,
+                # it's an inline lambda — clear the pending flag.
+                if self._arrow_pending and token.type not in self.OPEN_PAREN_types:
+                    self._arrow_pending = False
+
+                yield token
+
+                if token.type in self.OPEN_PAREN_types:
+                    self.paren_level += 1
+                elif token.type in self.CLOSE_PAREN_types:
+                    self.paren_level -= 1
+                    assert self.paren_level >= 0
+                elif token.type == "ARROW" and self.paren_level > 0:
+                    self._arrow_pending = True
+
+        # End of stream: close any remaining lambda body indents, then top-level
+        while self._lambda_body_stack:
+            self._lambda_body_stack.pop()
+            self.indent_level.pop()
+            yield Token.new_borrow_pos(self.DEDENT_type, '', token) if token else Token(self.DEDENT_type, '')
+
+        while len(self.indent_level) > 1:
+            self.indent_level.pop()
+            yield Token.new_borrow_pos(self.DEDENT_type, '', token) if token else Token(self.DEDENT_type, '')
+
+        assert self.indent_level == [0], self.indent_level
+
+    def _active_lambda_paren_level(self) -> int | None:
+        """Return the paren_level of the innermost active lambda body, or None."""
+        if self._lambda_body_stack:
+            return self._lambda_body_stack[-1][1]
+        return None
+
     def handle_NL(self, token: Token) -> Iterator[Token]:
+        indent_str = token.rsplit('\n', 1)[1]
+        indent = indent_str.count(' ') + indent_str.count('\t') * self.tab_len
+
+        lam_paren = self._active_lambda_paren_level()
+
+        # Case 1: Arrow pending — check if this NL starts a lambda block body
+        if self._arrow_pending:
+            self._arrow_pending = False
+            if indent > self.indent_level[-1]:
+                # Push lambda body: record base indent and paren level
+                self._lambda_body_stack.append((self.indent_level[-1], self.paren_level))
+                self.indent_level.append(indent)
+                yield Token.new_borrow_pos(self.NL_type, token, token)
+                yield Token.new_borrow_pos(self.INDENT_type, indent_str, token)
+            else:
+                # Not indented — inline lambda that just had a newline before expr.
+                # Suppress the NL (we're inside parens).
+                return
+            return
+
+        # Case 2: Inside a lambda body at its paren level — track indent normally
+        if lam_paren is not None and self.paren_level == lam_paren:
+            base_indent = self._lambda_body_stack[-1][0]
+
+            # If we've dedented to or below the base, close the lambda body
+            if indent <= base_indent:
+                # Close all lambda bodies that are at or above this indent
+                while self._lambda_body_stack and indent <= self._lambda_body_stack[-1][0]:
+                    self._lambda_body_stack.pop()
+                    self.indent_level.pop()
+                    yield Token.new_borrow_pos(self.NL_type, token, token)
+                    yield Token.new_borrow_pos(self.DEDENT_type, indent_str, token)
+                # After closing lambda body, we're back in parens — suppress this NL
+                return
+
+            # Still inside the lambda body — normal indent/dedent tracking
+            yield Token.new_borrow_pos(self.NL_type, token, token)
+
+            if indent > self.indent_level[-1]:
+                self.indent_level.append(indent)
+                yield Token.new_borrow_pos(self.INDENT_type, indent_str, token)
+            else:
+                dedented = False
+                while indent < self.indent_level[-1]:
+                    self.indent_level.pop()
+                    yield Token.new_borrow_pos(self.DEDENT_type, indent_str, token)
+                    dedented = True
+
+                if indent != self.indent_level[-1]:
+                    from lark.indenter import DedentError
+                    raise DedentError(
+                        'Unexpected dedent to column %s. Expected dedent to %s'
+                        % (indent, self.indent_level[-1])
+                    )
+
+                if dedented:
+                    yield Token.new_borrow_pos(self.NL_type, '', token)
+            return
+
+        # Case 3: Inside parens but not in a lambda body (or nested deeper) — suppress
         if self.paren_level > 0:
             return
 
+        # Case 4: Top-level — normal indentation handling
         yield token  # _NL token
-
-        indent_str = token.rsplit('\n', 1)[1]
-        indent = indent_str.count(' ') + indent_str.count('\t') * self.tab_len
 
         if indent > self.indent_level[-1]:
             self.indent_level.append(indent)
