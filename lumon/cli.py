@@ -194,15 +194,19 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     skipped: list[str] = []
 
     for filename, content in files.items():
-        dest = claude_dir / filename
+        # CLAUDE.md goes at the project root, everything else in .claude/
+        if filename == "CLAUDE.md":
+            dest = target / filename
+        else:
+            dest = claude_dir / filename
         if dest.exists() and not args.force:
-            skipped.append(filename)
+            skipped.append(str(dest.relative_to(target)))
             continue
         dest.write_text(content, encoding="utf-8")
-        deployed.append(filename)
+        deployed.append(str(dest.relative_to(target)))
 
     if deployed:
-        print(f"Deployed to {claude_dir}:")
+        print(f"Deployed to {target}:")
         for f in deployed:
             print(f"  + {f}")
 
