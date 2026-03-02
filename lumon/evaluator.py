@@ -627,6 +627,11 @@ def _eval_with(node: WithExpr, env: Environment) -> object:
 # --- Ask / Spawn ---
 
 def _eval_ask(node: AskExpr, env: Environment) -> object:
+    # If a response has been queued (replay mode), return it directly.
+    queued = env.consume_response()
+    if queued is not None:
+        return queued[0]
+
     prompt = eval_node(node.prompt, env) if node.prompt else ""
     context = eval_node(node.context, env) if node.context else None
     expects = node.expects  # Type expression, serialize as-is
@@ -644,6 +649,11 @@ def _eval_ask(node: AskExpr, env: Environment) -> object:
 
 
 def _eval_spawn(node: SpawnExpr, env: Environment) -> object:
+    # If a response has been queued (replay mode), return it directly.
+    queued = env.consume_response()
+    if queued is not None:
+        return queued[0]
+
     prompt = eval_node(node.prompt, env) if node.prompt else ""
     context = eval_node(node.context, env) if node.context else None
     fork = eval_node(node.fork, env) if node.fork else False
