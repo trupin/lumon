@@ -242,6 +242,67 @@ class TestLambdas:
 
 
 # ===================================================================
+# Multi-line lambdas inside function arguments
+# ===================================================================
+
+class TestMultiLineLambdaArgs:
+    def test_multiline_lambda_in_list_map(self, run):
+        """Multi-line lambda with let binding passed to list.map."""
+        r = run(
+            'let result = list.map([1, 2, 3], fn(x) ->\n'
+            '  let doubled = x * 2\n'
+            '  doubled + 1\n'
+            ')\n'
+            'return result'
+        )
+        assert r.value == [3, 5, 7]
+
+    def test_multiline_lambda_in_list_fold(self, run):
+        """Multi-line lambda with let binding passed to list.fold."""
+        r = run(
+            'let result = list.fold([1, 2, 3], [], fn(acc, x) ->\n'
+            '  let doubled = x * 2\n'
+            '  list.concat(acc, [doubled])\n'
+            ')\n'
+            'return result'
+        )
+        assert r.value == [2, 4, 6]
+
+    def test_nested_multiline_lambdas(self, run):
+        """Nested multi-line lambdas inside function call arguments."""
+        r = run(
+            'let result = list.map([1, 2, 3], fn(x) ->\n'
+            '  let inner = list.map([10, 20], fn(y) ->\n'
+            '    let sum = x + y\n'
+            '    sum\n'
+            '  )\n'
+            '  list.fold(inner, 0, fn(a, b) -> a + b)\n'
+            ')\n'
+            'return result'
+        )
+        assert r.value == [32, 34, 36]
+
+    def test_multiline_lambda_trailing_arg(self, run):
+        """Multi-line lambda as trailing argument after other args."""
+        r = run(
+            'let result = list.fold([1, 2, 3], 0, fn(sum, x) ->\n'
+            '  let sq = x * x\n'
+            '  sum + sq\n'
+            ')\n'
+            'return result'
+        )
+        assert r.value == 14
+
+    def test_inline_lambda_in_function_call_still_works(self, run):
+        """Inline lambda inside function call (regression check)."""
+        r = run(
+            'let result = list.map([1, 2, 3], fn(x) -> x * 2)\n'
+            'return result'
+        )
+        assert r.value == [2, 4, 6]
+
+
+# ===================================================================
 # Closures
 # ===================================================================
 

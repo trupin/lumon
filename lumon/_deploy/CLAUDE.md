@@ -157,7 +157,7 @@ These restrictions are by design. Everything you need is available through Lumon
 - **Tags**: `:ok`, `:error("msg")` (like enums with payloads)
 - **Match**: `match expr` with patterns, guards, destructuring
 - **Pipes**: `items |> list.sort |> list.take(3)`
-- **Lambdas**: `fn(x) -> x * 2`
+- **Lambdas**: `fn(x) -> x * 2` (multi-line with `let` bindings works everywhere, including as function arguments)
 - **No loops**: use `list.map`, `list.filter`, `list.fold`
 - **Nil-coalescing**: `value ?? "default"`
 - **Types**: `text`, `number`, `bool`, `list<T>`, `map`, `tag`, `none`
