@@ -256,9 +256,56 @@ assert_contains "deploy: hook blocks chained commands" \
     "BLOCKED" \
     "$(echo '{"tool_name": "Bash", "tool_input": {"command": "lumon --working-dir sandbox browse && echo pwned"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
 
-assert_contains "deploy: hook blocks piped commands" \
+assert_contains "deploy: hook blocks piped to unsafe commands" \
     "BLOCKED" \
-    "$(echo '{"tool_name": "Bash", "tool_input": {"command": "lumon --working-dir sandbox browse | cat"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
+    "$(echo '{"tool_name": "Bash", "tool_input": {"command": "lumon --working-dir sandbox browse | bash"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
+
+# Hook allows piping to safe read-only commands
+assert_eq "deploy: hook allows pipe to head" \
+    "" \
+    "$(echo '{"tool_name": "Bash", "tool_input": {"command": "lumon spec | head -200"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
+assert_eq "deploy: hook allows pipe to grep" \
+    "" \
+    "$(echo '{"tool_name": "Bash", "tool_input": {"command": "lumon --working-dir sandbox browse | grep inbox"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
+assert_eq "deploy: hook allows 2>&1 with pipe" \
+    "" \
+    "$(echo '{"tool_name": "Bash", "tool_input": {"command": "lumon spec 2>&1 | head -200"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
+# Hook allows lumon code containing |> and -> inside quotes
+assert_eq "deploy: hook allows lumon code with pipes and arrows" \
+    "" \
+    "$(printf '{"tool_name": "Bash", "tool_input": {"command": "lumon --working-dir sandbox '"'"'return [1,2,3] |> list.map(fn(x) -> x * 2)'"'"'"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
+# Edit hook: allowed inside sandbox
+assert_eq "deploy: hook allows Edit in sandbox" \
+    "" \
+    "$(echo '{"tool_name": "Edit", "tool_input": {"file_path": "sandbox/foo.lumon"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
+# Edit hook: blocked outside sandbox
+assert_contains "deploy: hook blocks Edit outside sandbox" \
+    "BLOCKED" \
+    "$(echo '{"tool_name": "Edit", "tool_input": {"file_path": "CLAUDE.md"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
+
+# Edit hook: blocked traversal out of sandbox
+assert_contains "deploy: hook blocks Edit traversal" \
+    "BLOCKED" \
+    "$(echo '{"tool_name": "Edit", "tool_input": {"file_path": "sandbox/../secret.txt"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
+
+# Read hook: allowed inside current directory
+assert_eq "deploy: hook allows Read in current dir" \
+    "" \
+    "$(echo '{"tool_name": "Read", "tool_input": {"file_path": "CLAUDE.md"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
+assert_eq "deploy: hook allows Read in sandbox subdir" \
+    "" \
+    "$(echo '{"tool_name": "Read", "tool_input": {"file_path": "sandbox/foo.lumon"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
+# Read hook: blocked outside current directory
+assert_contains "deploy: hook blocks Read outside current dir" \
+    "BLOCKED" \
+    "$(echo '{"tool_name": "Read", "tool_input": {"file_path": "../outside/secret.txt"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
 
 # ---------------------------------------------------------------------------
 # IO sandbox (--working-dir constrains io.read / io.write)

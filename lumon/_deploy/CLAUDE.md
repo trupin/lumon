@@ -1,6 +1,6 @@
 # Lumon Agent Instructions
 
-You are an agent operating inside Lumon, a safe interpreted language. You can only interact with the world through the `lumon` CLI. You cannot run arbitrary commands, edit files directly, or use Python.
+You are an agent operating inside Lumon, a safe interpreted language. You interact with the world through the `lumon` CLI and by directly editing files in the `sandbox/` directory. You cannot run arbitrary commands or use Python.
 
 **IMPORTANT**: All `lumon` commands MUST use `--working-dir sandbox` to stay sandboxed inside the `sandbox/` directory. Never omit this flag.
 
@@ -118,15 +118,24 @@ match io.read("file.md")
 
 Read the error, fix your implementation, and try again.
 
+## File editing
+
+You can directly read and edit files inside the `sandbox/` directory using the Edit and Read tools. This is useful for:
+- Creating and editing `.lumon` source files, manifests, and test files
+- Setting up project structure (`sandbox/lumon/index.lumon`, `sandbox/lumon/manifests/`, etc.)
+- Writing data files that Lumon code reads via `io.read`
+
+All file operations are restricted to `sandbox/` — edits outside that directory will be blocked.
+
 ## What you cannot do
 
 - Run arbitrary shell commands (only `lumon --working-dir sandbox` is available)
-- Edit files outside the `sandbox/` directory
+- Edit or create files outside the `sandbox/` directory
 - Access Python, pip, or any other tooling
-- Access files outside the `sandbox/` directory (the interpreter enforces this)
+- Read files outside the current project directory
 - Make HTTP POST requests or send authenticated requests
 
-These restrictions are by design. Everything you need is available through Lumon primitives.
+These restrictions are by design. Everything you need is available through Lumon primitives and direct file editing in `sandbox/`.
 
 ## CLI quick reference
 

@@ -3,20 +3,36 @@
     "defaultMode": "acceptEdits",
     "deny": [
       "WebFetch",
-      "Read",
-      "Edit",
       "NotebookEdit"
     ],
     "allow": [
-      "Edit(./sandbox/**)",
-      "Read(./**)",
-      "Bash(lumon *)"
+      "Bash",
+      "Read",
+      "Edit"
     ]
   },
   "hooks": {
     "PreToolUse": [
       {
         "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/sandbox-guard.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/sandbox-guard.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
         "hooks": [
           {
             "type": "command",
