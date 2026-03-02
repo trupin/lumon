@@ -10,7 +10,7 @@ from pathlib import Path
 
 _STATE_FILE = Path(".lumon_state.json")
 
-_SUBCOMMANDS = {"deploy", "browse", "test", "respond"}
+_SUBCOMMANDS = {"deploy", "browse", "test", "respond", "spec"}
 
 
 # ---------------------------------------------------------------------------
@@ -53,6 +53,13 @@ def _deploy_files() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 # Command implementations
 # ---------------------------------------------------------------------------
+
+
+def cmd_spec(args: argparse.Namespace) -> int:
+    """Print the Lumon language specification."""
+    text = importlib.resources.files("lumon._spec").joinpath("spec.md").read_text(encoding="utf-8")
+    print(text, end="")
+    return 0
 
 
 def cmd_run_code(code: str) -> int:
@@ -248,6 +255,8 @@ def main() -> None:
         sys.exit(cmd_respond(args))
     elif args.command == "deploy":
         sys.exit(cmd_deploy(args))
+    elif args.command == "spec":
+        sys.exit(cmd_spec(args))
     else:
         parser.print_help()
         sys.exit(0)
@@ -264,7 +273,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "Browse:      lumon browse [<namespace>]\n"
             "Test:        lumon test [<namespace>]\n"
             "Respond:     lumon respond '<json>'\n"
-            "Deploy:      lumon deploy <target>"
+            "Deploy:      lumon deploy <target>\n"
+            "Spec:        lumon spec"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -325,6 +335,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help="Overwrite existing files.",
+    )
+
+    # spec
+    sub.add_parser(
+        "spec",
+        help="Print the Lumon language specification.",
+        description="Print the full Lumon language specification to stdout.",
     )
 
     return parser

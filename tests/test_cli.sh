@@ -202,6 +202,18 @@ assert_contains "respond: no state → error" \
     "$(cd "$RESPOND_ROOT" && run respond '42' 2>&1 || true)"
 
 # ---------------------------------------------------------------------------
+# Spec
+# ---------------------------------------------------------------------------
+
+assert_contains "spec: contains language title" \
+    "Lumon Language Specification" \
+    "$(run spec)"
+
+assert_contains "spec: contains types section" \
+    "## 1. Types" \
+    "$(run spec)"
+
+# ---------------------------------------------------------------------------
 # Help flag
 # ---------------------------------------------------------------------------
 
