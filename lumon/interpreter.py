@@ -11,7 +11,13 @@ from lumon.serializer import serialize
 from lumon.type_checker import type_check
 
 
-def interpret(code: str, *, io_backend: object = None, http_backend: object = None) -> dict:
+def interpret(
+    code: str,
+    *,
+    io_backend: object = None,
+    http_backend: object = None,
+    responses: list[object] | None = None,
+) -> dict:
     """Parse, type-check, and execute Lumon code.
 
     Returns a dict matching the output protocol:
@@ -24,6 +30,8 @@ def interpret(code: str, *, io_backend: object = None, http_backend: object = No
         ast = parse(code)
         type_check(ast, io_backend=io_backend, http_backend=http_backend)
         env = Environment()
+        if responses:
+            env._response_queue.extend(responses)
         register_builtins(env, io_backend, http_backend)
         result = eval_node(ast, env)
         return {"type": "result", "value": serialize(result)}

@@ -8,8 +8,5 @@ build/
 # Virtual environment
 .venv/
 
-# Claude Code
-.claude/
-
 # Plans
 plans/

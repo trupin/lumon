@@ -19,6 +19,8 @@ class Environment:
         self._call_depth = 0 if parent is None else parent._call_depth
         self._max_call_depth = 100
         self._call_stack: list[str] = [] if parent is None else parent._call_stack
+        # Response queue for ask/spawn replay (shared across scope chain)
+        self._response_queue: list[object] = [] if parent is None else parent._response_queue
 
     def get(self, name: str) -> object:
         if name in self._bindings:
@@ -45,7 +47,18 @@ class Environment:
         snap._call_depth = self._call_depth
         snap._max_call_depth = self._max_call_depth
         snap._call_stack = list(self._call_stack)
+        snap._response_queue = self._response_queue  # shared mutable list
         return snap
+
+    def consume_response(self) -> tuple[object] | None:
+        """Pop the next queued response, or return None if queue is empty.
+
+        Returns a single-element tuple to distinguish None responses from
+        an empty queue.
+        """
+        if not self._response_queue:
+            return None
+        return (self._response_queue.pop(0),)
 
     def register_builtin(self, name: str, fn: object) -> None:
         self._builtins[name] = fn

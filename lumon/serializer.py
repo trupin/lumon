@@ -17,3 +17,19 @@ def serialize(value: object) -> object:
         return {k: serialize(v) for k, v in value.items()}
     # str, int, float, bool, None pass through directly
     return value
+
+
+def deserialize(value: object) -> object:
+    """Convert a JSON-parsed value back to a Lumon runtime value.
+
+    Converts ``{"tag": "name"}`` and ``{"tag": "name", "value": ...}``
+    to ``LumonTag`` instances. Everything else passes through as-is.
+    """
+    if isinstance(value, dict):
+        if "tag" in value and isinstance(value["tag"], str) and set(value.keys()) <= {"tag", "value"}:
+            payload = deserialize(value["value"]) if "value" in value else None
+            return LumonTag(value["tag"], payload)
+        return {k: deserialize(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [deserialize(item) for item in value]
+    return value
