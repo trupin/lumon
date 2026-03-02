@@ -18,6 +18,10 @@ testpaths = ["tests"]
 where = ["."]
 include = ["lumon*"]
 
+[tool.setuptools.package-data]
+"lumon._spec" = ["*.md"]
+"lumon._deploy" = ["*.md", "*.json"]
+
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
