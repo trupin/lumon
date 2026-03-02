@@ -64,6 +64,7 @@ def cmd_spec(args: argparse.Namespace) -> int:
 
 def cmd_run_code(code: str) -> int:
     """Execute Lumon code and print the JSON result to stdout."""
+    from lumon.backends import RealFS
     from lumon.interpreter import interpret
     from lumon.serializer import deserialize
 
@@ -74,7 +75,8 @@ def cmd_run_code(code: str) -> int:
     else:
         responses = []
 
-    result = interpret(code, responses=responses if responses else None)
+    io_backend = RealFS(".")
+    result = interpret(code, io_backend=io_backend, responses=responses if responses else None)
     print(json.dumps(result, ensure_ascii=False))
 
     if result.get("type") in ("ask", "spawn_batch"):
@@ -226,7 +228,27 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _apply_working_dir() -> None:
+    """Extract and apply --working-dir before argparse runs."""
+    import os
+
+    for i, arg in enumerate(sys.argv[1:], start=1):
+        if arg == "--working-dir" and i + 1 < len(sys.argv):
+            wd = sys.argv[i + 1]
+            os.chdir(wd)
+            del sys.argv[i : i + 2]
+            return
+        if arg.startswith("--working-dir="):
+            wd = arg.split("=", 1)[1]
+            os.chdir(wd)
+            del sys.argv[i]
+            return
+
+
 def main() -> None:
+    # Handle --working-dir before anything else (including the fast path).
+    _apply_working_dir()
+
     # Fast path: if first arg is not a known subcommand, treat it as code/file.
     if len(sys.argv) == 1:
         # No args: read from stdin
@@ -281,6 +303,11 @@ def _build_parser() -> argparse.ArgumentParser:
             "Spec:        lumon spec"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--working-dir",
+        metavar="<path>",
+        help="Use <path> as the base directory (applied before any command).",
     )
     sub = parser.add_subparsers(dest="command", metavar="<command>")
 

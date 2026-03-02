@@ -214,6 +214,85 @@ assert_contains "spec: contains types section" \
     "$(run spec)"
 
 # ---------------------------------------------------------------------------
+# Deploy
+# ---------------------------------------------------------------------------
+
+DEPLOY_ROOT="$TMPDIR_ROOT/deploy_target"
+mkdir -p "$DEPLOY_ROOT"
+
+run deploy "$DEPLOY_ROOT" > /dev/null 2>&1
+
+assert_eq "deploy: CLAUDE.md at project root" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/CLAUDE.md" ] && echo yes || echo no)"
+
+assert_eq "deploy: settings.json in .claude/" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/.claude/settings.json" ] && echo yes || echo no)"
+
+assert_eq "deploy: CLAUDE.md NOT in .claude/" \
+    "no" \
+    "$([ -f "$DEPLOY_ROOT/.claude/CLAUDE.md" ] && echo yes || echo no)"
+
+# ---------------------------------------------------------------------------
+# IO sandbox (--working-dir constrains io.read / io.write)
+# ---------------------------------------------------------------------------
+
+SANDBOX="$TMPDIR_ROOT/sandbox"
+OUTSIDE="$TMPDIR_ROOT/outside"
+mkdir -p "$SANDBOX" "$OUTSIDE"
+echo "secret" > "$OUTSIDE/secret.txt"
+echo "safe" > "$SANDBOX/safe.txt"
+
+# Read inside working dir should succeed
+assert_contains "sandbox: io.read inside working dir" \
+    '"tag": "ok"' \
+    "$(run --working-dir "$SANDBOX" 'return io.read("safe.txt")')"
+
+# Read outside working dir via traversal should fail
+assert_contains "sandbox: io.read traversal blocked" \
+    '"tag": "error"' \
+    "$(run --working-dir "$SANDBOX" 'return io.read("../outside/secret.txt")')"
+
+# Write inside working dir should succeed
+assert_contains "sandbox: io.write inside working dir" \
+    '"tag": "ok"' \
+    "$(run --working-dir "$SANDBOX" 'return io.write("new.txt", "hello")')"
+
+# Write outside working dir via traversal should fail
+assert_contains "sandbox: io.write traversal blocked" \
+    '"tag": "error"' \
+    "$(run --working-dir "$SANDBOX" 'return io.write("../outside/evil.txt", "pwned")')"
+
+# Verify the outside file was not created
+assert_eq "sandbox: evil file was not written" \
+    "no" \
+    "$([ -f "$OUTSIDE/evil.txt" ] && echo yes || echo no)"
+
+# Read via absolute path outside working dir should fail
+assert_contains "sandbox: io.read absolute path blocked" \
+    '"tag": "error"' \
+    "$(run --working-dir "$SANDBOX" "return io.read(\"$OUTSIDE/secret.txt\")")"
+
+# ---------------------------------------------------------------------------
+# --working-dir
+# ---------------------------------------------------------------------------
+
+WD_ROOT="$TMPDIR_ROOT/wd_project"
+mkdir -p "$WD_ROOT/lumon/manifests"
+cat > "$WD_ROOT/lumon/index.lumon" <<'EOF'
+wd_test -- working dir test
+EOF
+
+assert_eq "working-dir: browse uses working dir" \
+    "$(cat "$WD_ROOT/lumon/index.lumon")" \
+    "$(run --working-dir "$WD_ROOT" browse)"
+
+assert_eq "working-dir: inline code works with flag" \
+    '{"type": "result", "value": 1}' \
+    "$(run --working-dir "$WD_ROOT" 'return 1')"
+
+# ---------------------------------------------------------------------------
 # Help flag
 # ---------------------------------------------------------------------------
 

@@ -1,16 +1,17 @@
 {
   "permissions": {
+    "defaultMode": "acceptEdits",
     "allow": [
-      "Bash(lumon:*)",
-      "Read",
-      "Glob",
-      "Grep"
+      "Bash(lumon --working-dir ./lumon *)",
+      "Edit(./lumon/**)",
+      "Read(./**)"
     ],
     "deny": [
+      "Bash",
+      "WebFetch",
+      "Read",
       "Edit",
-      "Write",
-      "NotebookEdit",
-      "Bash"
+      "NotebookEdit"
     ]
   }
 }
