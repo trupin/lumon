@@ -17,7 +17,7 @@ class MockFS:
     are treated as non-existent.
     """
 
-    def __init__(self, files: dict[str, str] | None = None, *, root: str = "/"):
+    def __init__(self, files: dict[str, str] | None = None, *, root: str = "/sandbox"):
         self.root = os.path.normpath(root)
         # Normalise keys so lookups are consistent
         self._files: dict[str, str] = {}
