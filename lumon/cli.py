@@ -12,7 +12,7 @@ from pathlib import Path
 from lumon import __version__
 from lumon.backends import RealFS
 from lumon.interpreter import interpret
-from lumon.plugins import load_config, split_contracts
+from lumon.plugins import disk_manifest_namespaces, load_config, split_contracts
 from lumon.serializer import deserialize
 
 _STATE_FILE = Path(".lumon_state.json")
@@ -282,12 +282,7 @@ def cmd_browse(args: argparse.Namespace) -> int:
             parts.append(disk_index.read_text(encoding="utf-8").rstrip("\n"))
         # Append plugin namespaces (check for disk conflicts first)
         plugin_ns, _config = _discover_plugin_namespaces()
-        disk_ns: set[str] = set()
-        manifests_dir = Path("lumon") / "manifests"
-        if manifests_dir.is_dir():
-            for fname in os.listdir(manifests_dir):
-                if fname.endswith(".lumon"):
-                    disk_ns.add(fname[:-6])
+        disk_ns = disk_manifest_namespaces(".")
         for ns in plugin_ns:
             if ns in disk_ns:
                 print(

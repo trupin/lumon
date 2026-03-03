@@ -308,3 +308,20 @@ class TestAccessOperators:
             'return m.match'
         )
         assert r.value == 99
+
+    def test_map_keyword_dot_access_true(self, run):
+        """Dot access with keyword .true (issue #15)."""
+        r = run(
+            'let m = map.set({}, "true", "yes")\n'
+            'return m.true'
+        )
+        assert r.value == "yes"
+
+    def test_map_chained_keyword_dot_access(self, run):
+        """Chained dot access with keyword field names (issue #15)."""
+        r = run(
+            'let inner = map.set({}, "none", 7)\n'
+            'let outer = map.set({}, "match", inner)\n'
+            'return outer.match.none'
+        )
+        assert r.value == 7

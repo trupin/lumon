@@ -88,6 +88,7 @@ namespace_ref: namespace_path
              | "match" | "if" | "else" | "with" | "then" | "ask" | "spawn"
              | "async" | "await" | "await_all" | "not" | "and" | "or"
              | "true" | "false" | "none"
+             | "takes" | "returns" | "fork" | "context" | "expects" | "assert"
 
 // === Literals ===
 tag_literal: ":" IDENT ("(" expression ")")?

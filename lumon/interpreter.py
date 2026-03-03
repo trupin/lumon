@@ -11,7 +11,12 @@ from lumon.environment import Environment
 from lumon.errors import AskSignal, LumonError, ReturnSignal, SpawnSignal
 from lumon.evaluator import eval_node
 from lumon.parser import parse
-from lumon.plugins import discover_plugins, load_config, split_contracts
+from lumon.plugins import (
+    discover_plugins,
+    disk_manifest_namespaces,
+    load_config,
+    split_contracts,
+)
 from lumon.serializer import serialize
 from lumon.source_utils import extract_blocks, save_blocks
 from lumon.type_checker import type_check
@@ -52,12 +57,7 @@ def _setup_plugins(
         return
 
     # Detect namespace conflicts between plugins and disk manifests
-    manifest_dir = os.path.join(working_dir, "lumon", "manifests")
-    disk_namespaces: set[str] = set()
-    if os.path.isdir(manifest_dir):
-        for fname in os.listdir(manifest_dir):
-            if fname.endswith(".lumon"):
-                disk_namespaces.add(fname[:-6])  # strip .lumon
+    disk_namespaces = disk_manifest_namespaces(working_dir)
     for plugin in plugins:
         if plugin.alias in disk_namespaces:
             raise LumonError(

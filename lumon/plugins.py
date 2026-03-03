@@ -82,6 +82,22 @@ def load_config(working_dir: str) -> dict:
             raise LumonError(f"Invalid .lumon.json: {e}") from e
 
 
+def disk_manifest_namespaces(working_dir: str) -> set[str]:
+    """Return the set of namespace names that have disk manifests.
+
+    Scans ``<working_dir>/lumon/manifests/*.lumon`` and returns the
+    stem of each file (e.g. ``{"inbox", "math"}``).
+    """
+    manifest_dir = os.path.join(working_dir, "lumon", "manifests")
+    if not os.path.isdir(manifest_dir):
+        return set()
+    return {
+        fname[:-6]
+        for fname in os.listdir(manifest_dir)
+        if fname.endswith(".lumon")
+    }
+
+
 def discover_plugins(working_dir: str, config: dict) -> list[PluginInfo]:
     """Scan ../plugins/ for subdirectories listed in config["plugins"].
 

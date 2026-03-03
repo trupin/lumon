@@ -171,6 +171,20 @@ class TestDefineImplement:
         )
         assert r.value == 12
 
+    def test_keyword_as_function_name_inline(self, run):
+        """Keywords can be used as function names in inline define/implement (issue #15)."""
+        r = run(
+            'define util.none\n'
+            '  "Return ok"\n'
+            '  returns: text "Result"\n'
+            '\n'
+            'implement util.none\n'
+            '  return "ok"\n'
+            '\n'
+            'return util.none()'
+        )
+        assert r.value == "ok"
+
     def test_function_returning_tag(self, run):
         r = run(
             'define safe.div\n'
