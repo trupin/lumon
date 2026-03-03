@@ -51,7 +51,7 @@ def _deploy_files() -> dict[str, str]:
     """Return {filename: text_content} for all bundled deploy templates."""
     pkg = importlib.resources.files("lumon._deploy")
     result: dict[str, str] = {}
-    for name in ("CLAUDE.md", "settings.json", "sandbox-guard.py"):
+    for name in ("CLAUDE.md", "settings.json", "sandbox-guard.py", "plugin-CLAUDE.md"):
         result[name] = (pkg / name).read_text(encoding="utf-8")
     return result
 
@@ -224,6 +224,8 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     claude_dir.mkdir(exist_ok=True)
     sandbox_dir = target / "sandbox"
     sandbox_dir.mkdir(exist_ok=True)
+    plugins_dir = target / "plugins"
+    plugins_dir.mkdir(exist_ok=True)
 
     files = _deploy_files()
     deployed: list[str] = []
@@ -233,9 +235,10 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     hooks_dir.mkdir(exist_ok=True)
 
     for filename, content in files.items():
-        # CLAUDE.md → project root, hooks → .claude/hooks/, rest → .claude/
         if filename == "CLAUDE.md":
             dest = target / filename
+        elif filename == "plugin-CLAUDE.md":
+            dest = plugins_dir / "CLAUDE.md"
         elif filename.endswith(".py"):
             dest = hooks_dir / filename
         else:

@@ -349,6 +349,27 @@ assert_contains "deploy: hook blocks Read outside current dir" \
     "BLOCKED" \
     "$(echo '{"tool_name": "Read", "tool_input": {"file_path": "../outside/secret.txt"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
 
+# Deploy: plugins directory
+assert_eq "deploy: plugins/ directory created" \
+    "yes" \
+    "$([ -d "$DEPLOY_ROOT/plugins" ] && echo yes || echo no)"
+
+assert_eq "deploy: plugins/CLAUDE.md deployed" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/plugins/CLAUDE.md" ] && echo yes || echo no)"
+
+assert_contains "deploy: plugins CLAUDE.md has protocol section" \
+    "Plugin protocol" \
+    "$(cat "$DEPLOY_ROOT/plugins/CLAUDE.md")"
+
+assert_contains "deploy: plugins CLAUDE.md has file locations" \
+    "File locations" \
+    "$(cat "$DEPLOY_ROOT/plugins/CLAUDE.md")"
+
+assert_contains "deploy: plugins CLAUDE.md documents bridge path convention" \
+    "../plugins/" \
+    "$(cat "$DEPLOY_ROOT/plugins/CLAUDE.md")"
+
 # ---------------------------------------------------------------------------
 # IO sandbox (--working-dir constrains io.read / io.write)
 # ---------------------------------------------------------------------------
