@@ -1,5 +1,7 @@
 # Lumon
 
+> **Status**: Early development — the interpreter is not yet implemented. The language spec and APIs may change without notice. Not suitable for production use.
+
 A minimal, safe, pseudocode-like interpreted language that defines the cognitive boundary of an AI agent.
 
 Safety is achieved by construction — agents can only operate within the primitives the language provides. No sandboxing, no permission prompts.
