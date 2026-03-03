@@ -2,7 +2,7 @@
 
 > **Status**: Early development — the interpreter is implemented but the language spec and APIs may change without notice. Not suitable for production use.
 
-A minimal, safe, pseudocode-like interpreted language that defines the cognitive boundary of an AI agent.
+**A safe, self-implementing language for AI agents.**
 
 Lumon is a minimal interpreted language that defines what an AI agent can and cannot do — not through sandboxing, but through language design. If a primitive doesn't exist in Lumon, the agent cannot conceive of the action. There is nothing to escape from.
 
