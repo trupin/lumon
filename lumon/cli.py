@@ -12,6 +12,7 @@ from pathlib import Path
 from lumon import __version__
 from lumon.backends import RealFS
 from lumon.interpreter import interpret
+from lumon.plugins import load_config
 from lumon.serializer import deserialize
 
 _STATE_FILE = Path(".lumon_state.json")
@@ -142,12 +143,68 @@ def _bundled_manifest(name: str) -> str | None:
         return None
 
 
+def _annotate_contracts(manifest_text: str, contracts: dict) -> str:
+    """Inject [contract: ...] annotations into manifest text for params with contracts."""
+    if not contracts:
+        return manifest_text
+    lines = manifest_text.splitlines()
+    result: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        # Match parameter lines like:  name: type "desc" or  name: type "desc" = default
+        for param_name, contract in contracts.items():
+            if stripped.startswith(f"{param_name}:"):
+                annotation = _format_contract(contract)
+                if annotation:
+                    line = f"{line}  [contract: {annotation}]"
+                break
+        result.append(line)
+    return "\n".join(result)
+
+
+def _format_contract(contract: object) -> str:
+    """Format a contract value for display."""
+    if isinstance(contract, str):
+        return contract
+    if isinstance(contract, list):
+        if len(contract) == 2 and all(isinstance(v, (int, float)) for v in contract):
+            return f"{contract[0]}-{contract[1]}"
+        if all(isinstance(v, str) for v in contract):
+            return " | ".join(contract)
+    return str(contract)
+
+
+def _discover_plugin_namespaces() -> tuple[list[str], dict]:
+    """Discover plugin namespaces from ../plugins/ based on .lumon.json.
+
+    Returns (list of namespace names, config dict).
+    """
+    config = load_config(".")
+    allowed = config.get("plugins", {})
+    if not allowed:
+        return [], config
+
+    plugins_dir = os.path.normpath(os.path.join("..", "plugins"))
+    if not os.path.isdir(plugins_dir):
+        return [], config
+
+    namespaces: list[str] = []
+    for name in sorted(os.listdir(plugins_dir)):
+        if name not in allowed:
+            continue
+        plugin_path = os.path.join(plugins_dir, name)
+        manifest_path = os.path.join(plugin_path, "manifest.lumon")
+        if os.path.isdir(plugin_path) and os.path.isfile(manifest_path):
+            namespaces.append(name)
+    return namespaces, config
+
+
 def cmd_browse(args: argparse.Namespace) -> int:
     """Display the namespace index or a specific namespace manifest."""
     namespace: str | None = getattr(args, "namespace", None)
 
     if namespace:
-        # Try disk first, then bundled manifests
+        # Try disk first, then bundled manifests, then plugins
         path = Path("lumon") / "manifests" / f"{namespace}.lumon"
         if path.exists():
             print(path.read_text(encoding="utf-8"), end="")
@@ -156,10 +213,20 @@ def cmd_browse(args: argparse.Namespace) -> int:
         if bundled is not None:
             print(bundled, end="")
             return 0
+        # Check plugins
+        plugin_manifest = Path("..") / "plugins" / namespace / "manifest.lumon"
+        if plugin_manifest.exists():
+            config = load_config(".")
+            plugin_contracts = config.get("plugins", {}).get(namespace, {})
+            text = plugin_manifest.read_text(encoding="utf-8")
+            if plugin_contracts:
+                text = _annotate_contracts(text, plugin_contracts)
+            print(text, end="")
+            return 0
         print(f"error: manifest for '{namespace}' not found ({path})", file=sys.stderr)
         return 1
     else:
-        # Index: show bundled index, then append user namespaces from disk
+        # Index: show bundled index, then append user namespaces from disk, then plugins
         parts: list[str] = []
         bundled = _bundled_manifest("index.lumon")
         if bundled is not None:
@@ -167,6 +234,10 @@ def cmd_browse(args: argparse.Namespace) -> int:
         disk_index = Path("lumon") / "index.lumon"
         if disk_index.exists():
             parts.append(disk_index.read_text(encoding="utf-8").rstrip("\n"))
+        # Append plugin namespaces
+        plugin_ns, _config = _discover_plugin_namespaces()
+        for ns in plugin_ns:
+            parts.append(f"{ns} -- plugin")
         if not parts:
             print("error: namespace index not found (lumon/index.lumon)", file=sys.stderr)
             return 1
@@ -248,6 +319,17 @@ def cmd_deploy(args: argparse.Namespace) -> int:
             continue
         dest.write_text(content, encoding="utf-8")
         deployed.append(str(dest.relative_to(target)))
+
+    # Create starter .lumon.json at target root
+    lumon_json = target / ".lumon.json"
+    if not lumon_json.exists() or args.force:
+        lumon_json.write_text(
+            json.dumps({"plugins": {}}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        deployed.append(".lumon.json")
+    else:
+        skipped.append(".lumon.json")
 
     if deployed:
         print(f"Deployed to {target}:")

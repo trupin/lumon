@@ -18,7 +18,6 @@ class Environment:
         self._defines: dict[str, object] = {} if parent is None else parent._defines
         self._implements: dict[str, object] = {} if parent is None else parent._implements
         self._builtins: dict[str, object] = {} if parent is None else parent._builtins
-        self._bridges: dict[str, str] = {} if parent is None else parent._bridges
         self._namespace_prefixes: set[str] = set() if parent is None else parent._namespace_prefixes
         self._call_depth = 0 if parent is None else parent._call_depth
         self._max_call_depth = 100
@@ -28,9 +27,12 @@ class Environment:
         # Lazy loader for auto-loading namespaces from disk (shared)
         self._loader: Callable[[str], None] | None = None if parent is None else parent._loader
         self._loading: set[str] = set() if parent is None else parent._loading
-        # Bridge executor for test injection (shared)
-        self._bridge_executor: Callable[..., object] | None = None if parent is None else parent._bridge_executor
-        # Working directory for bridge subprocess cwd (shared)
+        # Plugin system (shared)
+        self._plugin_dirs: dict[str, str] = {} if parent is None else parent._plugin_dirs
+        self._plugin_contracts: dict[str, dict] = {} if parent is None else parent._plugin_contracts
+        self._plugin_executor: Callable[..., object] | None = None if parent is None else parent._plugin_executor
+        self._active_plugin_dir: str | None = None if parent is None else parent._active_plugin_dir
+        # Working directory (shared)
         self._working_dir: str | None = None if parent is None else parent._working_dir
 
     def get(self, name: str) -> object:
@@ -54,7 +56,6 @@ class Environment:
         snap._defines = self._defines
         snap._implements = self._implements
         snap._builtins = self._builtins
-        snap._bridges = self._bridges
         snap._namespace_prefixes = self._namespace_prefixes
         snap._call_depth = self._call_depth
         snap._max_call_depth = self._max_call_depth
@@ -62,7 +63,10 @@ class Environment:
         snap._response_queue = self._response_queue  # shared mutable list
         snap._loader = self._loader
         snap._loading = self._loading
-        snap._bridge_executor = self._bridge_executor
+        snap._plugin_dirs = self._plugin_dirs
+        snap._plugin_contracts = self._plugin_contracts
+        snap._plugin_executor = self._plugin_executor
+        snap._active_plugin_dir = self._active_plugin_dir
         snap._working_dir = self._working_dir
         return snap
 
@@ -91,11 +95,6 @@ class Environment:
         assert isinstance(node, ImplementBlock)
         self._implements[node.namespace_path] = node
 
-    def register_bridge(self, name: str, run_cmd: str) -> None:
-        self._bridges[name] = run_cmd
-        prefix = name.split(".")[0]
-        self._namespace_prefixes.add(prefix)
-
     def set_loader(self, loader: Callable[[str], None]) -> None:
         """Set the lazy loader callback for auto-loading namespaces from disk."""
         self._loader = loader
@@ -115,8 +114,7 @@ class Environment:
     def resolve_function(self, name: str) -> tuple[str, ...]:
         """Resolve a namespace function.
 
-        Returns ('builtin', callable), ('user', define, implement),
-        or ('bridge', define, run_cmd).
+        Returns ('builtin', callable) or ('user', define, implement).
         """
         if name in self._builtins:
             return ("builtin", self._builtins[name])  # type: ignore[return-value]
@@ -129,10 +127,6 @@ class Environment:
         if name in self._implements:
             define = self._defines.get(name)
             return ("user", define, self._implements[name])  # type: ignore[return-value]
-        # Check bridges after user-defined, before fail
-        if name in self._bridges:
-            define = self._defines.get(name)
-            return ("bridge", define, self._bridges[name])  # type: ignore[return-value]
         raise LumonError(f"Undefined function: {name}")
 
     def push_call(self, name: str) -> None:

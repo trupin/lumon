@@ -5,12 +5,12 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 
-from lumon.bridge import load_bridges
 from lumon.builtins import register_builtins
 from lumon.environment import Environment
 from lumon.errors import AskSignal, LumonError, ReturnSignal, SpawnSignal
 from lumon.evaluator import eval_node
 from lumon.parser import parse
+from lumon.plugins import discover_plugins, load_config
 from lumon.serializer import serialize
 from lumon.source_utils import extract_blocks, save_blocks
 from lumon.type_checker import type_check
@@ -37,27 +37,56 @@ def _setup_loader(env: Environment, working_dir: str) -> None:
     env.set_loader(loader)
 
 
-def _setup_bridges(env: Environment, working_dir: str, bridge_executor: Callable[..., object] | None = None) -> None:
-    """Load bridge declarations and register them in the environment."""
-    bridges = load_bridges(working_dir)
-    if not bridges:
+def _setup_plugins(
+    env: Environment,
+    working_dir: str,
+    plugin_executor: Callable[..., object] | None = None,
+) -> None:
+    """Discover and register plugins from ../plugins/ based on .lumon.json."""
+    config = load_config(working_dir)
+    plugins = discover_plugins(working_dir, config)
+    if not plugins:
         return
 
-    if bridge_executor is not None:
-        env._bridge_executor = bridge_executor
+    if plugin_executor is not None:
+        env._plugin_executor = plugin_executor
 
-    for name, run_cmd in bridges.items():
-        # Trigger the lazy loader for this namespace so the define gets loaded
-        ns = name.split(".")[0]
-        env.trigger_loader(ns)
+    plugin_config = config.get("plugins", {})
 
-        # Validate: every bridge must have a corresponding define
-        if name not in env._defines:
-            raise LumonError(
-                f"Bridge '{name}' has no matching define in manifests"
-            )
+    for plugin in plugins:
+        # Parse and register manifest (defines)
+        if os.path.isfile(plugin.manifest_path):
+            source = open(plugin.manifest_path, encoding="utf-8").read()
+            try:
+                ast = parse(source)
+                eval_node(ast, env)
+            except LumonError:
+                raise
+            except Exception as e:
+                raise LumonError(f"Error loading plugin manifest {plugin.manifest_path}: {e}") from e
 
-        env.register_bridge(name, run_cmd)
+        # Parse and register impl (implements)
+        if os.path.isfile(plugin.impl_path):
+            source = open(plugin.impl_path, encoding="utf-8").read()
+            try:
+                ast = parse(source)
+                eval_node(ast, env)
+            except LumonError:
+                raise
+            except Exception as e:
+                raise LumonError(f"Error loading plugin impl {plugin.impl_path}: {e}") from e
+
+        # Record plugin dirs and contracts for each defined function in this plugin
+        fn_contracts = plugin_config.get(plugin.name, {})
+        for fn_name in list(env._defines.keys()):
+            if fn_name.startswith(plugin.name + "."):
+                env._plugin_dirs[fn_name] = plugin.path
+                short_name = fn_name.split(".", 1)[1]
+                if isinstance(fn_contracts, dict) and short_name in fn_contracts:
+                    env._plugin_contracts[fn_name] = fn_contracts[short_name]
+
+        # Trigger lazy loader so user impls in sandbox/lumon/impl/ can override
+        env.trigger_loader(plugin.name)
 
 
 def interpret(
@@ -68,7 +97,7 @@ def interpret(
     responses: list[object] | None = None,
     working_dir: str | None = None,
     persist: bool = False,
-    bridge_executor: Callable[..., object] | None = None,
+    plugin_executor: Callable[..., object] | None = None,
 ) -> dict:
     """Parse, type-check, and execute Lumon code.
 
@@ -88,9 +117,9 @@ def interpret(
         if working_dir is not None:
             env._working_dir = working_dir
             _setup_loader(env, working_dir)
-            _setup_bridges(env, working_dir, bridge_executor)
-        elif bridge_executor is not None:
-            env._bridge_executor = bridge_executor
+            _setup_plugins(env, working_dir, plugin_executor)
+        elif plugin_executor is not None:
+            env._plugin_executor = plugin_executor
         result = eval_node(ast, env)
         output = {"type": "result", "value": serialize(result)}
         if persist and working_dir is not None:

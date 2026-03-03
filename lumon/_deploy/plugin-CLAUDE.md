@@ -1,54 +1,68 @@
 # Lumon Plugin Agent Instructions
 
-You are an agent that writes plugins for a Lumon project. Plugins are standalone scripts that extend the Lumon agent's capabilities through the bridge system. You operate from the `plugins/` directory and register your plugins with the Lumon agent in the sibling `sandbox/` directory.
+You are an agent that writes plugins for a Lumon project. Plugins are self-contained directories that extend the Lumon agent's capabilities. Each plugin lives in its own directory under `plugins/` with a manifest, implementation, and scripts. The interpreter auto-discovers plugins listed in `.lumon.json`.
 
 ## What is a plugin?
 
-A plugin is an executable script that:
-1. Reads a JSON request from stdin
-2. Does useful work (web requests, database queries, file processing, etc.)
-3. Writes a JSON response to stdout
-4. Exits with code 0 on success, non-zero on error
+A plugin is a self-contained directory containing:
 
-The Lumon interpreter calls your plugin as a subprocess whenever the Lumon agent invokes the corresponding bridged function.
+1. **`manifest.lumon`** — `define` blocks declaring function signatures (what the agent sees)
+2. **`impl.lumon`** — `implement` blocks that call `plugin.exec` to run scripts
+3. **Script files** (e.g. `.py`) — the actual executables that do the work
 
-## Plugin protocol
+The plugin's `impl.lumon` uses `plugin.exec(command, args)` to run scripts in the plugin's directory. The Lumon agent cannot call `plugin.exec` directly — it only works inside plugin implementations.
 
-### Input (stdin)
+## Plugin directory structure
 
-Your plugin receives a single JSON object:
-
-```json
-{
-  "function": "search.web",
-  "args": {
-    "query": "Austin TX",
-    "max_results": 10
-  }
-}
+```
+plugins/
+  greet/
+    manifest.lumon     # define greet.hello ...
+    impl.lumon         # implement greet.hello using plugin.exec
+    greet.py           # actual script
+  browser/
+    manifest.lumon
+    impl.lumon
+    search.py
 ```
 
-- `function`: the fully qualified function name (namespace.name)
-- `args`: a map of named arguments matching the `define` signature
+## plugin.exec protocol
 
-### Output (stdout)
+### How impl.lumon calls scripts
+
+```
+implement greet.hello
+  let result = plugin.exec("python3 greet.py", {name: name})
+  return result
+```
+
+`plugin.exec(command, args)`:
+- **command**: shell command to run (executed in the plugin's directory)
+- **args**: map sent as JSON on stdin (just the map, no wrapper)
+
+### Script input (stdin)
+
+Your script receives a plain JSON map:
+
+```json
+{"name": "World", "max_results": 10}
+```
+
+### Script output (stdout)
 
 Write a single JSON value to stdout.
 
 **Success** — return a value directly or wrap in a tag:
-
 ```json
 {"tag": "ok", "value": ["result1", "result2"]}
 ```
 
 **Recoverable error** — return an error tag:
-
 ```json
 {"tag": "error", "value": "connection timed out"}
 ```
 
 **Plain values** work too — numbers, strings, lists, maps:
-
 ```json
 "Hello, World!"
 ```
@@ -58,7 +72,7 @@ Write a single JSON value to stdout.
 | Exit code | Result in Lumon |
 | :--- | :--- |
 | 0 + valid JSON | Value returned to Lumon code |
-| 0 + invalid JSON | Interpreter error (bug in your plugin) |
+| 0 + invalid JSON | Interpreter error (bug in your script) |
 | Non-zero | `:error(stderr_message)` returned to Lumon code |
 
 ### Rules
@@ -68,27 +82,30 @@ Write a single JSON value to stdout.
 - Use stderr for debug output or error messages
 - Keep execution under 30 seconds (the interpreter enforces a timeout)
 
+## Understanding the Lumon agent
+
+Your plugins are consumed by a Lumon agent operating in `../sandbox/`. Before writing a plugin, explore the parent to understand how it will be used:
+
+- **`../CLAUDE.md`** — The Lumon agent's instructions
+- **`../sandbox/lumon/index.lumon`** — The namespace index
+- **`../sandbox/lumon/manifests/`** — Existing function signatures
+- **`../sandbox/lumon/impl/`** — The agent's implementations
+- **`../.lumon.json`** — Plugin access control and contracts
+- **`../sandbox/`** — Data files the agent works with
+
+Start by reading `../CLAUDE.md` and browsing existing manifests. Design your plugin's API to match what the Lumon agent already expects — same tag patterns (`:ok`/`:error`), same naming conventions, same level of granularity.
+
 ## How to create a plugin
 
-### Step 1: Write the plugin script
+### Step 1: Create the plugin directory
 
-Create a Python file in this directory:
-
-```python
-#!/usr/bin/env python3
-"""Greet someone by name."""
-import json
-import sys
-
-request = json.load(sys.stdin)
-name = request["args"]["name"]
-
-json.dump(f"Hello, {name}!", sys.stdout)
+```
+plugins/<namespace>/
 ```
 
-### Step 2: Create the manifest
+### Step 2: Write the manifest
 
-Create a manifest at `../sandbox/lumon/manifests/<namespace>.lumon` that defines the function signature. This is what the Lumon agent sees when it runs `browse`:
+Create `manifest.lumon` with `define` blocks:
 
 ```
 define greet.hello
@@ -99,44 +116,94 @@ define greet.hello
 ```
 
 **Manifest rules:**
-- One namespace per file (all `greet.*` functions go in `greet.lumon`)
+- Namespace matches directory name (all `greet.*` functions go in `greet/manifest.lumon`)
 - Each function needs: description, typed parameters, return type
 - Parameters: `name: type "description"` with optional `= default_value`
 - Available types: `text`, `number`, `bool`, `list<T>`, `map`, `none`
 - Use `:ok(T) | :error(text)` for functions that can fail
 
-### Step 3: Register the bridge
+### Step 3: Write the implementation
 
-Add a bridge declaration to `../sandbox/lumon/bridges.lumon`:
-
-```
-bridge greet.hello
-  run: "python3 ../plugins/greet_hello.py"
-```
-
-**Path convention**: bridge `run:` commands execute with the working directory set to `sandbox/`. Since your plugins live in `plugins/` (a sibling of `sandbox/`), always use `../plugins/` in the path.
-
-### Step 4: Update the namespace index
-
-If this is a new namespace, add it to `../sandbox/lumon/index.lumon`:
+Create `impl.lumon` that uses `plugin.exec`:
 
 ```
-greet "Greeting utilities"
+implement greet.hello
+  let result = plugin.exec("python3 greet.py", {name: name})
+  return result
 ```
 
-Skip this if the namespace already exists in the index.
+### Step 4: Write the script
+
+Create the executable script:
+
+```python
+#!/usr/bin/env python3
+"""Greet someone by name."""
+import json
+import sys
+
+args = json.load(sys.stdin)
+name = args["name"]
+
+json.dump(f"Hello, {name}!", sys.stdout)
+```
+
+### Step 5: Register in .lumon.json
+
+Add the plugin to `../.lumon.json`:
+
+```json
+{
+  "plugins": {
+    "greet": {}
+  }
+}
+```
+
+Empty `{}` means all functions enabled with no parameter contracts. You can add contracts to restrict parameter values — see "Contracts" below.
+
+## Contracts
+
+The `.lumon.json` file can define contracts that restrict parameter values. Contract violations are interpreter errors — the script never runs.
+
+```json
+{
+  "plugins": {
+    "browser": {
+      "search": {
+        "url": "https://zillow.com/*",
+        "max_results": [1, 50]
+      }
+    }
+  }
+}
+```
+
+### Contract types
+
+- **Text wildcard**: `"https://zillow.com/*"` — glob pattern matched against text args
+- **Number range**: `[1, 50]` — inclusive range for number args
+- **Enum**: `["fast", "thorough"]` — allowed values for text args
+
+### How agents see contracts
+
+When the agent runs `lumon browse <namespace>`, contracts are shown as annotations:
+
+```
+define browser.search
+  "Search the web"
+  takes:
+    url: text "URL to search"              [contract: https://zillow.com/*]
+    max_results: number "Max results" = 10  [contract: 1-50]
+  returns: :ok(list<map>) | :error(text)
+```
 
 ## How to test
 
-### Test the plugin directly
+### Test the script directly
 
 ```bash
-echo '{"function": "greet.hello", "args": {"name": "World"}}' | python3 greet_hello.py
-```
-
-Expected output:
-```json
-"Hello, World!"
+echo '{"name": "World"}' | python3 greet.py
 ```
 
 ### Test through the Lumon interpreter
@@ -150,26 +217,37 @@ Expected output:
 {"type": "result", "value": "Hello, World!"}
 ```
 
-### Test error handling
-
-Make sure your plugin handles bad input gracefully — exit non-zero or return an error tag:
-
-```bash
-echo '{"function": "greet.hello", "args": {}}' | python3 greet_hello.py
-```
-
-## File locations
-
-| What | Path from `plugins/` |
-| :--- | :--- |
-| Plugin scripts | `./<script>.py` |
-| Function manifests | `../sandbox/lumon/manifests/<ns>.lumon` |
-| Bridge declarations | `../sandbox/lumon/bridges.lumon` |
-| Namespace index | `../sandbox/lumon/index.lumon` |
-
 ## Complete example: web search plugin
 
-### 1. Plugin script (`web_search.py`)
+### 1. Directory structure
+
+```
+plugins/search/
+  manifest.lumon
+  impl.lumon
+  web_search.py
+```
+
+### 2. Manifest (`manifest.lumon`)
+
+```
+define search.web
+  "Search the web for information"
+  takes:
+    query: text "Search query"
+    max_results: number "Maximum results to return" = 5
+  returns: :ok(list<map>) | :error(text) "Search results or error"
+```
+
+### 3. Implementation (`impl.lumon`)
+
+```
+implement search.web
+  let result = plugin.exec("python3 web_search.py", {query: query, max_results: max_results})
+  return result
+```
+
+### 4. Script (`web_search.py`)
 
 ```python
 #!/usr/bin/env python3
@@ -179,9 +257,9 @@ import sys
 import urllib.request
 import urllib.parse
 
-request = json.load(sys.stdin)
-query = request["args"]["query"]
-max_results = request["args"].get("max_results", 5)
+args = json.load(sys.stdin)
+query = args["query"]
+max_results = args.get("max_results", 5)
 
 try:
     url = f"https://api.example.com/search?q={urllib.parse.quote(query)}&limit={max_results}"
@@ -194,31 +272,22 @@ except Exception as e:
     sys.exit(1)
 ```
 
-### 2. Manifest (`../sandbox/lumon/manifests/search.lumon`)
+### 5. Config (`.lumon.json`)
 
-```
-define search.web
-  "Search the web for information"
-  takes:
-    query: text "Search query"
-    max_results: number "Maximum results to return" = 5
-  returns: :ok(list<map>) | :error(text) "Search results or error"
-```
-
-### 3. Bridge (`../sandbox/lumon/bridges.lumon`)
-
-```
-bridge search.web
-  run: "python3 ../plugins/web_search.py"
+```json
+{
+  "plugins": {
+    "search": {
+      "web": {
+        "query": "*",
+        "max_results": [1, 20]
+      }
+    }
+  }
+}
 ```
 
-### 4. Index entry (`../sandbox/lumon/index.lumon`)
-
-```
-search "Web search capabilities"
-```
-
-### 5. How the Lumon agent uses it
+### 6. How the Lumon agent uses it
 
 Once registered, the Lumon agent can call your plugin like any other function:
 
@@ -232,8 +301,9 @@ implement find.homes
 
 ## Tips
 
-- **One script per function** is simplest, but a single script can serve multiple functions by checking `request["function"]`
+- **One directory per namespace** — all `greet.*` functions go in `plugins/greet/`
 - **Use tags** (`:ok`/`:error`) for functions that can fail — it lets the Lumon agent handle errors with `match`
-- **Test locally first** with `echo ... | python3` before wiring up the bridge
-- **Check stderr** if a bridge call returns `:error` — your plugin's stderr becomes the error message
+- **Test scripts directly** with `echo '...' | python3` before wiring up the plugin
+- **Check stderr** if a plugin call returns `:error` — your script's stderr becomes the error message
 - **Read the Lumon spec** with `lumon spec` to understand the type system and language features
+- **Contracts protect invariants** — use them to restrict URLs, numeric ranges, or enum values

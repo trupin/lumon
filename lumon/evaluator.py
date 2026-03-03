@@ -50,7 +50,7 @@ from lumon.ast_nodes import (
 )
 from lumon.environment import Environment
 from lumon.errors import AskSignal, LumonError, ReturnSignal, SpawnSignal
-from lumon.bridge import call_bridge
+from lumon.plugins import validate_contracts
 from lumon.serializer import serialize
 from lumon.values import LumonFunction, LumonTag, is_truthy
 
@@ -347,8 +347,6 @@ def _eval_field_access(obj_node: object, field: str, env: Environment) -> object
             resolved = env.resolve_function(ns_path)
             if resolved[0] == "builtin":
                 return resolved[1]
-            elif resolved[0] == "bridge":
-                return _make_bridge_fn_ref(ns_path, resolved[1], resolved[2], env)
             # User-defined function reference
             return _make_user_fn_ref(ns_path, env)
         except LumonError:
@@ -370,14 +368,6 @@ def _make_user_fn_ref(ns_path: str, env: Environment) -> LumonFunction:
     # Create a LumonFunction that wraps the implement call
     params = tuple(p.name for p in define.params) if define else ()  # type: ignore[union-attr]
     return LumonFunction(params, impl, env.snapshot(), is_lambda=False)
-
-
-def _make_bridge_fn_ref(ns_path: str, define: object, run_cmd: str, env: Environment) -> object:
-    """Create a callable reference to a bridge function (for pipe support)."""
-    def bridge_fn(*args: object) -> object:
-        return _call_bridge_function(ns_path, define, run_cmd, args, env)
-
-    return bridge_fn
 
 
 def _eval_index_access(obj_node: object, idx_node: object, env: Environment) -> object:
@@ -439,15 +429,13 @@ def _eval_lambda_call(target: object, args: tuple[object, ...], env: Environment
 
 
 def _call_function(name: str, args: tuple[object, ...], env: Environment) -> object:
-    """Call a named function (builtin, user-defined, or bridge)."""
+    """Call a named function (builtin or user-defined)."""
     resolved = env.resolve_function(name)
     match resolved:
         case ("builtin", fn):
             return fn(*args)  # type: ignore[operator]
         case ("user", define, impl):
             return _call_user_function(name, define, impl, args, env)
-        case ("bridge", define, run_cmd):
-            return _call_bridge_function(name, define, run_cmd, args, env)
         case _:
             raise LumonError(f"Cannot call '{name}'")
 
@@ -457,6 +445,13 @@ def _call_user_function(
 ) -> object:
     """Call a user-defined function (define + implement)."""
     assert isinstance(impl, ImplementBlock)
+
+    # Plugin contract validation + context injection
+    plugin_dir = env._plugin_dirs.get(name)
+    if plugin_dir is not None and isinstance(define, DefineBlock):
+        contracts = env._plugin_contracts.get(name, {})
+        if contracts:
+            validate_contracts(name, args, define, contracts)
 
     env.push_call(name)
     try:
@@ -476,6 +471,11 @@ def _call_user_function(
                         function=name,
                     )
 
+        # Set plugin context so plugin.exec works inside plugin impls
+        prev_plugin_dir = env._active_plugin_dir
+        if plugin_dir is not None:
+            env._active_plugin_dir = plugin_dir
+
         try:
             result = None
             for stmt in impl.body:
@@ -483,6 +483,9 @@ def _call_user_function(
             return result
         except ReturnSignal as rs:
             return rs.value
+        finally:
+            if plugin_dir is not None:
+                env._active_plugin_dir = prev_plugin_dir
     except LumonError as e:
         if e.function is None:
             e.function = name
@@ -491,37 +494,6 @@ def _call_user_function(
         raise
     finally:
         env.pop_call()
-
-
-def _call_bridge_function(
-    name: str, define: object, run_cmd: str, args: tuple[object, ...], env: Environment
-) -> object:
-    """Call a bridge function (define + external executable)."""
-    if not isinstance(define, DefineBlock):
-        raise LumonError(f"Bridge '{name}' has no matching define", function=name)
-
-    # Build named args dict from positional args using define params
-    named_args: dict[str, object] = {}
-    if define.params:
-        for i, param in enumerate(define.params):
-            assert isinstance(param, ParamDef)
-            if i < len(args):
-                named_args[param.name] = serialize(args[i])
-            elif param.default is not None:
-                named_args[param.name] = serialize(eval_node(param.default, env))
-            else:
-                raise LumonError(
-                    f"Missing argument '{param.name}' in call to {name}",
-                    function=name,
-                )
-
-    return call_bridge(
-        name,
-        named_args,
-        run_cmd,
-        env._working_dir or ".",
-        executor=env._bridge_executor,
-    )
 
 
 def _call_value(fn_val: object, args: tuple[object, ...], env: Environment) -> object:

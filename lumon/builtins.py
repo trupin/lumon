@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 
 from lumon.environment import Environment
+from lumon.errors import LumonError
+from lumon.plugins import exec_plugin_script
 from lumon.values import LumonFunction, LumonTag, is_truthy
 
 
@@ -224,3 +226,14 @@ def register_builtins(
         env.register_builtin(
             "http.get", lambda url: _wrap_tag_result(_http.get(url))  # type: ignore[union-attr]
         )
+
+    # --- plugin.* ---
+    def _plugin_exec(command: str, args: object = None) -> object:
+        if env._active_plugin_dir is None:
+            raise LumonError("plugin.exec can only be called from a plugin implementation")
+        return exec_plugin_script(
+            env._active_plugin_dir, command, args,
+            executor=env._plugin_executor,
+        )
+
+    env.register_builtin("plugin.exec", _plugin_exec)
