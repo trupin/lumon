@@ -234,6 +234,8 @@ def register_builtins(
         return exec_plugin_script(
             env._active_plugin_dir, command, args,
             executor=env._plugin_executor,
+            instance=env._active_plugin_instance or "",
+            env_vars=env._active_plugin_env,
         )
 
     env.register_builtin("plugin.exec", _plugin_exec)

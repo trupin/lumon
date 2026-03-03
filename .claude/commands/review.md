@@ -83,6 +83,6 @@ Order the list by severity:
 ## Rules
 
 - Do NOT fix anything — only report. The user will decide what to act on.
-- Do NOT run tests or typecheck — those have their own skills.
+- Do NOT run tests, typecheck, or lint — those have their own skills.
 - Be specific. "Improve error handling" is not actionable. "Handle FileNotFoundError in bridge.py:85 — currently crashes, should return LumonError" is.
 - If $ARGUMENTS is provided, focus the review on that specific area.

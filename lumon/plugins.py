@@ -21,9 +21,48 @@ class PluginInfo:
     """Metadata for a discovered plugin directory."""
 
     name: str
+    alias: str
     path: str
     manifest_path: str
     impl_path: str
+
+
+def classify_contract(value: object) -> str:
+    """Classify a contract value as 'dynamic' or 'forced'.
+
+    Dynamic (agent provides, system validates):
+      - string containing '*' (wildcard)
+      - [min, max] number range
+      - ["a", "b"] string enum
+    Forced (system injects, agent never sees):
+      - plain string (no '*')
+      - plain number
+      - plain boolean
+    """
+    if isinstance(value, bool):
+        return "forced"
+    if isinstance(value, str):
+        return "dynamic" if "*" in value else "forced"
+    if isinstance(value, (int, float)):
+        return "forced"
+    if isinstance(value, list) and len(value) > 0:
+        if len(value) == 2 and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in value):
+            return "dynamic"  # number range
+        if all(isinstance(v, str) for v in value):
+            return "dynamic"  # enum
+    return "forced"
+
+
+def split_contracts(contracts: dict[str, object]) -> tuple[dict[str, object], dict[str, object]]:
+    """Split a contract dict into (dynamic, forced) dicts."""
+    dynamic: dict[str, object] = {}
+    forced: dict[str, object] = {}
+    for key, value in contracts.items():
+        if classify_contract(value) == "dynamic":
+            dynamic[key] = value
+        else:
+            forced[key] = value
+    return dynamic, forced
 
 
 def load_config(working_dir: str) -> dict:
@@ -47,6 +86,8 @@ def discover_plugins(working_dir: str, config: dict) -> list[PluginInfo]:
     """Scan ../plugins/ for subdirectories listed in config["plugins"].
 
     Each subdir with a manifest.lumon is a plugin.
+    Supports multi-instance: config key is the alias, optional "plugin" key
+    points to the source directory. If absent, alias == source dir name.
     Returns list of PluginInfo for allowed plugins only.
     """
     allowed = config.get("plugins", {})
@@ -58,10 +99,13 @@ def discover_plugins(working_dir: str, config: dict) -> list[PluginInfo]:
         return []
 
     result: list[PluginInfo] = []
-    for name in sorted(os.listdir(plugins_dir)):
-        if name not in allowed:
-            continue
-        plugin_path = os.path.join(plugins_dir, name)
+    for alias in sorted(allowed.keys()):
+        instance_config = allowed[alias]
+        # Resolve source directory: "plugin" key or alias itself
+        source_name = alias
+        if isinstance(instance_config, dict) and "plugin" in instance_config:
+            source_name = instance_config["plugin"]
+        plugin_path = os.path.join(plugins_dir, source_name)
         if not os.path.isdir(plugin_path):
             continue
         manifest_path = os.path.join(plugin_path, "manifest.lumon")
@@ -69,7 +113,8 @@ def discover_plugins(working_dir: str, config: dict) -> list[PluginInfo]:
         if not os.path.isfile(manifest_path):
             continue
         result.append(PluginInfo(
-            name=name,
+            name=source_name,
+            alias=alias,
             path=plugin_path,
             manifest_path=manifest_path,
             impl_path=impl_path,
@@ -141,8 +186,8 @@ def validate_contracts(
                     )
 
 
-PluginExecutor = Callable[[str, dict[str, object], str], object]
-"""Signature: (command, args_dict, plugin_dir) -> result value."""
+PluginExecutor = Callable[[str, dict[str, object], str, str], object]
+"""Signature: (command, args_dict, plugin_dir, instance) -> result value."""
 
 
 def exec_plugin_script(
@@ -150,6 +195,8 @@ def exec_plugin_script(
     command: str,
     args: object = None,
     executor: PluginExecutor | None = None,
+    instance: str = "",
+    env_vars: dict[str, str] | None = None,
 ) -> object:
     """Execute a plugin script via subprocess (or injected executor for tests).
 
@@ -162,9 +209,14 @@ def exec_plugin_script(
     args_map = args if isinstance(args, dict) else {}
 
     if executor is not None:
-        return executor(command, args_map, plugin_dir)
+        return executor(command, args_map, plugin_dir, instance)
 
     payload = json.dumps(args_map)
+
+    # Build subprocess environment with instance identity and custom env vars
+    sub_env = {**os.environ, "LUMON_PLUGIN_INSTANCE": instance}
+    if env_vars:
+        sub_env.update(env_vars)
 
     try:
         result = subprocess.run(
@@ -174,11 +226,13 @@ def exec_plugin_script(
             text=True,
             cwd=plugin_dir,
             timeout=30,
+            env=sub_env,
+            check=False,
         )
-    except FileNotFoundError:
-        raise LumonError(f"Plugin executable not found: {command}")
-    except subprocess.TimeoutExpired:
-        raise LumonError(f"Plugin script timed out after 30 seconds: {command}")
+    except FileNotFoundError as exc:
+        raise LumonError(f"Plugin executable not found: {command}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise LumonError(f"Plugin script timed out after 30 seconds: {command}") from exc
 
     if result.returncode != 0:
         stderr_msg = result.stderr[:1024].strip() if result.stderr else "unknown error"
@@ -186,9 +240,9 @@ def exec_plugin_script(
 
     try:
         parsed = json.loads(result.stdout)
-    except (json.JSONDecodeError, ValueError):
+    except (json.JSONDecodeError, ValueError) as exc:
         raise LumonError(
             f"Plugin script returned invalid JSON on exit 0: {command}",
-        )
+        ) from exc
 
     return deserialize(parsed)

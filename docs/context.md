@@ -42,6 +42,9 @@ This is fundamentally different from sandboxing. Sandboxing assumes the agent kn
 - Extend the agent's reality with capabilities that require external programs (web APIs, databases, browsers)
 - Auto-discovered from `plugins/` directory, controlled by `.lumon.json` config
 - Parameter contracts (URL wildcards, numeric ranges, enums) enforce invariants before execution
+- Forced parameter values let project authors hardcode sensitive or policy-driven values (API keys, base URLs) — agents never see them
+- Multi-instance support: the same plugin directory can be mounted under different aliases with different configs and env vars
+- Each instance receives identity (`LUMON_PLUGIN_INSTANCE`) and custom env vars for namespaced storage
 - To the agent, plugin functions look like any other function — the plugin mechanism is invisible
 
 ### Trust model

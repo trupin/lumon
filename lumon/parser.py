@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Generator, Iterator
 
 from lark import Lark, Token, Transformer, v_args
@@ -768,7 +767,7 @@ class LumonTransformer(Transformer):
         return Program(tuple(s for s in statements if s is not None))
 
 
-_parser: Lark | None = None
+_parser: Lark | None = None  # pylint: disable=invalid-name
 
 
 def _get_parser() -> Lark:

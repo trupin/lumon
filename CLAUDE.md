@@ -72,15 +72,16 @@ impl/<ns>.lumon      → Loaded on call (implementations)
 
 ## Validation Commands
 
-Three slash commands for validating correctness:
+Four slash commands for validating correctness:
 
 - `/test` — runs pytest (`/test` for full suite, `/test tests/test_types.py` for a specific file)
 - `/typecheck` — runs pyright (`/typecheck` for the lumon package, `/typecheck lumon/parser.py` for a specific file)
+- `/lint` — runs pylint (`/lint` for the lumon package, `/lint lumon/plugins.py` for a specific file)
 - `/review` — reviews recent changes for gaps, defects, missing tests, spec drift, and code quality issues
 
 ### When to run them
 
-- **After wrapping up a task** — always run `/review`, `/test`, and `/typecheck` before considering a task done
+- **After wrapping up a task** — always run `/review`, `/test`, `/typecheck`, and `/lint` before considering a task done
 - **When debugging** — run `/test` with the relevant test file to get failure details
 - **Not after every small edit** — only when you need signal, not after each line change
 
@@ -92,6 +93,7 @@ A task is **not done** unless:
 3. That test passes (`/test`)
 4. No test regressions (all previously passing tests still pass)
 5. No pyright errors in modified files (`/typecheck`)
+6. No pylint errors in modified files (`/lint`)
 
 ## Git Workflow
 

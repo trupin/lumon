@@ -12,7 +12,7 @@ from pathlib import Path
 from lumon import __version__
 from lumon.backends import RealFS
 from lumon.interpreter import interpret
-from lumon.plugins import load_config
+from lumon.plugins import load_config, split_contracts
 from lumon.serializer import deserialize
 
 _STATE_FILE = Path(".lumon_state.json")
@@ -68,7 +68,7 @@ def cmd_version() -> int:
     return 0
 
 
-def cmd_spec(args: argparse.Namespace) -> int:
+def cmd_spec(_args: argparse.Namespace) -> int:
     """Print the Lumon language specification."""
     text = importlib.resources.files("lumon._spec").joinpath("spec.md").read_text(encoding="utf-8")
     print(text, end="")
@@ -143,16 +143,35 @@ def _bundled_manifest(name: str) -> str | None:
         return None
 
 
-def _annotate_contracts(manifest_text: str, contracts: dict) -> str:
-    """Inject [contract: ...] annotations into manifest text for params with contracts."""
+def _annotate_manifest(manifest_text: str, contracts: dict) -> str:
+    """Annotate manifest text: hide forced params, add contract annotations for dynamic ones."""
     if not contracts:
         return manifest_text
+
+    # Flatten all param contracts across functions
+    all_dynamic: dict[str, object] = {}
+    all_forced_params: set[str] = set()
+    for _fn_name, fn_contracts in contracts.items():
+        if not isinstance(fn_contracts, dict):
+            continue
+        dynamic, forced = split_contracts(fn_contracts)
+        all_dynamic.update(dynamic)
+        all_forced_params.update(forced.keys())
+
     lines = manifest_text.splitlines()
     result: list[str] = []
     for line in lines:
         stripped = line.strip()
-        # Match parameter lines like:  name: type "desc" or  name: type "desc" = default
-        for param_name, contract in contracts.items():
+        # Check if this is a forced param line — hide it entirely
+        skip = False
+        for param_name in all_forced_params:
+            if stripped.startswith(f"{param_name}:"):
+                skip = True
+                break
+        if skip:
+            continue
+        # Annotate dynamic contract params
+        for param_name, contract in all_dynamic.items():
             if stripped.startswith(f"{param_name}:"):
                 annotation = _format_contract(contract)
                 if annotation:
@@ -177,7 +196,9 @@ def _format_contract(contract: object) -> str:
 def _discover_plugin_namespaces() -> tuple[list[str], dict]:
     """Discover plugin namespaces from ../plugins/ based on .lumon.json.
 
-    Returns (list of namespace names, config dict).
+    Supports multi-instance: config key is the alias, optional "plugin" key
+    points to the source directory.
+    Returns (list of alias names, config dict).
     """
     config = load_config(".")
     allowed = config.get("plugins", {})
@@ -189,13 +210,15 @@ def _discover_plugin_namespaces() -> tuple[list[str], dict]:
         return [], config
 
     namespaces: list[str] = []
-    for name in sorted(os.listdir(plugins_dir)):
-        if name not in allowed:
-            continue
-        plugin_path = os.path.join(plugins_dir, name)
+    for alias in sorted(allowed.keys()):
+        instance_config = allowed[alias]
+        source_name = alias
+        if isinstance(instance_config, dict) and "plugin" in instance_config:
+            source_name = instance_config["plugin"]
+        plugin_path = os.path.join(plugins_dir, source_name)
         manifest_path = os.path.join(plugin_path, "manifest.lumon")
         if os.path.isdir(plugin_path) and os.path.isfile(manifest_path):
-            namespaces.append(name)
+            namespaces.append(alias)
     return namespaces, config
 
 
@@ -213,14 +236,27 @@ def cmd_browse(args: argparse.Namespace) -> int:
         if bundled is not None:
             print(bundled, end="")
             return 0
-        # Check plugins
-        plugin_manifest = Path("..") / "plugins" / namespace / "manifest.lumon"
+        # Check plugins (resolve source dir via "plugin" key)
+        config = load_config(".")
+        plugin_config = config.get("plugins", {})
+        instance_config = plugin_config.get(namespace, {})
+        source_name = namespace
+        if isinstance(instance_config, dict) and "plugin" in instance_config:
+            source_name = instance_config["plugin"]
+        plugin_manifest = Path("..") / "plugins" / source_name / "manifest.lumon"
         if plugin_manifest.exists():
-            config = load_config(".")
-            plugin_contracts = config.get("plugins", {}).get(namespace, {})
             text = plugin_manifest.read_text(encoding="utf-8")
-            if plugin_contracts:
-                text = _annotate_contracts(text, plugin_contracts)
+            # Replace source namespace with alias in manifest text
+            if source_name != namespace:
+                text = text.replace(f"{source_name}.", f"{namespace}.")
+            # Strip reserved keys and annotate contracts
+            if isinstance(instance_config, dict):
+                fn_contracts = {
+                    k: v for k, v in instance_config.items()
+                    if k not in {"plugin", "env"}
+                }
+                if fn_contracts:
+                    text = _annotate_manifest(text, fn_contracts)
             print(text, end="")
             return 0
         print(f"error: manifest for '{namespace}' not found ({path})", file=sys.stderr)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from collections.abc import Callable
 
@@ -10,10 +11,12 @@ from lumon.environment import Environment
 from lumon.errors import AskSignal, LumonError, ReturnSignal, SpawnSignal
 from lumon.evaluator import eval_node
 from lumon.parser import parse
-from lumon.plugins import discover_plugins, load_config
+from lumon.plugins import discover_plugins, load_config, split_contracts
 from lumon.serializer import serialize
 from lumon.source_utils import extract_blocks, save_blocks
 from lumon.type_checker import type_check
+
+_PLUGIN_RESERVED_KEYS = {"plugin", "env"}
 
 
 def _setup_loader(env: Environment, working_dir: str) -> None:
@@ -76,17 +79,59 @@ def _setup_plugins(
             except Exception as e:
                 raise LumonError(f"Error loading plugin impl {plugin.impl_path}: {e}") from e
 
-        # Record plugin dirs and contracts for each defined function in this plugin
-        fn_contracts = plugin_config.get(plugin.name, {})
+        # Rename defines/implements from source prefix to alias prefix (when they differ)
+        if plugin.alias != plugin.name:
+            source_prefix = plugin.name + "."
+            for fn_name in list(env._defines.keys()):
+                if fn_name.startswith(source_prefix):
+                    alias_name = plugin.alias + "." + fn_name.split(".", 1)[1]
+                    old_node = env._defines.pop(fn_name)
+                    env._defines[alias_name] = dataclasses.replace(old_node, namespace_path=alias_name)  # type: ignore[type-var]
+            for fn_name in list(env._implements.keys()):
+                if fn_name.startswith(source_prefix):
+                    alias_name = plugin.alias + "." + fn_name.split(".", 1)[1]
+                    old_node = env._implements.pop(fn_name)
+                    env._implements[alias_name] = dataclasses.replace(old_node, namespace_path=alias_name)  # type: ignore[type-var]
+            # Register the alias as a namespace prefix
+            env._namespace_prefixes.add(plugin.alias)
+
+        # Get instance config and strip reserved keys
+        instance_config = plugin_config.get(plugin.alias, {})
+        if not isinstance(instance_config, dict):
+            instance_config = {}
+
+        # Extract env vars from "env" key
+        custom_env: dict[str, str] = {}
+        if "env" in instance_config:
+            raw_env = instance_config["env"]
+            if isinstance(raw_env, dict):
+                custom_env = {str(k): str(v) for k, v in raw_env.items()}
+
+        # Build function-level contracts (strip reserved keys)
+        fn_contracts = {k: v for k, v in instance_config.items() if k not in _PLUGIN_RESERVED_KEYS}
+
+        # Record plugin dirs, contracts, forced values, and env vars
         for fn_name in list(env._defines.keys()):
-            if fn_name.startswith(plugin.name + "."):
+            if fn_name.startswith(plugin.alias + "."):
                 env._plugin_dirs[fn_name] = plugin.path
                 short_name = fn_name.split(".", 1)[1]
+
+                # Store instance identity and env vars for each function
+                env._plugin_instances[fn_name] = plugin.alias
+                if custom_env:
+                    env._plugin_env_vars[fn_name] = custom_env
+
                 if isinstance(fn_contracts, dict) and short_name in fn_contracts:
-                    env._plugin_contracts[fn_name] = fn_contracts[short_name]
+                    param_contracts = fn_contracts[short_name]
+                    if isinstance(param_contracts, dict):
+                        dynamic, forced = split_contracts(param_contracts)
+                        if dynamic:
+                            env._plugin_contracts[fn_name] = dynamic
+                        if forced:
+                            env._plugin_forced_values[fn_name] = forced
 
         # Trigger lazy loader so user impls in sandbox/lumon/impl/ can override
-        env.trigger_loader(plugin.name)
+        env.trigger_loader(plugin.alias)
 
 
 def interpret(

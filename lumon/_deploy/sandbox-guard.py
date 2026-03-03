@@ -30,9 +30,7 @@ def _strip_quoted(command: str) -> str:
 
 def _split_on_pipes(command: str) -> list[str]:
     """Split command on unquoted pipe operators, preserving quoted content."""
-    unquoted = _strip_quoted(command)
-    # Find pipe positions in the unquoted version, but split the original
-    # We need to map positions back, so instead rebuild by tracking quote state
+    # Split on unquoted pipes by tracking quote state
     segments: list[str] = []
     current: list[str] = []
     in_single = False

@@ -162,9 +162,9 @@ Add the plugin to `../.lumon.json`:
 
 Empty `{}` means all functions enabled with no parameter contracts. You can add contracts to restrict parameter values — see "Contracts" below.
 
-## Contracts
+## Contracts and forced values
 
-The `.lumon.json` file can define contracts that restrict parameter values. Contract violations are interpreter errors — the script never runs.
+The `.lumon.json` file can define contracts that restrict parameter values, or forced values that the system injects automatically. Contract violations are interpreter errors — the script never runs.
 
 ```json
 {
@@ -179,15 +179,32 @@ The `.lumon.json` file can define contracts that restrict parameter values. Cont
 }
 ```
 
-### Contract types
+### Contract classification
 
-- **Text wildcard**: `"https://zillow.com/*"` — glob pattern matched against text args
+Contract values are classified by shape:
+
+**Dynamic** (agent provides, system validates):
+- **Text wildcard**: `"https://zillow.com/*"` — glob pattern matched against text args (has `*`)
 - **Number range**: `[1, 50]` — inclusive range for number args
 - **Enum**: `["fast", "thorough"]` — allowed values for text args
 
+**Forced** (system injects, agent never sees):
+- **Plain string**: `"sk-abc123"` — no `*`, injected at the correct parameter position
+- **Plain number**: `42` — injected
+- **Plain boolean**: `true` / `false` — injected
+
+### How forced values work
+
+When a parameter has a forced value:
+1. The agent sees a reduced signature — forced params are hidden from `lumon browse`
+2. The agent calls with args for visible params only
+3. The system reconstructs full args by interleaving forced values at correct positions
+4. Dynamic contracts are validated on the full args
+5. The implementation body sees all parameters (forced + agent-provided)
+
 ### How agents see contracts
 
-When the agent runs `lumon browse <namespace>`, contracts are shown as annotations:
+When the agent runs `lumon browse <namespace>`, dynamic contracts are shown as annotations and forced params are hidden:
 
 ```
 define browser.search
@@ -196,6 +213,44 @@ define browser.search
     url: text "URL to search"              [contract: https://zillow.com/*]
     max_results: number "Max results" = 10  [contract: 1-50]
   returns: :ok(list<map>) | :error(text)
+```
+
+## Multi-instance plugins
+
+The same plugin directory can be registered multiple times under different aliases with different configs. This lets project authors mount a generic plugin (e.g., `browser`) as multiple specialized instances (e.g., `zillow` and `redfin`).
+
+```json
+{
+  "plugins": {
+    "zillow": {
+      "plugin": "browser",
+      "env": {"API_KEY": "sk-zillow-123"},
+      "search": {"url": "https://zillow.com/*"}
+    },
+    "redfin": {
+      "plugin": "browser",
+      "env": {"API_KEY": "sk-redfin-456"},
+      "search": {"url": "https://redfin.com/*"}
+    }
+  }
+}
+```
+
+- `"plugin"` — source directory name. If absent, the config key is the directory name (backward compatible)
+- `"env"` — static environment variables passed to plugin scripts via subprocess env
+
+## Instance identity and environment variables
+
+Each plugin instance receives environment variables in the subprocess:
+
+- **`LUMON_PLUGIN_INSTANCE`** — the alias name (e.g., `"zillow"`), so scripts can namespace storage
+- **Custom env vars** from `"env"` config — API keys, base URLs, etc.
+
+```python
+import os
+instance = os.environ.get("LUMON_PLUGIN_INSTANCE", "")
+api_key = os.environ.get("API_KEY", "")
+cache_dir = f"/tmp/lumon-{instance}"
 ```
 
 ## How to test

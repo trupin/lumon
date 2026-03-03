@@ -704,15 +704,31 @@ target/
       greet.py
 ```
 
-**`.lumon.json` — plugin access control and contracts**:
+**`.lumon.json` — plugin access control, contracts, and multi-instance**:
 
 ```json
 {
   "plugins": {
-    "browser": {
+    "zillow": {
+      "plugin": "browser",
+      "env": {
+        "API_KEY": "sk-zillow-123",
+        "BASE_URL": "https://api.zillow.com"
+      },
       "search": {
         "url": "https://zillow.com/*",
         "max_results": [1, 50]
+      }
+    },
+    "redfin": {
+      "plugin": "browser",
+      "env": {
+        "API_KEY": "sk-redfin-456",
+        "BASE_URL": "https://api.redfin.com"
+      },
+      "search": {
+        "url": "https://redfin.com/*",
+        "max_results": [1, 20]
       }
     },
     "greet": {}
@@ -720,15 +736,33 @@ target/
 }
 ```
 
-Top-level keys under `"plugins"` are plugin directory names. Only listed plugins are loaded — unlisted ones are ignored. Empty `{}` means all functions enabled with no parameter contracts. Function-level objects map parameter names to contracts. Omitted functions within a listed plugin are enabled with no contracts.
+Top-level keys under `"plugins"` are **aliases** — the namespace the agent sees. Only listed plugins are loaded — unlisted ones are ignored. Empty `{}` means all functions enabled with no parameter contracts.
 
-**Contract types**:
+**Reserved keys** at the plugin instance level:
 
-- **Text wildcard**: `"https://zillow.com/*"` — `fnmatch` glob pattern matched against text args
-- **Number range**: `[min, max]` — inclusive range for number args
-- **Enum**: `["option1", "option2"]` (list of strings) — allowed values for text args
+- `"plugin"` — source directory name in `plugins/`. If absent, the alias is the directory name (backward compatible).
+- `"env"` — static environment variables passed to plugin scripts via subprocess env. Useful for API keys, base URLs, and other config that scripts need but agents shouldn't see.
+
+Everything else is treated as function-level contracts/forced values.
+
+**Multi-instance**: the same plugin directory can be registered multiple times under different aliases with different configs. Each alias gets its own contracts, forced values, and env vars.
+
+**Contract types** — contract values are classified by shape:
+
+- **Dynamic** (agent provides, system validates):
+  - Text wildcard: `"https://zillow.com/*"` — string with `*`, `fnmatch` glob pattern
+  - Number range: `[min, max]` — inclusive range for number args
+  - Enum: `["option1", "option2"]` (list of strings) — allowed values for text args
+- **Forced** (system injects, agent never sees):
+  - Plain string (no `*`): `"sk-abc123"` — injected at the correct position
+  - Plain number: `42` — injected
+  - Plain boolean: `true` / `false` — injected
 
 Contract violations are interpreter errors (halt execution with structured error).
+
+**Forced values**: when a contract value is forced (plain string without `*`, plain number, plain boolean), the parameter is hidden from `lumon browse` output and the agent never provides it. The system injects the forced value at the correct position before contract validation. The implementation body sees all parameters (forced + agent-provided).
+
+**Instance identity and environment variables**: each plugin instance receives a `LUMON_PLUGIN_INSTANCE` environment variable set to the alias name, so scripts can namespace their storage. Custom env vars from the `"env"` config are also merged into the subprocess environment.
 
 **Plugin implementation**: plugin `impl.lumon` files use `plugin.exec(command, args)` to run scripts in the plugin's directory. `plugin.exec` is only callable from inside a plugin implementation — it errors anywhere else.
 
@@ -766,16 +800,18 @@ On exit 0, stdout is parsed as JSON and deserialized into Lumon values (tag obje
 
 Plugin defines and implements are registered at startup, so they participate in step 2. If a user `implement` block in `sandbox/lumon/impl/` exists for a function that also has a plugin impl, the user impl takes precedence (loaded later by the lazy loader).
 
-**Discovery**: `lumon browse` shows plugin namespaces in the index. `lumon browse <ns>` shows the plugin's manifest with contract annotations:
+**Discovery**: `lumon browse` shows plugin aliases in the index. `lumon browse <alias>` shows the plugin's manifest with the alias namespace, dynamic contract annotations, and forced parameters hidden:
 
 ```
-define browser.search
+define zillow.search
   "Search the web"
   takes:
     url: text "URL to search"              [contract: https://zillow.com/*]
     max_results: number "Max results" = 10  [contract: 1-50]
   returns: :ok(list<map>) | :error(text)
 ```
+
+(If `api_key` were a forced parameter, it would not appear in the output above.)
 
 **Security properties**:
 

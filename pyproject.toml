@@ -9,7 +9,7 @@ dependencies = ["lark>=1.3"]
 lumon = "lumon.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest", "pyright"]
+dev = ["pytest", "pyright", "pylint"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -22,6 +22,45 @@ include = ["lumon*"]
 "lumon._spec" = ["*.md"]
 "lumon._deploy" = ["*.md", "*.json", "*.py"]
 "lumon._manifests" = ["*.lumon"]
+
+[tool.pylint.main]
+load-plugins = []
+
+[tool.pylint."messages control"]
+disable = [
+    "missing-module-docstring",
+    "missing-class-docstring",
+    "missing-function-docstring",
+    "too-many-return-statements",
+    "too-many-branches",
+    "too-many-statements",
+    "too-many-locals",
+    "too-many-arguments",
+    "too-many-positional-arguments",
+    "too-many-instance-attributes",
+    "too-few-public-methods",
+    "line-too-long",              # enforced by pyright / formatter
+    "import-outside-toplevel",    # used for circular dep resolution
+    "protected-access",          # internal modules access _fields by design
+    "unnecessary-lambda",        # lambdas used for builtin registration clarity
+    "duplicate-code",            # builtins/evaluator share type-checking patterns
+    "consider-using-f-string",
+    "superfluous-parens",
+    "no-else-break",
+    "no-else-return",
+    "too-many-public-methods",    # lark Transformer has many visit methods
+    "global-statement",           # parser caching pattern
+    "too-many-nested-blocks",     # plugin setup has nested try/for/if
+    "consider-using-with",        # one-shot file reads don't need with
+    "f-string-without-interpolation",
+]
+
+[tool.pylint.format]
+max-line-length = 120
+
+[tool.pylint.basic]
+# sandbox-guard.py is a deployed hook, not a regular module
+module-naming-style = "any"
 
 [tool.pyright]
 venvPath = "."

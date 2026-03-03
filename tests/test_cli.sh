@@ -571,6 +571,183 @@ assert_contains "plugin: unlisted plugin not accessible" \
     "$(run --working-dir "$PLUGIN_UNLISTED_ROOT/sandbox" 'return secret.fn()')"
 
 # ---------------------------------------------------------------------------
+# Multi-instance plugins
+# ---------------------------------------------------------------------------
+
+MULTI_ROOT="$TMPDIR_ROOT/multi_project"
+mkdir -p "$MULTI_ROOT/sandbox/lumon/manifests" "$MULTI_ROOT/plugins/browser"
+
+# Plugin manifest (source namespace: browser)
+cat > "$MULTI_ROOT/plugins/browser/manifest.lumon" <<'EOF'
+define browser.search
+  "Search the web"
+  takes:
+    url: text "URL to search"
+    max_results: number "Max results" = 10
+  returns: text "Results"
+EOF
+
+# Plugin impl
+cat > "$MULTI_ROOT/plugins/browser/impl.lumon" <<'EOF'
+implement browser.search
+  let result = plugin.exec("python3 search.py", {url: url, max_results: max_results})
+  return result
+EOF
+
+# Plugin script that returns instance name + url
+cat > "$MULTI_ROOT/plugins/browser/search.py" <<'PYEOF'
+import json, sys, os
+args = json.load(sys.stdin)
+instance = os.environ.get("LUMON_PLUGIN_INSTANCE", "unknown")
+json.dump(f"{instance}:{args['url']}", sys.stdout)
+PYEOF
+
+# Multi-instance config
+cat > "$MULTI_ROOT/.lumon.json" <<'EOF'
+{
+  "plugins": {
+    "zillow": {
+      "plugin": "browser",
+      "search": {
+        "url": "https://zillow.com/*",
+        "max_results": [1, 50]
+      }
+    },
+    "redfin": {
+      "plugin": "browser",
+      "search": {
+        "url": "https://redfin.com/*",
+        "max_results": [1, 20]
+      }
+    }
+  }
+}
+EOF
+
+# Test: multi-instance browse shows aliases
+assert_contains "multi-instance: browse shows zillow" \
+    "zillow" \
+    "$(cd "$MULTI_ROOT/sandbox" && run browse)"
+
+assert_contains "multi-instance: browse shows redfin" \
+    "redfin" \
+    "$(cd "$MULTI_ROOT/sandbox" && run browse)"
+
+# Test: browse manifest shows alias namespace
+assert_contains "multi-instance: browse manifest shows zillow.search" \
+    "zillow.search" \
+    "$(cd "$MULTI_ROOT/sandbox" && run browse zillow)"
+
+# Test: instance env var passed to script
+assert_eq "multi-instance: instance identity in script" \
+    '{"type": "result", "value": "zillow:https://zillow.com/homes"}' \
+    "$(run --working-dir "$MULTI_ROOT/sandbox" 'return zillow.search("https://zillow.com/homes")')"
+
+assert_eq "multi-instance: redfin instance identity" \
+    '{"type": "result", "value": "redfin:https://redfin.com/homes"}' \
+    "$(run --working-dir "$MULTI_ROOT/sandbox" 'return redfin.search("https://redfin.com/homes")')"
+
+# Test: cross-alias contract isolation
+assert_contains "multi-instance: zillow rejects redfin URL" \
+    '"type": "error"' \
+    "$(run --working-dir "$MULTI_ROOT/sandbox" 'return zillow.search("https://redfin.com/123")')"
+
+# ---------------------------------------------------------------------------
+# Forced parameter values
+# ---------------------------------------------------------------------------
+
+FORCED_ROOT="$TMPDIR_ROOT/forced_project"
+mkdir -p "$FORCED_ROOT/sandbox/lumon/manifests" "$FORCED_ROOT/plugins/api"
+
+cat > "$FORCED_ROOT/plugins/api/manifest.lumon" <<'EOF'
+define api.call
+  "Make an API call"
+  takes:
+    endpoint: text "API endpoint"
+    api_key: text "API key"
+  returns: text "Response"
+EOF
+
+cat > "$FORCED_ROOT/plugins/api/impl.lumon" <<'EOF'
+implement api.call
+  let result = plugin.exec("python3 call.py", {endpoint: endpoint, api_key: api_key})
+  return result
+EOF
+
+cat > "$FORCED_ROOT/plugins/api/call.py" <<'PYEOF'
+import json, sys
+args = json.load(sys.stdin)
+json.dump(f"{args['endpoint']}:{args['api_key']}", sys.stdout)
+PYEOF
+
+# Config with forced api_key
+cat > "$FORCED_ROOT/.lumon.json" <<'EOF'
+{"plugins": {"api": {"call": {"api_key": "sk-secret-123"}}}}
+EOF
+
+# Test: forced value injected (agent provides only endpoint)
+assert_eq "forced: api_key injected" \
+    '{"type": "result", "value": "/users:sk-secret-123"}' \
+    "$(run --working-dir "$FORCED_ROOT/sandbox" 'return api.call("/users")')"
+
+# Test: browse hides forced params
+BROWSE_FORCED="$(cd "$FORCED_ROOT/sandbox" && run browse api)"
+assert_contains "forced: browse shows endpoint" \
+    "endpoint" \
+    "$BROWSE_FORCED"
+
+# api_key should not appear in browse output (it's forced)
+if [[ "$BROWSE_FORCED" == *"api_key"* ]]; then
+    fail "forced: browse hides api_key" "(not contain) api_key" "$BROWSE_FORCED"
+else
+    pass "forced: browse hides api_key"
+fi
+
+# ---------------------------------------------------------------------------
+# Custom env vars
+# ---------------------------------------------------------------------------
+
+ENV_ROOT="$TMPDIR_ROOT/env_project"
+mkdir -p "$ENV_ROOT/sandbox/lumon/manifests" "$ENV_ROOT/plugins/svc"
+
+cat > "$ENV_ROOT/plugins/svc/manifest.lumon" <<'EOF'
+define svc.ping
+  "Ping the service"
+  returns: text "Response"
+EOF
+
+cat > "$ENV_ROOT/plugins/svc/impl.lumon" <<'EOF'
+implement svc.ping
+  let result = plugin.exec("python3 ping.py", {})
+  return result
+EOF
+
+cat > "$ENV_ROOT/plugins/svc/ping.py" <<'PYEOF'
+import json, sys, os
+api_key = os.environ.get("API_KEY", "none")
+base_url = os.environ.get("BASE_URL", "none")
+instance = os.environ.get("LUMON_PLUGIN_INSTANCE", "none")
+json.dump(f"{instance}:{api_key}:{base_url}", sys.stdout)
+PYEOF
+
+cat > "$ENV_ROOT/.lumon.json" <<'EOF'
+{
+  "plugins": {
+    "svc": {
+      "env": {
+        "API_KEY": "sk-test-456",
+        "BASE_URL": "https://api.example.com"
+      }
+    }
+  }
+}
+EOF
+
+assert_eq "env vars: custom env vars passed to script" \
+    '{"type": "result", "value": "svc:sk-test-456:https://api.example.com"}' \
+    "$(run --working-dir "$ENV_ROOT/sandbox" 'return svc.ping()')"
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 

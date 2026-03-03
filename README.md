@@ -57,6 +57,10 @@ uv pip install -e ".[dev]"
 .venv/bin/python -m pyright lumon/
 ```
 
+## Plugins
+
+Lumon supports a plugin system for extensibility. Plugins are self-contained directories that extend the agent's capabilities with external programs (web APIs, databases, browsers). A `.lumon.json` config controls which plugins are loaded and enforces parameter contracts.
+
 ## Documentation
 
 - [Language Specification](docs/spec.md) — full spec (types, operators, control flow, functions, builtins, execution model)
