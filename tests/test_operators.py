@@ -300,3 +300,11 @@ class TestAccessOperators:
     def test_map_in_list_access(self, run):
         r = run('let items = [{name: "a"}, {name: "b"}]\nreturn items[1].name')
         assert r.value == "b"
+
+    def test_map_keyword_dot_access(self, run):
+        """Dot access with a keyword field name like .match (issue #15)."""
+        r = run(
+            'let m = map.set({}, "match", 99)\n'
+            'return m.match'
+        )
+        assert r.value == 99

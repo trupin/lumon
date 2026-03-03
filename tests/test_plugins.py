@@ -1423,3 +1423,86 @@ class TestURLNormalization:
         r = interpret(code, working_dir=wd, plugin_executor=mock_executor)
         assert r["type"] == "error"
         assert "Contract violation" in r["message"]
+
+
+# ---------------------------------------------------------------------------
+# Namespace conflict detection (issue #14)
+# ---------------------------------------------------------------------------
+
+
+class TestNamespaceConflict:
+    """Plugin alias colliding with a disk manifest should raise an error."""
+
+    def test_conflict_raises_error(self, tmp_path: Path) -> None:
+        """Plugin alias matching a disk manifest namespace → error."""
+        wd = make_plugin_project(
+            tmp_path,
+            {"greet": {
+                "manifest.lumon": GREET_MANIFEST,
+                "impl.lumon": GREET_IMPL,
+            }},
+        )
+        # Place a disk manifest under the same namespace as the plugin alias
+        manifest_dir = Path(wd) / "lumon" / "manifests"
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        (manifest_dir / "greet.lumon").write_text(
+            'define greet.hi\n'
+            '  "Say hi"\n'
+            '  returns: text "greeting"\n'
+        )
+
+        r = interpret("return 1", working_dir=wd, plugin_executor=mock_executor)
+        assert r["type"] == "error"
+        assert "Namespace conflict" in r["message"]
+        assert "greet" in r["message"]
+
+    def test_no_conflict_when_disjoint(self, tmp_path: Path) -> None:
+        """No error when plugin alias and disk manifests don't overlap."""
+        wd = make_plugin_project(
+            tmp_path,
+            {"greet": {
+                "manifest.lumon": GREET_MANIFEST,
+                "impl.lumon": GREET_IMPL,
+            }},
+        )
+        # Place a disk manifest under a *different* namespace
+        manifest_dir = Path(wd) / "lumon" / "manifests"
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        (manifest_dir / "other.lumon").write_text(
+            'define other.fn\n'
+            '  "Other fn"\n'
+            '  returns: text "result"\n'
+        )
+
+        r = interpret(
+            'return greet.hello("World")',
+            working_dir=wd,
+            plugin_executor=mock_executor,
+        )
+        assert r["type"] == "result"
+
+    def test_conflict_with_aliased_plugin(self, tmp_path: Path) -> None:
+        """Alias (not source dir name) is checked against disk manifests."""
+        wd = make_plugin_project(
+            tmp_path,
+            {"browser": {
+                "manifest.lumon": SEARCH_MANIFEST,
+                "impl.lumon": SEARCH_IMPL,
+            }},
+            config={"plugins": {
+                "zillow": {"plugin": "browser"},
+            }},
+        )
+        # Conflict is on the alias "zillow", not the source dir "browser"
+        manifest_dir = Path(wd) / "lumon" / "manifests"
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        (manifest_dir / "zillow.lumon").write_text(
+            'define zillow.fn\n'
+            '  "Zillow fn"\n'
+            '  returns: text "result"\n'
+        )
+
+        r = interpret("return 1", working_dir=wd, plugin_executor=mock_executor)
+        assert r["type"] == "error"
+        assert "Namespace conflict" in r["message"]
+        assert "zillow" in r["message"]

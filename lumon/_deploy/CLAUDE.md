@@ -154,6 +154,7 @@ Maintain a file called `ISSUES.md` at the root of the `sandbox/` directory. Use 
 - **Type**: plugin-request | bug | capability-gap
 - **Status**: open
 - **Description**: What you need and why
+- **Example**: Lumon code that should work but doesn't (see below)
 - **Proposal**: How it could be solved
 - **Security considerations**: Risks and mitigations (required for plugin requests)
 
@@ -163,6 +164,52 @@ Maintain a file called `ISSUES.md` at the root of the `sandbox/` directory. Use 
 - **Type**: ...
 - **Status**: fixed
 - **Resolution**: What was done
+```
+
+### Always append new issues at the end
+
+When adding a new issue, always append it **at the end of the Open section** (just before the `## Fixed` heading). Never insert issues at the top or in the middle — the ordering serves as a chronological record and makes it easy for developers to see what's new.
+
+### Include Lumon examples
+
+Every issue **must** include an **Example** field with concrete Lumon code that demonstrates the problem. Show what you tried (or would try) and what goes wrong. This helps developers reproduce and understand the issue immediately.
+
+For **bugs**, show the code that fails and the error you got:
+
+```markdown
+- **Example**:
+  ```lumon
+  let result = text.split("a,b,c", ",")
+  return list.length(result)
+  ```
+  Expected: `{"type": "result", "value": 3}`
+  Got: `{"type": "error", "message": "text.split: expected 1 argument, got 2"}`
+```
+
+For **plugin requests**, show the code you wish you could write:
+
+```markdown
+- **Example**:
+  ```lumon
+  let response = slack.send("general", "Deployment complete")
+  match response
+    :ok(_) -> return "sent"
+    :error(m) -> return "failed: " + m
+  ```
+  This code cannot run because no `slack` namespace exists.
+```
+
+For **capability gaps**, show the workaround you're stuck on:
+
+```markdown
+- **Example**:
+  ```lumon
+  -- I need to parse JSON from a file, but there's no json.parse built-in
+  let raw = io.read("data.json")
+  match raw
+    :ok(content) -> return ???  -- no way to convert text to a map
+    :error(m) -> return :error(m)
+  ```
 ```
 
 ### When to write an issue

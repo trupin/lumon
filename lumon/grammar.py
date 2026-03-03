@@ -53,7 +53,7 @@ impl_body: (impl_statement _NL)* impl_statement?
            | postfix_expr
 
 ?postfix_expr: primary postfix_access*
-?postfix_access: "." IDENT -> dot_access
+?postfix_access: "." _ident_or_kw -> dot_access
                | "[" expression "]" -> index_access
 
 // === Primary expressions ===
@@ -81,8 +81,13 @@ impl_body: (impl_statement _NL)* impl_statement?
 function_call: namespace_path "(" arguments? ")"
              | IDENT "(" arguments? ")" -> local_call
 arguments: expression ("," expression)*
-namespace_path: IDENT ("." (IDENT | FN_KW))+
+namespace_path: IDENT ("." _ident_or_kw)+
 namespace_ref: namespace_path
+
+!_ident_or_kw: IDENT | FN_KW | "let" | "define" | "implement" | "return"
+             | "match" | "if" | "else" | "with" | "then" | "ask" | "spawn"
+             | "async" | "await" | "await_all" | "not" | "and" | "or"
+             | "true" | "false" | "none"
 
 // === Literals ===
 tag_literal: ":" IDENT ("(" expression ")")?

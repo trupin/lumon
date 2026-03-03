@@ -762,6 +762,55 @@ assert_eq "env vars: custom env vars passed to script" \
     "$(run --working-dir "$ENV_ROOT/sandbox" 'return svc.ping()')"
 
 # ---------------------------------------------------------------------------
+# Namespace conflict (issue #14)
+# ---------------------------------------------------------------------------
+
+CONFLICT_ROOT="$TMPDIR_ROOT/conflict_project"
+mkdir -p "$CONFLICT_ROOT/sandbox/lumon/manifests" "$CONFLICT_ROOT/plugins/ext"
+
+# Plugin manifest
+cat > "$CONFLICT_ROOT/plugins/ext/manifest.lumon" <<'EOF'
+define ext.greet
+  "Greet someone"
+  takes:
+    name: text "Name"
+  returns: text "Greeting"
+EOF
+
+# Plugin impl
+cat > "$CONFLICT_ROOT/plugins/ext/impl.lumon" <<'EOF'
+implement ext.greet
+  let result = plugin.exec("echo hi", {name: name})
+  return result
+EOF
+
+# .lumon.json enabling the plugin
+cat > "$CONFLICT_ROOT/.lumon.json" <<'EOF'
+{"plugins": {"ext": {}}}
+EOF
+
+# Conflicting disk manifest under the same namespace
+cat > "$CONFLICT_ROOT/sandbox/lumon/manifests/ext.lumon" <<'EOF'
+define ext.other
+  "Other fn"
+  returns: text "result"
+EOF
+
+assert_contains "namespace conflict: error on collision" \
+    "Namespace conflict" \
+    "$(run --working-dir "$CONFLICT_ROOT/sandbox" 'return 1')"
+
+# browse specific namespace should also detect conflict
+assert_contains "namespace conflict: browse ext detects conflict" \
+    "Namespace conflict" \
+    "$(cd "$CONFLICT_ROOT/sandbox" && run browse ext 2>&1 || true)"
+
+# browse index should also detect conflict
+assert_contains "namespace conflict: browse index detects conflict" \
+    "Namespace conflict" \
+    "$(cd "$CONFLICT_ROOT/sandbox" && run browse 2>&1 || true)"
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 

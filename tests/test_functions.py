@@ -458,6 +458,54 @@ class TestAutoLoading:
             result = interpret('return greet.hello("World")', working_dir=wd)
             assert result == {"type": "result", "value": "Hello, World"}
 
+    def test_keyword_as_function_name(self):
+        """Keywords can be used as function names in namespace paths (issue #15)."""
+        with tempfile.TemporaryDirectory() as wd:
+            manifests = os.path.join(wd, "lumon", "manifests")
+            impl = os.path.join(wd, "lumon", "impl")
+            os.makedirs(manifests)
+            os.makedirs(impl)
+
+            with open(os.path.join(manifests, "ns.lumon"), "w") as f:
+                f.write(
+                    'define ns.none\n'
+                    '  "Return none"\n'
+                    '  returns: text "Always empty"\n'
+                )
+            with open(os.path.join(impl, "ns.lumon"), "w") as f:
+                f.write(
+                    'implement ns.none\n'
+                    '  return "ok"\n'
+                )
+
+            result = interpret('return ns.none()', working_dir=wd)
+            assert result == {"type": "result", "value": "ok"}
+
+    def test_keyword_match_as_function_name(self):
+        """Keyword 'match' can be used as function name in namespace paths (issue #15)."""
+        with tempfile.TemporaryDirectory() as wd:
+            manifests = os.path.join(wd, "lumon", "manifests")
+            impl = os.path.join(wd, "lumon", "impl")
+            os.makedirs(manifests)
+            os.makedirs(impl)
+
+            with open(os.path.join(manifests, "ns.lumon"), "w") as f:
+                f.write(
+                    'define ns.match\n'
+                    '  "Match something"\n'
+                    '  takes:\n'
+                    '    x: number "Input"\n'
+                    '  returns: number "Result"\n'
+                )
+            with open(os.path.join(impl, "ns.lumon"), "w") as f:
+                f.write(
+                    'implement ns.match\n'
+                    '  return x * 2\n'
+                )
+
+            result = interpret('return ns.match(5)', working_dir=wd)
+            assert result == {"type": "result", "value": 10}
+
     def test_undefined_function_no_files_on_disk(self):
         """Without files on disk, undefined function error is raised."""
         with tempfile.TemporaryDirectory() as wd:

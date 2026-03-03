@@ -230,6 +230,16 @@ def cmd_browse(args: argparse.Namespace) -> int:
         # Try disk first, then bundled manifests, then plugins
         path = Path("lumon") / "manifests" / f"{namespace}.lumon"
         if path.exists():
+            # Check for plugin alias collision before returning disk manifest
+            plugin_ns, _cfg = _discover_plugin_namespaces()
+            if namespace in plugin_ns:
+                print(
+                    f"Namespace conflict: '{namespace}' is both a plugin alias "
+                    f"and a disk manifest (lumon/manifests/{namespace}.lumon). "
+                    f"Remove one to avoid ambiguity.",
+                    file=sys.stderr,
+                )
+                return 1
             print(path.read_text(encoding="utf-8"), end="")
             return 0
         bundled = _bundled_manifest(f"{namespace}.lumon")
@@ -270,9 +280,23 @@ def cmd_browse(args: argparse.Namespace) -> int:
         disk_index = Path("lumon") / "index.lumon"
         if disk_index.exists():
             parts.append(disk_index.read_text(encoding="utf-8").rstrip("\n"))
-        # Append plugin namespaces
+        # Append plugin namespaces (check for disk conflicts first)
         plugin_ns, _config = _discover_plugin_namespaces()
+        disk_ns: set[str] = set()
+        manifests_dir = Path("lumon") / "manifests"
+        if manifests_dir.is_dir():
+            for fname in os.listdir(manifests_dir):
+                if fname.endswith(".lumon"):
+                    disk_ns.add(fname[:-6])
         for ns in plugin_ns:
+            if ns in disk_ns:
+                print(
+                    f"Namespace conflict: '{ns}' is both a plugin alias "
+                    f"and a disk manifest (lumon/manifests/{ns}.lumon). "
+                    f"Remove one to avoid ambiguity.",
+                    file=sys.stderr,
+                )
+                return 1
             parts.append(f"{ns} -- plugin")
         if not parts:
             print("error: namespace index not found (lumon/index.lumon)", file=sys.stderr)

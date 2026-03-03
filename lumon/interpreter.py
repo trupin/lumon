@@ -51,6 +51,21 @@ def _setup_plugins(
     if not plugins:
         return
 
+    # Detect namespace conflicts between plugins and disk manifests
+    manifest_dir = os.path.join(working_dir, "lumon", "manifests")
+    disk_namespaces: set[str] = set()
+    if os.path.isdir(manifest_dir):
+        for fname in os.listdir(manifest_dir):
+            if fname.endswith(".lumon"):
+                disk_namespaces.add(fname[:-6])  # strip .lumon
+    for plugin in plugins:
+        if plugin.alias in disk_namespaces:
+            raise LumonError(
+                f"Namespace conflict: '{plugin.alias}' is both a plugin alias "
+                f"and a disk manifest (lumon/manifests/{plugin.alias}.lumon). "
+                f"Remove one to avoid ambiguity."
+            )
+
     if plugin_executor is not None:
         env._plugin_executor = plugin_executor
 
