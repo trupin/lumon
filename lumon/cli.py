@@ -420,11 +420,14 @@ def main() -> None:
     if sys.argv[1] not in _SUBCOMMANDS and not sys.argv[1].startswith("-"):
         # Positional arg: inline code or a file path
         arg = sys.argv[1]
-        path = Path(arg)
-        if path.exists() and path.suffix == ".lumon":
-            code = path.read_text(encoding="utf-8")
-        else:
+        if "\n" in arg or len(arg) > 255:
             code = arg
+        else:
+            path = Path(arg)
+            if path.exists() and path.suffix == ".lumon":
+                code = path.read_text(encoding="utf-8")
+            else:
+                code = arg
         sys.exit(cmd_run_code(code))
 
     # Subcommand dispatch via argparse

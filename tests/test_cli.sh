@@ -66,6 +66,20 @@ assert_eq "inline: tag with payload" \
     "$(run 'return :error("oops")')"
 
 # ---------------------------------------------------------------------------
+# Long inline code (issue #12 — no OSError on strings exceeding path limit)
+# ---------------------------------------------------------------------------
+
+LONG_CODE="return 1 + $(python3 -c "print(' + '.join(['1'] * 300))")"
+assert_eq "inline: long string no OSError" \
+    '{"type": "result", "value": 301}' \
+    "$(run "$LONG_CODE")"
+
+# Code with newlines should be treated as inline, not a file path
+assert_eq "inline: multiline string" \
+    '{"type": "result", "value": 3}' \
+    "$(run "$(printf 'let x = 1\nlet y = 2\nreturn x + y')")"
+
+# ---------------------------------------------------------------------------
 # Stdin
 # ---------------------------------------------------------------------------
 

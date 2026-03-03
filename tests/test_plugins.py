@@ -1313,3 +1313,113 @@ define browser.search
             assert "browser" not in namespaces
         finally:
             os.chdir(orig)
+
+
+# ---------------------------------------------------------------------------
+# URL normalization in contracts (issue #13)
+# ---------------------------------------------------------------------------
+
+
+class TestURLNormalization:
+    """Bare domain URLs should match wildcard contracts like https://example.com/*."""
+
+    def test_normalize_url_bare_domain(self) -> None:
+        """Bare domain gets trailing slash appended."""
+        from lumon.plugins import _normalize_url
+
+        assert _normalize_url("https://example.com") == "https://example.com/"
+
+    def test_normalize_url_with_trailing_slash(self) -> None:
+        """URL already ending with / is unchanged."""
+        from lumon.plugins import _normalize_url
+
+        assert _normalize_url("https://example.com/") == "https://example.com/"
+
+    def test_normalize_url_with_path(self) -> None:
+        """URL with a path component is unchanged."""
+        from lumon.plugins import _normalize_url
+
+        assert _normalize_url("https://example.com/homes") == "https://example.com/homes"
+
+    def test_normalize_url_non_url_string(self) -> None:
+        """Non-URL strings are returned unchanged."""
+        from lumon.plugins import _normalize_url
+
+        assert _normalize_url("just a string") == "just a string"
+        assert _normalize_url("/local/path") == "/local/path"
+
+    def test_normalize_url_http_scheme(self) -> None:
+        """http:// scheme is also normalized."""
+        from lumon.plugins import _normalize_url
+
+        assert _normalize_url("http://example.com") == "http://example.com/"
+
+    def test_normalize_url_port_bare_domain(self) -> None:
+        """Bare domain with port gets trailing slash."""
+        from lumon.plugins import _normalize_url
+
+        assert _normalize_url("https://example.com:8080") == "https://example.com:8080/"
+
+    def test_normalize_url_query_on_bare_domain(self) -> None:
+        """Query string on bare domain: slash inserted before '?'."""
+        from lumon.plugins import _normalize_url
+
+        assert _normalize_url("https://example.com?q=1") == "https://example.com/?q=1"
+
+    def test_normalize_url_fragment_on_bare_domain(self) -> None:
+        """Fragment on bare domain: slash inserted before '#'."""
+        from lumon.plugins import _normalize_url
+
+        assert _normalize_url("https://example.com#section") == "https://example.com/#section"
+
+    def test_bare_domain_matches_wildcard_contract(self, tmp_path: Path) -> None:
+        """Bare domain matches https://example.com/* contract (issue #13)."""
+
+        def executor(command: str, args: dict[str, object], plugin_dir: str, instance: str = "") -> object:
+            return "ok"
+
+        wd = make_plugin_project(
+            tmp_path,
+            {"browser": {
+                "manifest.lumon": SEARCH_MANIFEST,
+                "impl.lumon": SEARCH_IMPL,
+            }},
+            config={"plugins": {"browser": {"search": {"url": "https://example.com/*"}}}},
+        )
+        # Bare domain (no trailing slash) should now match
+        code = 'return browser.search("https://example.com")'
+        r = interpret(code, working_dir=wd, plugin_executor=executor)
+        assert r["type"] == "result"
+
+    def test_trailing_slash_still_matches(self, tmp_path: Path) -> None:
+        """Domain with trailing slash still matches the wildcard contract."""
+
+        def executor(command: str, args: dict[str, object], plugin_dir: str, instance: str = "") -> object:
+            return "ok"
+
+        wd = make_plugin_project(
+            tmp_path,
+            {"browser": {
+                "manifest.lumon": SEARCH_MANIFEST,
+                "impl.lumon": SEARCH_IMPL,
+            }},
+            config={"plugins": {"browser": {"search": {"url": "https://example.com/*"}}}},
+        )
+        code = 'return browser.search("https://example.com/")'
+        r = interpret(code, working_dir=wd, plugin_executor=executor)
+        assert r["type"] == "result"
+
+    def test_mismatched_domain_still_rejected(self, tmp_path: Path) -> None:
+        """A non-matching bare domain is still rejected after normalization."""
+        wd = make_plugin_project(
+            tmp_path,
+            {"browser": {
+                "manifest.lumon": SEARCH_MANIFEST,
+                "impl.lumon": SEARCH_IMPL,
+            }},
+            config={"plugins": {"browser": {"search": {"url": "https://example.com/*"}}}},
+        )
+        code = 'return browser.search("https://evil.com")'
+        r = interpret(code, working_dir=wd, plugin_executor=mock_executor)
+        assert r["type"] == "error"
+        assert "Contract violation" in r["message"]

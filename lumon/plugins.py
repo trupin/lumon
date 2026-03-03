@@ -122,6 +122,33 @@ def discover_plugins(working_dir: str, config: dict) -> list[PluginInfo]:
     return result
 
 
+def _normalize_url(value: str) -> str:
+    """Append trailing slash to bare HTTP(S) domain URLs.
+
+    Browsers treat ``https://example.com`` and ``https://example.com/``
+    identically.  Normalising before ``fnmatch`` ensures that a wildcard
+    contract like ``https://example.com/*`` matches both forms.
+    """
+    if not (value.startswith("http://") or value.startswith("https://")):
+        return value
+    after_scheme = value.split("//", 1)
+    if len(after_scheme) < 2:
+        return value
+    rest = after_scheme[1]
+    # Strip query and fragment before checking for a path separator
+    host_part = rest.split("?", 1)[0].split("#", 1)[0]
+    if "/" not in host_part:
+        # Insert slash before query/fragment, or append at end
+        insert_pos = len(value)
+        for delim in ("?", "#"):
+            idx = rest.find(delim)
+            if idx != -1:
+                insert_pos = len(after_scheme[0]) + 2 + idx
+                break
+        return value[:insert_pos] + "/" + value[insert_pos:]
+    return value
+
+
 def validate_contracts(
     name: str, args: tuple[object, ...], define: DefineBlock, contracts: dict
 ) -> None:
@@ -152,7 +179,8 @@ def validate_contracts(
                     f"Contract violation in {name}: parameter '{param.name}' "
                     f"expected text, got {type(value).__name__}"
                 )
-            if not fnmatch.fnmatch(value, contract):
+            normalized = _normalize_url(value)
+            if not fnmatch.fnmatch(normalized, contract):
                 raise LumonError(
                     f"Contract violation in {name}: parameter '{param.name}' "
                     f'value "{value}" does not match pattern "{contract}"'
