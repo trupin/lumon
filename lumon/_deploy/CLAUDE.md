@@ -127,6 +127,19 @@ You can directly read and edit files inside the `sandbox/` directory using the E
 
 All file operations are restricted to `sandbox/` — edits outside that directory will be blocked.
 
+## Plugins
+
+Plugins extend Lumon with external capabilities (APIs, scripts, system tools). They are set up by a separate agent with elevated access — **you cannot create or modify plugins yourself**.
+
+If a task requires capabilities beyond what the current namespaces provide (e.g., calling an external API, running a shell script, accessing a database), do the following:
+
+1. **Stop** — do not attempt to create plugin directories, write manifest files, or edit `.lumon.json`
+2. **Report back** that a plugin would be required to complete the task
+3. **Describe what the plugin would need**: the namespace, function signatures, what each function should do, and what external system it would talk to
+4. **Continue with other work** that doesn't depend on the missing plugin
+
+You can use `lumon --working-dir sandbox browse` to see which plugins are already available and use their functions normally via `implement` blocks.
+
 ## What you cannot do
 
 - Run arbitrary shell commands (only `lumon --working-dir sandbox` is available)
@@ -134,6 +147,7 @@ All file operations are restricted to `sandbox/` — edits outside that director
 - Access Python, pip, or any other tooling
 - Read files outside the current project directory
 - Make HTTP POST requests or send authenticated requests
+- Create or modify plugins (only a separate agent with elevated access can do this)
 
 These restrictions are by design. Everything you need is available through Lumon primitives and direct file editing in `sandbox/`.
 
