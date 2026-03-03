@@ -513,14 +513,14 @@ def _call_user_function(
                     )
 
         # Set plugin context so plugin.exec works inside plugin impls
-        prev_plugin_dir = env._active_plugin_dir
-        prev_plugin_instance = env._active_plugin_instance
-        prev_plugin_env = env._active_plugin_env
+        # Uses shared mutable dict so nested calls (implement → plugin) see updates
+        prev_plugin_dir = env._active_plugin["dir"]
+        prev_plugin_instance = env._active_plugin["instance"]
+        prev_plugin_env = env._active_plugin["env"]
         if plugin_dir is not None:
-            env._active_plugin_dir = plugin_dir
-            # Set instance identity (alias name) and env vars for this plugin call
-            env._active_plugin_instance = env._plugin_instances.get(name)
-            env._active_plugin_env = env._plugin_env_vars.get(name) or None
+            env._active_plugin["dir"] = plugin_dir
+            env._active_plugin["instance"] = env._plugin_instances.get(name)
+            env._active_plugin["env"] = env._plugin_env_vars.get(name) or None
 
         try:
             result = None
@@ -531,9 +531,9 @@ def _call_user_function(
             return rs.value
         finally:
             if plugin_dir is not None:
-                env._active_plugin_dir = prev_plugin_dir
-                env._active_plugin_instance = prev_plugin_instance
-                env._active_plugin_env = prev_plugin_env
+                env._active_plugin["dir"] = prev_plugin_dir
+                env._active_plugin["instance"] = prev_plugin_instance
+                env._active_plugin["env"] = prev_plugin_env
     except LumonError as e:
         if e.function is None:
             e.function = name

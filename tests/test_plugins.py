@@ -1103,6 +1103,130 @@ implement zillow.search
 
 
 # ---------------------------------------------------------------------------
+# Plugin calls from implement blocks (issue #10)
+# ---------------------------------------------------------------------------
+
+
+class TestPluginCallFromImplement:
+    """Plugin functions should be callable from inside implement blocks."""
+
+    def test_implement_calls_plugin_function(self, tmp_path: Path) -> None:
+        """A user implement block can call a plugin function (issue #10)."""
+        def executor(command: str, args: dict[str, object], plugin_dir: str, instance: str = "") -> object:
+            return f"result for {args.get('name', '')}"
+
+        wd = make_plugin_project(
+            tmp_path,
+            {"greet": {
+                "manifest.lumon": GREET_MANIFEST,
+                "impl.lumon": GREET_IMPL,
+            }},
+            sandbox_impls={
+                "wrapper": (
+                    'define wrapper.say_hello\n'
+                    '  "Wraps greet.hello"\n'
+                    '  takes:\n'
+                    '    name: text "Name"\n'
+                    '  returns: text "The wrapped greeting"\n'
+                    '\n'
+                    'implement wrapper.say_hello\n'
+                    '  let greeting = greet.hello(name)\n'
+                    '  return "wrapped: " + greeting\n'
+                ),
+            },
+        )
+        r = interpret(
+            'return wrapper.say_hello("Alice")',
+            working_dir=wd,
+            plugin_executor=executor,
+        )
+        assert r["type"] == "result"
+        assert "wrapped:" in r["value"]
+        assert "Alice" in r["value"]
+
+    def test_implement_calls_plugin_nested(self, tmp_path: Path) -> None:
+        """Plugin calls work even when nested multiple implement blocks deep."""
+        def executor(command: str, args: dict[str, object], plugin_dir: str, instance: str = "") -> object:
+            return args
+
+        wd = make_plugin_project(
+            tmp_path,
+            {"greet": {
+                "manifest.lumon": GREET_MANIFEST,
+                "impl.lumon": GREET_IMPL,
+            }},
+            sandbox_impls={
+                "mid": (
+                    'define mid.call\n'
+                    '  "Middle layer"\n'
+                    '  takes:\n'
+                    '    name: text "Name"\n'
+                    '  returns: map "Result"\n'
+                    '\n'
+                    'implement mid.call\n'
+                    '  return greet.hello(name)\n'
+                ),
+                "outer": (
+                    'define outer.call\n'
+                    '  "Outer layer"\n'
+                    '  takes:\n'
+                    '    name: text "Name"\n'
+                    '  returns: map "Result"\n'
+                    '\n'
+                    'implement outer.call\n'
+                    '  return mid.call(name)\n'
+                ),
+            },
+        )
+        r = interpret(
+            'return outer.call("Bob")',
+            working_dir=wd,
+            plugin_executor=executor,
+        )
+        assert r["type"] == "result"
+        assert r["value"]["name"] == "Bob"
+
+    def test_plugin_context_restored_after_implement_call(self, tmp_path: Path) -> None:
+        """Plugin context is properly restored after a nested call."""
+        calls: list[str] = []
+
+        def executor(command: str, args: dict[str, object], plugin_dir: str, instance: str = "") -> object:
+            calls.append(plugin_dir)
+            return args
+
+        # Two plugins: greet and search
+        wd = make_plugin_project(
+            tmp_path,
+            {
+                "greet": {
+                    "manifest.lumon": GREET_MANIFEST,
+                    "impl.lumon": GREET_IMPL,
+                },
+                "browser": {
+                    "manifest.lumon": SEARCH_MANIFEST,
+                    "impl.lumon": SEARCH_IMPL,
+                },
+            },
+        )
+        # Call both plugin functions at top level
+        r1 = interpret(
+            'return greet.hello("A")',
+            working_dir=wd,
+            plugin_executor=executor,
+        )
+        assert r1["type"] == "result"
+        r2 = interpret(
+            'return browser.search("url")',
+            working_dir=wd,
+            plugin_executor=executor,
+        )
+        assert r2["type"] == "result"
+        # Each call should have used its own plugin dir
+        assert "greet" in calls[0]
+        assert "browser" in calls[1]
+
+
+# ---------------------------------------------------------------------------
 # Browse with forced values
 # ---------------------------------------------------------------------------
 

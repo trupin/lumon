@@ -34,9 +34,11 @@ class Environment:
         self._plugin_instances: dict[str, str] = {} if parent is None else parent._plugin_instances
         self._plugin_env_vars: dict[str, dict[str, str]] = {} if parent is None else parent._plugin_env_vars
         self._plugin_executor: Callable[..., object] | None = None if parent is None else parent._plugin_executor
-        self._active_plugin_dir: str | None = None if parent is None else parent._active_plugin_dir
-        self._active_plugin_instance: str | None = None if parent is None else parent._active_plugin_instance
-        self._active_plugin_env: dict[str, str] | None = None if parent is None else parent._active_plugin_env
+        # Active plugin state — shared mutable dict so nested calls see updates
+        # Keys: "dir" (str|None), "instance" (str|None), "env" (dict|None)
+        self._active_plugin: dict[str, object] = (
+            {"dir": None, "instance": None, "env": None} if parent is None else parent._active_plugin
+        )
         # Working directory (shared)
         self._working_dir: str | None = None if parent is None else parent._working_dir
 
@@ -74,9 +76,7 @@ class Environment:
         snap._plugin_instances = self._plugin_instances
         snap._plugin_env_vars = self._plugin_env_vars
         snap._plugin_executor = self._plugin_executor
-        snap._active_plugin_dir = self._active_plugin_dir
-        snap._active_plugin_instance = self._active_plugin_instance
-        snap._active_plugin_env = self._active_plugin_env
+        snap._active_plugin = self._active_plugin
         snap._working_dir = self._working_dir
         return snap
 

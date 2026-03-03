@@ -229,13 +229,16 @@ def register_builtins(
 
     # --- plugin.* ---
     def _plugin_exec(command: str, args: object = None) -> object:
-        if env._active_plugin_dir is None:
+        plugin_dir = env._active_plugin["dir"]
+        if not isinstance(plugin_dir, str):
             raise LumonError("plugin.exec can only be called from a plugin implementation")
+        instance = env._active_plugin["instance"]
+        plugin_env = env._active_plugin["env"]
         return exec_plugin_script(
-            env._active_plugin_dir, command, args,
+            plugin_dir, command, args,
             executor=env._plugin_executor,
-            instance=env._active_plugin_instance or "",
-            env_vars=env._active_plugin_env,
+            instance=instance if isinstance(instance, str) else "",
+            env_vars=plugin_env if isinstance(plugin_env, dict) else None,
         )
 
     env.register_builtin("plugin.exec", _plugin_exec)
