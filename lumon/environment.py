@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from lumon.ast_nodes import DefineBlock, ImplementBlock
 from lumon.errors import LumonError
 
 
@@ -17,6 +18,7 @@ class Environment:
         self._defines: dict[str, object] = {} if parent is None else parent._defines
         self._implements: dict[str, object] = {} if parent is None else parent._implements
         self._builtins: dict[str, object] = {} if parent is None else parent._builtins
+        self._bridges: dict[str, str] = {} if parent is None else parent._bridges
         self._namespace_prefixes: set[str] = set() if parent is None else parent._namespace_prefixes
         self._call_depth = 0 if parent is None else parent._call_depth
         self._max_call_depth = 100
@@ -26,6 +28,10 @@ class Environment:
         # Lazy loader for auto-loading namespaces from disk (shared)
         self._loader: Callable[[str], None] | None = None if parent is None else parent._loader
         self._loading: set[str] = set() if parent is None else parent._loading
+        # Bridge executor for test injection (shared)
+        self._bridge_executor: Callable[..., object] | None = None if parent is None else parent._bridge_executor
+        # Working directory for bridge subprocess cwd (shared)
+        self._working_dir: str | None = None if parent is None else parent._working_dir
 
     def get(self, name: str) -> object:
         if name in self._bindings:
@@ -48,6 +54,7 @@ class Environment:
         snap._defines = self._defines
         snap._implements = self._implements
         snap._builtins = self._builtins
+        snap._bridges = self._bridges
         snap._namespace_prefixes = self._namespace_prefixes
         snap._call_depth = self._call_depth
         snap._max_call_depth = self._max_call_depth
@@ -55,6 +62,8 @@ class Environment:
         snap._response_queue = self._response_queue  # shared mutable list
         snap._loader = self._loader
         snap._loading = self._loading
+        snap._bridge_executor = self._bridge_executor
+        snap._working_dir = self._working_dir
         return snap
 
     def consume_response(self) -> tuple[object] | None:
@@ -73,44 +82,57 @@ class Environment:
         self._namespace_prefixes.add(prefix)
 
     def register_define(self, node: object) -> None:
-        from lumon.ast_nodes import DefineBlock
         assert isinstance(node, DefineBlock)
         self._defines[node.namespace_path] = node
         prefix = node.namespace_path.split(".")[0]
         self._namespace_prefixes.add(prefix)
 
     def register_implement(self, node: object) -> None:
-        from lumon.ast_nodes import ImplementBlock
         assert isinstance(node, ImplementBlock)
         self._implements[node.namespace_path] = node
+
+    def register_bridge(self, name: str, run_cmd: str) -> None:
+        self._bridges[name] = run_cmd
+        prefix = name.split(".")[0]
+        self._namespace_prefixes.add(prefix)
 
     def set_loader(self, loader: Callable[[str], None]) -> None:
         """Set the lazy loader callback for auto-loading namespaces from disk."""
         self._loader = loader
 
+    def trigger_loader(self, namespace: str) -> None:
+        """Trigger the lazy loader for a namespace if not already loading."""
+        if self._loader is not None and namespace not in self._loading:
+            self._loading.add(namespace)
+            try:
+                self._loader(namespace)
+            finally:
+                self._loading.discard(namespace)
+
     def is_namespace(self, name: str) -> bool:
         return name in self._namespace_prefixes
 
     def resolve_function(self, name: str) -> tuple[str, ...]:
-        """Resolve a namespace function. Returns ('builtin', callable) or ('user', define, implement)."""
+        """Resolve a namespace function.
+
+        Returns ('builtin', callable), ('user', define, implement),
+        or ('bridge', define, run_cmd).
+        """
         if name in self._builtins:
             return ("builtin", self._builtins[name])  # type: ignore[return-value]
         if name in self._implements:
             define = self._defines.get(name)
             return ("user", define, self._implements[name])  # type: ignore[return-value]
         # Try lazy-loading the namespace from disk
-        if self._loader is not None:
-            ns = name.split(".")[0]
-            if ns not in self._loading:
-                self._loading.add(ns)
-                try:
-                    self._loader(ns)
-                finally:
-                    self._loading.discard(ns)
-                # Retry after loading
-                if name in self._implements:
-                    define = self._defines.get(name)
-                    return ("user", define, self._implements[name])  # type: ignore[return-value]
+        ns = name.split(".")[0]
+        self.trigger_loader(ns)
+        if name in self._implements:
+            define = self._defines.get(name)
+            return ("user", define, self._implements[name])  # type: ignore[return-value]
+        # Check bridges after user-defined, before fail
+        if name in self._bridges:
+            define = self._defines.get(name)
+            return ("bridge", define, self._bridges[name])  # type: ignore[return-value]
         raise LumonError(f"Undefined function: {name}")
 
     def push_call(self, name: str) -> None:

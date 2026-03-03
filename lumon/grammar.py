@@ -192,7 +192,7 @@ COMMENT: /--[^\n]*/
 %declare _INDENT _DEDENT
 _NL: /(\r?\n[\t ]*)+/
 
-IDENT: /(?!(?:let|define|implement|takes|returns|return|match|if|else|with|then|ask|spawn|fork|context|expects|async|await|await_all|assert|true|false|none|and|or|not)\b)[a-zA-Z_][a-zA-Z0-9_]*/
+IDENT: /(?!(?:let|define|implement|bridge|takes|returns|return|match|if|else|with|then|ask|spawn|fork|context|expects|async|await|await_all|assert|true|false|none|and|or|not)\b)[a-zA-Z_][a-zA-Z0-9_]*/
 NUMBER: /\d+(\.\d+)?/
 ESCAPED_STRING: "\"" /([^\"\\]|\\[\\\"nrt]|\\\([^)]*\))*/ "\""
 """

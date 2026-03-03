@@ -715,7 +715,7 @@ Each function referenced in a `bridge` block must have a corresponding `define` 
 }
 ```
 
-Written to the plugin's stdin as a single line, followed by EOF (stdin close).
+Written to the plugin's stdin as a single compact JSON line (no pretty-printing), followed by EOF (stdin close).
 
 **Output protocol** (exit-code wrapper):
 
@@ -727,7 +727,7 @@ Written to the plugin's stdin as a single line, followed by EOF (stdin close).
 | Executable not found | Interpreter error |
 | No matching `define` | Interpreter error at load time |
 
-On exit 0, stdout is parsed as JSON and returned as-is. The value should match the `define` return type (e.g. `{"tag": "ok", "value": [...]}` for `:ok(list<...>) | :error(text)`). On non-zero exit, the interpreter wraps stderr (trimmed, capped at 1KB) as `:error(message)`.
+On exit 0, stdout is parsed as JSON and deserialized into Lumon values (tag objects like `{"tag": "ok", "value": [...]}` are reconstituted as `:ok([...])`). The value should match the `define` return type. On non-zero exit, the interpreter wraps stderr (trimmed, capped at 1KB) as `:error(message)`.
 
 **Resolution order**: when a function is called, the interpreter resolves it in this order:
 

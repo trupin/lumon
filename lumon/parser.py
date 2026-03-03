@@ -6,7 +6,7 @@ import re
 from collections.abc import Generator, Iterator
 
 from lark import Lark, Token, Transformer, v_args
-from lark.indenter import Indenter
+from lark.indenter import DedentError, Indenter
 
 from lumon.ast_nodes import (
     AskExpr,
@@ -52,6 +52,7 @@ from lumon.ast_nodes import (
     WildcardPattern,
     WithExpr,
 )
+from lumon.errors import LumonError
 from lumon.grammar import GRAMMAR
 
 
@@ -166,7 +167,6 @@ class LumonIndenter(Indenter):
                     dedented = True
 
                 if indent != self.indent_level[-1]:
-                    from lark.indenter import DedentError
                     raise DedentError(
                         'Unexpected dedent to column %s. Expected dedent to %s'
                         % (indent, self.indent_level[-1])
@@ -194,7 +194,6 @@ class LumonIndenter(Indenter):
                 dedented = True
 
             if indent != self.indent_level[-1]:
-                from lark.indenter import DedentError
                 raise DedentError(
                     'Unexpected dedent to column %s. Expected dedent to %s'
                     % (indent, self.indent_level[-1])
@@ -787,8 +786,6 @@ def _get_parser() -> Lark:
 
 def parse(source: str) -> Program:
     """Parse Lumon source code into an AST Program node."""
-    from lumon.errors import LumonError
-
     source = _preprocess(source)
     # Ensure source ends with newline for the indenter
     if not source.endswith("\n"):

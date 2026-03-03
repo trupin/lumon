@@ -5,8 +5,14 @@ from __future__ import annotations
 import argparse
 import importlib.resources
 import json
+import os
 import sys
 from pathlib import Path
+
+from lumon import __version__
+from lumon.backends import RealFS
+from lumon.interpreter import interpret
+from lumon.serializer import deserialize
 
 _STATE_FILE = Path(".lumon_state.json")
 
@@ -57,8 +63,6 @@ def _deploy_files() -> dict[str, str]:
 
 def cmd_version() -> int:
     """Print the Lumon version."""
-    from lumon import __version__
-
     print(f"lumon {__version__}")
     return 0
 
@@ -72,10 +76,6 @@ def cmd_spec(args: argparse.Namespace) -> int:
 
 def cmd_run_code(code: str) -> int:
     """Execute Lumon code and print the JSON result to stdout."""
-    from lumon.backends import RealFS
-    from lumon.interpreter import interpret
-    from lumon.serializer import deserialize
-
     state = _load_state()
     if state is not None and state.get("code") == code:
         # Resuming the same code — shouldn't happen via cmd_run, but be safe
@@ -103,9 +103,6 @@ def cmd_run_code(code: str) -> int:
 
 def cmd_respond(args: argparse.Namespace) -> int:
     """Resume suspended execution by feeding a response."""
-    from lumon.interpreter import interpret
-    from lumon.serializer import deserialize
-
     state = _load_state()
     if state is None:
         print(
@@ -179,8 +176,6 @@ def cmd_browse(args: argparse.Namespace) -> int:
 
 def cmd_test(args: argparse.Namespace) -> int:
     """Run Lumon test files and report results."""
-    from lumon.interpreter import interpret
-
     namespace: str | None = getattr(args, "namespace", None)
     test_dir = Path("lumon") / "tests"
 
@@ -274,8 +269,6 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
 def _apply_working_dir() -> None:
     """Extract and apply --working-dir before argparse runs."""
-    import os
-
     for i, arg in enumerate(sys.argv[1:], start=1):
         if arg == "--working-dir" and i + 1 < len(sys.argv):
             wd = sys.argv[i + 1]

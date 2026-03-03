@@ -5,13 +5,13 @@ from __future__ import annotations
 import math
 
 from lumon.environment import Environment
-from lumon.values import LumonFunction, LumonTag
+from lumon.values import LumonFunction, LumonTag, is_truthy
 
 
 def _call_fn(fn_val: object, args: list[object]) -> object:
     """Call a LumonFunction or Python callable with args."""
     if isinstance(fn_val, LumonFunction):
-        from lumon.evaluator import call_lumon_fn
+        from lumon.evaluator import call_lumon_fn  # circular: evaluator imports builtins
         return call_lumon_fn(fn_val, args)
     if callable(fn_val):
         return fn_val(*args)
@@ -119,7 +119,6 @@ def _wrap_tag_result(backend_result: dict) -> LumonTag:
 
 
 def _is_truthy_for_filter(value: object) -> bool:
-    from lumon.values import is_truthy
     return is_truthy(value)
 
 

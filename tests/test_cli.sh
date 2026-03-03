@@ -433,6 +433,81 @@ assert_contains "help: --help shows usage" \
     "$(run --help 2>&1 || true)"
 
 # ---------------------------------------------------------------------------
+# Bridge system (real subprocess)
+# ---------------------------------------------------------------------------
+
+BRIDGE_ROOT="$TMPDIR_ROOT/bridge_project"
+mkdir -p "$BRIDGE_ROOT/lumon/manifests" "$BRIDGE_ROOT/plugins"
+
+# Manifest for bridge function
+cat > "$BRIDGE_ROOT/lumon/manifests/ext.lumon" <<'EOF'
+define ext.greet
+  "Greet someone"
+  takes:
+    name: text "Name"
+  returns: text "Greeting"
+EOF
+
+# Bridge config
+cat > "$BRIDGE_ROOT/lumon/bridges.lumon" <<'EOF'
+bridge ext.greet
+  run: "python3 plugins/greet.py"
+EOF
+
+# A working bridge plugin
+cat > "$BRIDGE_ROOT/plugins/greet.py" <<'PYEOF'
+import json, sys
+req = json.load(sys.stdin)
+name = req["args"]["name"]
+json.dump(f"Hello, {name}!", sys.stdout)
+PYEOF
+
+# A failing bridge plugin (non-zero exit)
+cat > "$BRIDGE_ROOT/plugins/fail.py" <<'PYEOF'
+import sys
+print("something went wrong", file=sys.stderr)
+sys.exit(1)
+PYEOF
+
+# A plugin that returns invalid JSON
+cat > "$BRIDGE_ROOT/plugins/bad_json.py" <<'PYEOF'
+print("not json at all")
+PYEOF
+
+# Test: bridge call with real subprocess
+assert_eq "bridge: real subprocess returns value" \
+    '{"type": "result", "value": "Hello, World!"}' \
+    "$(run --working-dir "$BRIDGE_ROOT" 'return ext.greet("World")')"
+
+# Test: non-zero exit returns :error(stderr)
+BRIDGE_FAIL_ROOT="$TMPDIR_ROOT/bridge_fail"
+mkdir -p "$BRIDGE_FAIL_ROOT/lumon/manifests" "$BRIDGE_FAIL_ROOT/plugins"
+cp "$BRIDGE_ROOT/lumon/manifests/ext.lumon" "$BRIDGE_FAIL_ROOT/lumon/manifests/ext.lumon"
+cat > "$BRIDGE_FAIL_ROOT/lumon/bridges.lumon" <<'EOF'
+bridge ext.greet
+  run: "python3 plugins/fail.py"
+EOF
+cp "$BRIDGE_ROOT/plugins/fail.py" "$BRIDGE_FAIL_ROOT/plugins/fail.py"
+
+assert_contains "bridge: non-zero exit returns :error" \
+    '"tag": "error"' \
+    "$(run --working-dir "$BRIDGE_FAIL_ROOT" 'return ext.greet("test")')"
+
+# Test: invalid JSON on exit 0 returns interpreter error
+BRIDGE_BAD_ROOT="$TMPDIR_ROOT/bridge_bad"
+mkdir -p "$BRIDGE_BAD_ROOT/lumon/manifests" "$BRIDGE_BAD_ROOT/plugins"
+cp "$BRIDGE_ROOT/lumon/manifests/ext.lumon" "$BRIDGE_BAD_ROOT/lumon/manifests/ext.lumon"
+cat > "$BRIDGE_BAD_ROOT/lumon/bridges.lumon" <<'EOF'
+bridge ext.greet
+  run: "python3 plugins/bad_json.py"
+EOF
+cp "$BRIDGE_ROOT/plugins/bad_json.py" "$BRIDGE_BAD_ROOT/plugins/bad_json.py"
+
+assert_contains "bridge: invalid JSON returns interpreter error" \
+    '"type": "error"' \
+    "$(run --working-dir "$BRIDGE_BAD_ROOT" 'return ext.greet("test")')"
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
