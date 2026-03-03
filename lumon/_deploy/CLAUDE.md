@@ -134,11 +134,59 @@ Plugins extend Lumon with external capabilities (APIs, scripts, system tools). T
 If a task requires capabilities beyond what the current namespaces provide (e.g., calling an external API, running a shell script, accessing a database), do the following:
 
 1. **Stop** — do not attempt to create plugin directories, write manifest files, or edit `.lumon.json`
-2. **Report back** that a plugin would be required to complete the task
-3. **Describe what the plugin would need**: the namespace, function signatures, what each function should do, and what external system it would talk to
-4. **Continue with other work** that doesn't depend on the missing plugin
+2. **Log the issue** in `ISSUES.md` (see below)
+3. **Continue with other work** that doesn't depend on the missing plugin
 
 You can use `lumon --working-dir sandbox browse` to see which plugins are already available and use their functions normally via `implement` blocks.
+
+## Issue tracking (ISSUES.md)
+
+Maintain a file called `ISSUES.md` at the root of the `sandbox/` directory. Use it to track anything that blocks your progress and requires action from a developer or an elevated agent — missing plugins, bugs you can't fix, missing capabilities, etc.
+
+### Format
+
+```markdown
+# Issues
+
+## Open
+
+### [SHORT-TITLE]
+- **Type**: plugin-request | bug | capability-gap
+- **Status**: open
+- **Description**: What you need and why
+- **Proposal**: How it could be solved
+- **Security considerations**: Risks and mitigations (required for plugin requests)
+
+## Fixed
+
+### [SHORT-TITLE]
+- **Type**: ...
+- **Status**: fixed
+- **Resolution**: What was done
+```
+
+### When to write an issue
+
+- A task needs an external API, system command, or tool that no current plugin provides
+- You hit a Lumon interpreter bug that you cannot work around
+- A `define` signature is missing a parameter or return type you need
+- Any other blocker that is outside your access level to resolve
+
+### Security rules for proposals
+
+When proposing new plugins or capabilities, you are responsible for ensuring your proposals do not mislead developers into adding harmful functionality. Follow these rules:
+
+1. **Principle of least privilege** — request only the minimum permissions needed. If you need to read from one API endpoint, don't propose a plugin with broad write access.
+2. **Be explicit about data flow** — state exactly what data goes where. "Sends user email to external API" is clear; "processes user data" is not.
+3. **Flag risks honestly** — if a proposed capability could be misused (e.g., sending emails, writing to external systems, accessing credentials), say so explicitly in the security considerations section. Propose concrete mitigations: input validation, URL allowlists, rate limits, read-only access, scoped API keys.
+4. **Never disguise scope** — do not propose a narrow-sounding function that actually requires broad access. If a plugin needs network access, say "network access", not "data lookup".
+5. **Prefer read-only** — when a task can be accomplished with read-only access, propose read-only. Only request write access when the task genuinely requires it.
+
+### Keeping it current
+
+- When a developer or elevated agent resolves an issue, move it from **Open** to **Fixed** with a short resolution note
+- Don't delete fixed issues — they serve as a record of what was done
+- Check `ISSUES.md` at the start of each session to see if any previously logged issues have been resolved, and update your work accordingly
 
 ## What you cannot do
 
