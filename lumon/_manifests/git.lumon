@@ -1,6 +1,5 @@
 define git.status
   "Get git working tree status"
-  takes: nothing
   returns: :ok(text) | :error(text) "Porcelain status output or error"
 
 define git.log

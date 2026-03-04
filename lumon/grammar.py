@@ -19,6 +19,7 @@ return_stmt: "return" expression
 define_block: "define" namespace_path _NL _INDENT description _NL takes_clause? _NL? returns_clause _NL _DEDENT
 description: ESCAPED_STRING
 takes_clause: "takes:" _NL _INDENT param_def+ _DEDENT
+            | "takes:" _NL
 param_def: IDENT ":" type_expr ESCAPED_STRING ("=" expression)? _NL
 returns_clause: "returns:" type_expr ESCAPED_STRING
 

@@ -110,6 +110,21 @@ class TestDefineImplement:
         )
         assert r.value == pytest.approx(3.14)
 
+    def test_empty_takes_block(self, run):
+        """Empty takes: block (no params) parses and executes (issue #17)."""
+        r = run(
+            'define const.e\n'
+            '  "Return Euler number"\n'
+            '  takes:\n'
+            '  returns: number "e"\n'
+            '\n'
+            'implement const.e\n'
+            '  return 2.718\n'
+            '\n'
+            'return const.e()'
+        )
+        assert r.value == pytest.approx(2.718)
+
     def test_return_exits_implement_from_match(self, run):
         """return inside a match arm exits the implement block."""
         r = run(
