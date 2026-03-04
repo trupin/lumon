@@ -5,8 +5,15 @@ from __future__ import annotations
 import argparse
 import importlib.resources
 import json
+import os
 import sys
 from pathlib import Path
+
+from lumon import __version__
+from lumon.backends import RealFS, RealGit
+from lumon.interpreter import interpret
+from lumon.plugins import disk_manifest_namespaces, load_config, split_contracts
+from lumon.serializer import deserialize
 
 _STATE_FILE = Path(".lumon_state.json")
 
@@ -45,7 +52,7 @@ def _deploy_files() -> dict[str, str]:
     """Return {filename: text_content} for all bundled deploy templates."""
     pkg = importlib.resources.files("lumon._deploy")
     result: dict[str, str] = {}
-    for name in ("CLAUDE.md", "settings.json", "sandbox-guard.py"):
+    for name in ("CLAUDE.md", "settings.json", "sandbox-guard.py", "plugin-CLAUDE.md"):
         result[name] = (pkg / name).read_text(encoding="utf-8")
     return result
 
@@ -57,13 +64,11 @@ def _deploy_files() -> dict[str, str]:
 
 def cmd_version() -> int:
     """Print the Lumon version."""
-    from lumon import __version__
-
     print(f"lumon {__version__}")
     return 0
 
 
-def cmd_spec(args: argparse.Namespace) -> int:
+def cmd_spec(_args: argparse.Namespace) -> int:
     """Print the Lumon language specification."""
     text = importlib.resources.files("lumon._spec").joinpath("spec.md").read_text(encoding="utf-8")
     print(text, end="")
@@ -72,10 +77,6 @@ def cmd_spec(args: argparse.Namespace) -> int:
 
 def cmd_run_code(code: str) -> int:
     """Execute Lumon code and print the JSON result to stdout."""
-    from lumon.backends import RealFS
-    from lumon.interpreter import interpret
-    from lumon.serializer import deserialize
-
     state = _load_state()
     if state is not None and state.get("code") == code:
         # Resuming the same code — shouldn't happen via cmd_run, but be safe
@@ -84,9 +85,11 @@ def cmd_run_code(code: str) -> int:
         responses = []
 
     io_backend = RealFS(".")
+    git_backend = RealGit(".")
     result = interpret(
         code,
         io_backend=io_backend,
+        git_backend=git_backend,
         responses=responses if responses else None,
         working_dir=".",
         persist=True,
@@ -103,9 +106,6 @@ def cmd_run_code(code: str) -> int:
 
 def cmd_respond(args: argparse.Namespace) -> int:
     """Resume suspended execution by feeding a response."""
-    from lumon.interpreter import interpret
-    from lumon.serializer import deserialize
-
     state = _load_state()
     if state is None:
         print(
@@ -145,24 +145,136 @@ def _bundled_manifest(name: str) -> str | None:
         return None
 
 
+def _annotate_manifest(manifest_text: str, contracts: dict) -> str:
+    """Annotate manifest text: hide forced params, add contract annotations for dynamic ones."""
+    if not contracts:
+        return manifest_text
+
+    # Flatten all param contracts across functions
+    all_dynamic: dict[str, object] = {}
+    all_forced_params: set[str] = set()
+    for _fn_name, fn_contracts in contracts.items():
+        if not isinstance(fn_contracts, dict):
+            continue
+        dynamic, forced = split_contracts(fn_contracts)
+        all_dynamic.update(dynamic)
+        all_forced_params.update(forced.keys())
+
+    lines = manifest_text.splitlines()
+    result: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        # Check if this is a forced param line — hide it entirely
+        skip = False
+        for param_name in all_forced_params:
+            if stripped.startswith(f"{param_name}:"):
+                skip = True
+                break
+        if skip:
+            continue
+        # Annotate dynamic contract params
+        for param_name, contract in all_dynamic.items():
+            if stripped.startswith(f"{param_name}:"):
+                annotation = _format_contract(contract)
+                if annotation:
+                    line = f"{line}  [contract: {annotation}]"
+                break
+        result.append(line)
+    return "\n".join(result)
+
+
+def _format_contract(contract: object) -> str:
+    """Format a contract value for display."""
+    if isinstance(contract, str):
+        return contract
+    if isinstance(contract, list):
+        if len(contract) == 2 and all(isinstance(v, (int, float)) for v in contract):
+            return f"{contract[0]}-{contract[1]}"
+        if all(isinstance(v, str) for v in contract):
+            return " | ".join(contract)
+    return str(contract)
+
+
+def _discover_plugin_namespaces() -> tuple[list[str], dict]:
+    """Discover plugin namespaces from ../plugins/ based on .lumon.json.
+
+    Supports multi-instance: config key is the alias, optional "plugin" key
+    points to the source directory.
+    Returns (list of alias names, config dict).
+    """
+    config = load_config(".")
+    allowed = config.get("plugins", {})
+    if not allowed:
+        return [], config
+
+    plugins_dir = os.path.normpath(os.path.join("..", "plugins"))
+    if not os.path.isdir(plugins_dir):
+        return [], config
+
+    namespaces: list[str] = []
+    for alias in sorted(allowed.keys()):
+        instance_config = allowed[alias]
+        source_name = alias
+        if isinstance(instance_config, dict) and "plugin" in instance_config:
+            source_name = instance_config["plugin"]
+        plugin_path = os.path.join(plugins_dir, source_name)
+        manifest_path = os.path.join(plugin_path, "manifest.lumon")
+        if os.path.isdir(plugin_path) and os.path.isfile(manifest_path):
+            namespaces.append(alias)
+    return namespaces, config
+
+
 def cmd_browse(args: argparse.Namespace) -> int:
     """Display the namespace index or a specific namespace manifest."""
     namespace: str | None = getattr(args, "namespace", None)
 
     if namespace:
-        # Try disk first, then bundled manifests
+        # Try disk first, then bundled manifests, then plugins
         path = Path("lumon") / "manifests" / f"{namespace}.lumon"
         if path.exists():
+            # Check for plugin alias collision before returning disk manifest
+            plugin_ns, _cfg = _discover_plugin_namespaces()
+            if namespace in plugin_ns:
+                print(
+                    f"Namespace conflict: '{namespace}' is both a plugin alias "
+                    f"and a disk manifest (lumon/manifests/{namespace}.lumon). "
+                    f"Remove one to avoid ambiguity.",
+                    file=sys.stderr,
+                )
+                return 1
             print(path.read_text(encoding="utf-8"), end="")
             return 0
         bundled = _bundled_manifest(f"{namespace}.lumon")
         if bundled is not None:
             print(bundled, end="")
             return 0
+        # Check plugins (resolve source dir via "plugin" key)
+        config = load_config(".")
+        plugin_config = config.get("plugins", {})
+        instance_config = plugin_config.get(namespace, {})
+        source_name = namespace
+        if isinstance(instance_config, dict) and "plugin" in instance_config:
+            source_name = instance_config["plugin"]
+        plugin_manifest = Path("..") / "plugins" / source_name / "manifest.lumon"
+        if plugin_manifest.exists():
+            text = plugin_manifest.read_text(encoding="utf-8")
+            # Replace source namespace with alias in manifest text
+            if source_name != namespace:
+                text = text.replace(f"{source_name}.", f"{namespace}.")
+            # Strip reserved keys and annotate contracts
+            if isinstance(instance_config, dict):
+                fn_contracts = {
+                    k: v for k, v in instance_config.items()
+                    if k not in {"plugin", "env"}
+                }
+                if fn_contracts:
+                    text = _annotate_manifest(text, fn_contracts)
+            print(text, end="")
+            return 0
         print(f"error: manifest for '{namespace}' not found ({path})", file=sys.stderr)
         return 1
     else:
-        # Index: show bundled index, then append user namespaces from disk
+        # Index: show bundled index, then append user namespaces from disk, then plugins
         parts: list[str] = []
         bundled = _bundled_manifest("index.lumon")
         if bundled is not None:
@@ -170,6 +282,19 @@ def cmd_browse(args: argparse.Namespace) -> int:
         disk_index = Path("lumon") / "index.lumon"
         if disk_index.exists():
             parts.append(disk_index.read_text(encoding="utf-8").rstrip("\n"))
+        # Append plugin namespaces (check for disk conflicts first)
+        plugin_ns, _config = _discover_plugin_namespaces()
+        disk_ns = disk_manifest_namespaces(".")
+        for ns in plugin_ns:
+            if ns in disk_ns:
+                print(
+                    f"Namespace conflict: '{ns}' is both a plugin alias "
+                    f"and a disk manifest (lumon/manifests/{ns}.lumon). "
+                    f"Remove one to avoid ambiguity.",
+                    file=sys.stderr,
+                )
+                return 1
+            parts.append(f"{ns} -- plugin")
         if not parts:
             print("error: namespace index not found (lumon/index.lumon)", file=sys.stderr)
             return 1
@@ -179,8 +304,6 @@ def cmd_browse(args: argparse.Namespace) -> int:
 
 def cmd_test(args: argparse.Namespace) -> int:
     """Run Lumon test files and report results."""
-    from lumon.interpreter import interpret
-
     namespace: str | None = getattr(args, "namespace", None)
     test_dir = Path("lumon") / "tests"
 
@@ -229,6 +352,8 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     claude_dir.mkdir(exist_ok=True)
     sandbox_dir = target / "sandbox"
     sandbox_dir.mkdir(exist_ok=True)
+    plugins_dir = target / "plugins"
+    plugins_dir.mkdir(exist_ok=True)
 
     files = _deploy_files()
     deployed: list[str] = []
@@ -238,9 +363,10 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     hooks_dir.mkdir(exist_ok=True)
 
     for filename, content in files.items():
-        # CLAUDE.md → project root, hooks → .claude/hooks/, rest → .claude/
         if filename == "CLAUDE.md":
             dest = target / filename
+        elif filename == "plugin-CLAUDE.md":
+            dest = plugins_dir / "CLAUDE.md"
         elif filename.endswith(".py"):
             dest = hooks_dir / filename
         else:
@@ -250,6 +376,17 @@ def cmd_deploy(args: argparse.Namespace) -> int:
             continue
         dest.write_text(content, encoding="utf-8")
         deployed.append(str(dest.relative_to(target)))
+
+    # Create starter .lumon.json at target root
+    lumon_json = target / ".lumon.json"
+    if not lumon_json.exists() or args.force:
+        lumon_json.write_text(
+            json.dumps({"plugins": {}}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        deployed.append(".lumon.json")
+    else:
+        skipped.append(".lumon.json")
 
     if deployed:
         print(f"Deployed to {target}:")
@@ -274,8 +411,6 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
 def _apply_working_dir() -> None:
     """Extract and apply --working-dir before argparse runs."""
-    import os
-
     for i, arg in enumerate(sys.argv[1:], start=1):
         if arg == "--working-dir" and i + 1 < len(sys.argv):
             wd = sys.argv[i + 1]
@@ -306,11 +441,14 @@ def main() -> None:
     if sys.argv[1] not in _SUBCOMMANDS and not sys.argv[1].startswith("-"):
         # Positional arg: inline code or a file path
         arg = sys.argv[1]
-        path = Path(arg)
-        if path.exists() and path.suffix == ".lumon":
-            code = path.read_text(encoding="utf-8")
-        else:
+        if "\n" in arg or len(arg) > 255:
             code = arg
+        else:
+            path = Path(arg)
+            if path.exists() and path.suffix == ".lumon":
+                code = path.read_text(encoding="utf-8")
+            else:
+                code = arg
         sys.exit(cmd_run_code(code))
 
     # Subcommand dispatch via argparse

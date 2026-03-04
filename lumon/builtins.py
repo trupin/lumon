@@ -5,13 +5,15 @@ from __future__ import annotations
 import math
 
 from lumon.environment import Environment
-from lumon.values import LumonFunction, LumonTag
+from lumon.errors import LumonError
+from lumon.plugins import exec_plugin_script
+from lumon.values import LumonFunction, LumonTag, is_truthy
 
 
 def _call_fn(fn_val: object, args: list[object]) -> object:
     """Call a LumonFunction or Python callable with args."""
     if isinstance(fn_val, LumonFunction):
-        from lumon.evaluator import call_lumon_fn
+        from lumon.evaluator import call_lumon_fn  # circular: evaluator imports builtins
         return call_lumon_fn(fn_val, args)
     if callable(fn_val):
         return fn_val(*args)
@@ -119,7 +121,6 @@ def _wrap_tag_result(backend_result: dict) -> LumonTag:
 
 
 def _is_truthy_for_filter(value: object) -> bool:
-    from lumon.values import is_truthy
     return is_truthy(value)
 
 
@@ -127,6 +128,7 @@ def register_builtins(
     env: Environment,
     io_backend: object | None = None,
     http_backend: object | None = None,
+    git_backend: object | None = None,
 ) -> None:
     """Register all built-in functions in the environment."""
 
@@ -218,6 +220,25 @@ def register_builtins(
         env.register_builtin(
             "io.list_dir", lambda path: _wrap_tag_result(_io.list_dir(path))  # type: ignore[union-attr]
         )
+        env.register_builtin(
+            "io.delete", lambda path: _wrap_tag_result(_io.delete(path))  # type: ignore[union-attr]
+        )
+        env.register_builtin(
+            "io.find", lambda path, pattern: _wrap_tag_result(_io.find(path, pattern))  # type: ignore[union-attr]
+        )
+        env.register_builtin(
+            "io.grep", lambda path, pattern: _wrap_tag_result(_io.grep(path, pattern))  # type: ignore[union-attr]
+        )
+        env.register_builtin(
+            "io.head", lambda path, n: _wrap_tag_result(_io.head(path, n))  # type: ignore[union-attr]
+        )
+        env.register_builtin(
+            "io.tail", lambda path, n: _wrap_tag_result(_io.tail(path, n))  # type: ignore[union-attr]
+        )
+        env.register_builtin(
+            "io.replace",
+            lambda path, old, new: _wrap_tag_result(_io.replace(path, old, new)),  # type: ignore[union-attr]
+        )
 
     # --- http.* ---
     if http_backend is not None:
@@ -225,3 +246,29 @@ def register_builtins(
         env.register_builtin(
             "http.get", lambda url: _wrap_tag_result(_http.get(url))  # type: ignore[union-attr]
         )
+
+    # --- git.* ---
+    if git_backend is not None:
+        _git = git_backend
+        env.register_builtin(
+            "git.status", lambda: _wrap_tag_result(_git.status())  # type: ignore[union-attr]
+        )
+        env.register_builtin(
+            "git.log", lambda n: _wrap_tag_result(_git.log(n))  # type: ignore[union-attr]
+        )
+
+    # --- plugin.* ---
+    def _plugin_exec(command: str, args: object = None) -> object:
+        plugin_dir = env._active_plugin["dir"]
+        if not isinstance(plugin_dir, str):
+            raise LumonError("plugin.exec can only be called from a plugin implementation")
+        instance = env._active_plugin["instance"]
+        plugin_env = env._active_plugin["env"]
+        return exec_plugin_script(
+            plugin_dir, command, args,
+            executor=env._plugin_executor,
+            instance=instance if isinstance(instance, str) else "",
+            env_vars=plugin_env if isinstance(plugin_env, dict) else None,
+        )
+
+    env.register_builtin("plugin.exec", _plugin_exec)

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import math
-
 from lumon.ast_nodes import (
     AskExpr,
     AsyncExpr,
@@ -50,6 +48,7 @@ from lumon.ast_nodes import (
 )
 from lumon.environment import Environment
 from lumon.errors import AskSignal, LumonError, ReturnSignal, SpawnSignal
+from lumon.plugins import validate_contracts
 from lumon.serializer import serialize
 from lumon.values import LumonFunction, LumonTag, is_truthy
 
@@ -439,13 +438,61 @@ def _call_function(name: str, args: tuple[object, ...], env: Environment) -> obj
             raise LumonError(f"Cannot call '{name}'")
 
 
+def _inject_forced_args(
+    define: DefineBlock,
+    agent_args: tuple[object, ...],
+    forced_values: dict[str, object],
+    name: str,
+) -> tuple[object, ...]:
+    """Reconstruct full args by interleaving forced values at correct positions.
+
+    Walk define params in order. For each param:
+    - If forced → insert forced value
+    - Otherwise → consume next agent-provided arg
+
+    Validates that agent provided the right number of args (total - forced).
+    """
+    visible_count = len(define.params) - len(forced_values) if define.params else 0
+
+    if len(agent_args) > visible_count:
+        raise LumonError(
+            f"Too many arguments in call to {name}: "
+            f"expected at most {visible_count}, got {len(agent_args)}",
+            function=name,
+        )
+
+    full_args: list[object] = []
+    agent_idx = 0
+    if define.params:
+        for param in define.params:
+            assert isinstance(param, ParamDef)
+            if param.name in forced_values:
+                full_args.append(forced_values[param.name])
+            elif agent_idx < len(agent_args):
+                full_args.append(agent_args[agent_idx])
+                agent_idx += 1
+            else:
+                break  # remaining params will use defaults in param binding
+    return tuple(full_args)
+
+
 def _call_user_function(
     name: str, define: object, impl: object, args: tuple[object, ...], env: Environment
 ) -> object:
     """Call a user-defined function (define + implement)."""
-    from lumon.ast_nodes import DefineBlock, ImplementBlock
-
     assert isinstance(impl, ImplementBlock)
+
+    # Plugin forced value injection + contract validation + context injection
+    plugin_dir = env._plugin_dirs.get(name)
+    if plugin_dir is not None and isinstance(define, DefineBlock):
+        # Inject forced values before contract validation
+        forced = env._plugin_forced_values.get(name, {})
+        if forced:
+            args = _inject_forced_args(define, args, forced, name)
+
+        contracts = env._plugin_contracts.get(name, {})
+        if contracts:
+            validate_contracts(name, args, define, contracts)
 
     env.push_call(name)
     try:
@@ -465,6 +512,16 @@ def _call_user_function(
                         function=name,
                     )
 
+        # Set plugin context so plugin.exec works inside plugin impls
+        # Uses shared mutable dict so nested calls (implement → plugin) see updates
+        prev_plugin_dir = env._active_plugin["dir"]
+        prev_plugin_instance = env._active_plugin["instance"]
+        prev_plugin_env = env._active_plugin["env"]
+        if plugin_dir is not None:
+            env._active_plugin["dir"] = plugin_dir
+            env._active_plugin["instance"] = env._plugin_instances.get(name)
+            env._active_plugin["env"] = env._plugin_env_vars.get(name) or None
+
         try:
             result = None
             for stmt in impl.body:
@@ -472,6 +529,11 @@ def _call_user_function(
             return result
         except ReturnSignal as rs:
             return rs.value
+        finally:
+            if plugin_dir is not None:
+                env._active_plugin["dir"] = prev_plugin_dir
+                env._active_plugin["instance"] = prev_plugin_instance
+                env._active_plugin["env"] = prev_plugin_env
     except LumonError as e:
         if e.function is None:
             e.function = name
@@ -497,7 +559,7 @@ def call_lumon_fn(fn_val: LumonFunction, args: list[object]) -> object:
 
 
 def _call_lumon_function(
-    fn: LumonFunction, args: tuple[object, ...], caller_env: Environment | None
+    fn: LumonFunction, args: tuple[object, ...], _caller_env: Environment | None
 ) -> object:
     """Execute a LumonFunction (lambda or implement-based)."""
     child_env = fn.closure_env.child_scope()  # type: ignore[union-attr]

@@ -174,3 +174,26 @@ class TestOutputProtocol:
             "type": "result",
             "value": {"tag": "ok", "value": "done"},
         }
+
+
+# ===================================================================
+# Type name in error messages
+# ===================================================================
+
+
+class TestTypeNameErrors:
+    def test_add_bool_to_number(self, run):
+        r = run("return true + 1")
+        assert r.type == "error"
+
+    def test_field_on_list(self, run):
+        r = run("let xs = [1, 2]\nreturn xs.first")
+        assert r.type == "error"
+
+    def test_field_on_tag(self, run):
+        r = run("let t = :ok\nreturn t.name")
+        assert r.type == "error"
+
+    def test_index_on_map(self, run):
+        r = run("let m = {a: 1}\nreturn m[0]")
+        assert r.type == "error"

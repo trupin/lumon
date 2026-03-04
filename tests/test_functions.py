@@ -110,6 +110,21 @@ class TestDefineImplement:
         )
         assert r.value == pytest.approx(3.14)
 
+    def test_empty_takes_block(self, run):
+        """Empty takes: block (no params) parses and executes (issue #17)."""
+        r = run(
+            'define const.e\n'
+            '  "Return Euler number"\n'
+            '  takes:\n'
+            '  returns: number "e"\n'
+            '\n'
+            'implement const.e\n'
+            '  return 2.718\n'
+            '\n'
+            'return const.e()'
+        )
+        assert r.value == pytest.approx(2.718)
+
     def test_return_exits_implement_from_match(self, run):
         """return inside a match arm exits the implement block."""
         r = run(
@@ -171,6 +186,20 @@ class TestDefineImplement:
         )
         assert r.value == 12
 
+    def test_keyword_as_function_name_inline(self, run):
+        """Keywords can be used as function names in inline define/implement (issue #15)."""
+        r = run(
+            'define util.none\n'
+            '  "Return ok"\n'
+            '  returns: text "Result"\n'
+            '\n'
+            'implement util.none\n'
+            '  return "ok"\n'
+            '\n'
+            'return util.none()'
+        )
+        assert r.value == "ok"
+
     def test_function_returning_tag(self, run):
         r = run(
             'define safe.div\n'
@@ -188,6 +217,52 @@ class TestDefineImplement:
             'return safe.div(10, 0)'
         )
         assert r.value == {"tag": "error", "value": "division by zero"}
+
+    def test_keyword_none_in_tag_return_type(self, run):
+        """Keyword 'none' is accepted in tag type expressions like :ok(none) (issue #15)."""
+        r = run(
+            'define browser.close_page\n'
+            '  "Close a page"\n'
+            '  takes:\n'
+            '    id: text "Page ID"\n'
+            '  returns: :ok(none) | :error(text) "Result"\n'
+            '\n'
+            'implement browser.close_page\n'
+            '  return :ok(none)\n'
+            '\n'
+            'return browser.close_page("p1")'
+        )
+        assert r.value == {"tag": "ok"}
+
+    def test_keyword_none_as_standalone_return_type(self, run):
+        """Keyword 'none' is accepted as a standalone return type (issue #15)."""
+        r = run(
+            'define util.noop\n'
+            '  "Do nothing"\n'
+            '  returns: none "Nothing"\n'
+            '\n'
+            'implement util.noop\n'
+            '  return none\n'
+            '\n'
+            'return util.noop()'
+        )
+        assert r.value is None
+
+    def test_keyword_none_in_takes_type(self, run):
+        """Keyword 'none' is accepted as a parameter type (issue #15)."""
+        r = run(
+            'define util.identity\n'
+            '  "Return input"\n'
+            '  takes:\n'
+            '    x: none "A none value"\n'
+            '  returns: none "Same none"\n'
+            '\n'
+            'implement util.identity\n'
+            '  return x\n'
+            '\n'
+            'return util.identity(none)'
+        )
+        assert r.value is None
 
 
 # ===================================================================
@@ -458,9 +533,154 @@ class TestAutoLoading:
             result = interpret('return greet.hello("World")', working_dir=wd)
             assert result == {"type": "result", "value": "Hello, World"}
 
+    def test_keyword_as_function_name(self):
+        """Keywords can be used as function names in namespace paths (issue #15)."""
+        with tempfile.TemporaryDirectory() as wd:
+            manifests = os.path.join(wd, "lumon", "manifests")
+            impl = os.path.join(wd, "lumon", "impl")
+            os.makedirs(manifests)
+            os.makedirs(impl)
+
+            with open(os.path.join(manifests, "ns.lumon"), "w") as f:
+                f.write(
+                    'define ns.none\n'
+                    '  "Return none"\n'
+                    '  returns: text "Always empty"\n'
+                )
+            with open(os.path.join(impl, "ns.lumon"), "w") as f:
+                f.write(
+                    'implement ns.none\n'
+                    '  return "ok"\n'
+                )
+
+            result = interpret('return ns.none()', working_dir=wd)
+            assert result == {"type": "result", "value": "ok"}
+
+    def test_keyword_match_as_function_name(self):
+        """Keyword 'match' can be used as function name in namespace paths (issue #15)."""
+        with tempfile.TemporaryDirectory() as wd:
+            manifests = os.path.join(wd, "lumon", "manifests")
+            impl = os.path.join(wd, "lumon", "impl")
+            os.makedirs(manifests)
+            os.makedirs(impl)
+
+            with open(os.path.join(manifests, "ns.lumon"), "w") as f:
+                f.write(
+                    'define ns.match\n'
+                    '  "Match something"\n'
+                    '  takes:\n'
+                    '    x: number "Input"\n'
+                    '  returns: number "Result"\n'
+                )
+            with open(os.path.join(impl, "ns.lumon"), "w") as f:
+                f.write(
+                    'implement ns.match\n'
+                    '  return x * 2\n'
+                )
+
+            result = interpret('return ns.match(5)', working_dir=wd)
+            assert result == {"type": "result", "value": 10}
+
     def test_undefined_function_no_files_on_disk(self):
         """Without files on disk, undefined function error is raised."""
         with tempfile.TemporaryDirectory() as wd:
             result = interpret('return missing.func()', working_dir=wd)
             r = RunResult(output=result)
             assert r.type == "error"
+
+
+# ===================================================================
+# Calling non-callable
+# ===================================================================
+
+
+class TestCallErrors:
+    def test_call_non_callable(self, run):
+        r = run("let x = 42\nreturn x(1)")
+        assert r.type == "error"
+
+
+# ===================================================================
+# Pipe to user-defined function
+# ===================================================================
+
+
+class TestUserFunctionPipe:
+    def test_pipe_to_user_function(self, run):
+        code = (
+            'define math.double\n'
+            '  "Double it"\n'
+            '  takes:\n'
+            '    n: number "The number"\n'
+            '  returns: number "Result"\n'
+            '\n'
+            'implement math.double\n'
+            '  return n * 2\n'
+            '\n'
+            'return 5 |> math.double'
+        )
+        r = run(code)
+        assert r.value == 10
+
+
+# ===================================================================
+# User-defined function stored in variable and called
+# ===================================================================
+
+
+class TestUserFunctionRef:
+    def test_store_user_fn_in_variable(self, run):
+        code = (
+            'define math.double\n'
+            '  "Double it"\n'
+            '  takes:\n'
+            '    n: number "The number"\n'
+            '  returns: number "Result"\n'
+            '\n'
+            'implement math.double\n'
+            '  return n * 2\n'
+            '\n'
+            'let f = math.double\n'
+            'return f(21)'
+        )
+        r = run(code)
+        assert r.value == 42
+
+    def test_pass_user_fn_to_map(self, run):
+        code = (
+            'define math.double\n'
+            '  "Double it"\n'
+            '  takes:\n'
+            '    n: number "The number"\n'
+            '  returns: number "Result"\n'
+            '\n'
+            'implement math.double\n'
+            '  return n * 2\n'
+            '\n'
+            'return [1, 2, 3] |> list.map(math.double)'
+        )
+        r = run(code)
+        assert r.value == [2, 4, 6]
+
+
+# ===================================================================
+# Recursion limit
+# ===================================================================
+
+
+class TestRecursionLimit:
+    def test_recursion_error(self):
+        with tempfile.TemporaryDirectory() as wd:
+            code = (
+                'define foo.bar\n'
+                '  "Recurse"\n'
+                '  returns: number "Result"\n'
+                '\n'
+                'implement foo.bar\n'
+                '  return foo.bar()\n'
+                '\n'
+                'return foo.bar()\n'
+            )
+            result = interpret(code, working_dir=wd)
+            assert result["type"] == "error"
+            assert "depth" in result.get("message", "").lower()

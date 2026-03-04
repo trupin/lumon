@@ -502,3 +502,75 @@ class TestAsyncAwait:
             {"tag": "ok", "value": "aaa"},
             {"tag": "ok", "value": "bbb"},
         ]
+
+
+# ===================================================================
+# if statement with else (false branch)
+# ===================================================================
+
+
+class TestIfStatementElse:
+    def test_if_statement_else_false_branch(self, run):
+        code = 'if false\n  return "yes"\nelse\n  return "no"'
+        r = run(code)
+        assert r.value == "no"
+
+
+# ===================================================================
+# match non-exhaustive
+# ===================================================================
+
+
+class TestMatchNonExhaustive:
+    def test_match_non_exhaustive(self, run):
+        r = run(
+            'return match 99\n'
+            '  "hello" -> true'
+        )
+        assert r.type == "error"
+        assert "no pattern matched" in r.output.get("message", "").lower()
+
+
+# ===================================================================
+# with/then/else nil falls through
+# ===================================================================
+
+
+class TestWithElse:
+    def test_with_nil_falls_through(self, run):
+        code = (
+            'let result = with\n'
+            '  x = none\n'
+            'then\n'
+            '  x\n'
+            'else\n'
+            '  "fallback"\n'
+            'return result'
+        )
+        r = run(code)
+        assert r.value == "fallback"
+
+
+# ===================================================================
+# ask / spawn signals
+# ===================================================================
+
+
+class TestAskSpawnSignals:
+    def test_ask_signal(self, run):
+        r = run(
+            'let answer = ask\n'
+            '  "What to do?"\n'
+            '  context: "data"\n'
+            '  expects: text'
+        )
+        assert r.type == "ask"
+        assert r.output["prompt"] == "What to do?"
+
+    def test_spawn_signal(self, run):
+        r = run(
+            'let h = spawn\n'
+            '  "Do something"\n'
+            '  context: [1, 2, 3]'
+        )
+        assert r.type in ("spawn_batch", "ask")

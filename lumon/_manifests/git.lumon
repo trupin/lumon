@@ -1,0 +1,9 @@
+define git.status
+  "Get git working tree status"
+  returns: :ok(text) | :error(text) "Porcelain status output or error"
+
+define git.log
+  "Get recent commit history"
+  takes:
+    n: number "Number of commits to return"
+  returns: :ok(list<text>) | :error(text) "List of hash-subject strings or error"

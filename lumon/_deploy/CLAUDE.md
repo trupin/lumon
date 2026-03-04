@@ -127,6 +127,114 @@ You can directly read and edit files inside the `sandbox/` directory using the E
 
 All file operations are restricted to `sandbox/` — edits outside that directory will be blocked.
 
+## Plugins
+
+Plugins extend Lumon with external capabilities (APIs, scripts, system tools). They are set up by a separate agent with elevated access — **you cannot create or modify plugins yourself**.
+
+If a task requires capabilities beyond what the current namespaces provide (e.g., calling an external API, running a shell script, accessing a database), do the following:
+
+1. **Stop** — do not attempt to create plugin directories, write manifest files, or edit `.lumon.json`
+2. **Log the issue** in `ISSUES.md` (see below)
+3. **Continue with other work** that doesn't depend on the missing plugin
+
+You can use `lumon --working-dir sandbox browse` to see which plugins are already available and use their functions normally via `implement` blocks.
+
+## Issue tracking (ISSUES.md)
+
+Maintain a file called `ISSUES.md` at the root of the `sandbox/` directory. Use it to track anything that blocks your progress and requires action from a developer or an elevated agent — missing plugins, bugs you can't fix, missing capabilities, etc.
+
+### Format
+
+```markdown
+# Issues
+
+## Open
+
+### [SHORT-TITLE]
+- **Type**: plugin-request | bug | capability-gap
+- **Status**: open
+- **Description**: What you need and why
+- **Example**: Lumon code that should work but doesn't (see below)
+- **Proposal**: How it could be solved
+- **Security considerations**: Risks and mitigations (required for plugin requests)
+
+## Fixed
+
+### [SHORT-TITLE]
+- **Type**: ...
+- **Status**: fixed
+- **Resolution**: What was done
+```
+
+### Always append new issues at the end
+
+When adding a new issue, always append it **at the end of the Open section** (just before the `## Fixed` heading). Never insert issues at the top or in the middle — the ordering serves as a chronological record and makes it easy for developers to see what's new.
+
+### Include Lumon examples
+
+Every issue **must** include an **Example** field with concrete Lumon code that demonstrates the problem. Show what you tried (or would try) and what goes wrong. This helps developers reproduce and understand the issue immediately.
+
+For **bugs**, show the code that fails and the error you got:
+
+```markdown
+- **Example**:
+  ```lumon
+  let result = text.split("a,b,c", ",")
+  return list.length(result)
+  ```
+  Expected: `{"type": "result", "value": 3}`
+  Got: `{"type": "error", "message": "text.split: expected 1 argument, got 2"}`
+```
+
+For **plugin requests**, show the code you wish you could write:
+
+```markdown
+- **Example**:
+  ```lumon
+  let response = slack.send("general", "Deployment complete")
+  match response
+    :ok(_) -> return "sent"
+    :error(m) -> return "failed: " + m
+  ```
+  This code cannot run because no `slack` namespace exists.
+```
+
+For **capability gaps**, show the workaround you're stuck on:
+
+```markdown
+- **Example**:
+  ```lumon
+  -- I need to parse JSON from a file, but there's no json.parse built-in
+  let raw = io.read("data.json")
+  match raw
+    :ok(content) -> return ???  -- no way to convert text to a map
+    :error(m) -> return :error(m)
+  ```
+```
+
+### When to write an issue
+
+- A task needs an external API, system command, or tool that no current plugin provides
+- You hit a Lumon interpreter bug that you cannot work around
+- A `define` signature is missing a parameter or return type you need
+- Any other blocker that is outside your access level to resolve
+
+### Security rules for proposals
+
+When proposing new plugins or capabilities, you are responsible for ensuring your proposals do not mislead developers into adding harmful functionality. Follow these rules:
+
+1. **Principle of least privilege** — request only the minimum permissions needed. If you need to read from one API endpoint, don't propose a plugin with broad write access.
+2. **Be explicit about data flow** — state exactly what data goes where. "Sends user email to external API" is clear; "processes user data" is not.
+3. **Flag risks honestly** — if a proposed capability could be misused (e.g., sending emails, writing to external systems, accessing credentials), say so explicitly in the security considerations section. Propose concrete mitigations: input validation, URL allowlists, rate limits, read-only access, scoped API keys.
+4. **Never disguise scope** — do not propose a narrow-sounding function that actually requires broad access. If a plugin needs network access, say "network access", not "data lookup".
+5. **Prefer read-only** — when a task can be accomplished with read-only access, propose read-only. Only request write access when the task genuinely requires it.
+
+### Keeping it current
+
+- When a developer or elevated agent resolves an issue, move it from **Open** to **Fixed** with a short resolution note
+- Don't delete fixed issues — they serve as a record of what was done
+- Check `ISSUES.md` at the start of each session to see if any previously logged issues have been resolved, and update your work accordingly
+
 ## What you cannot do
 
 - Run arbitrary shell commands (only `lumon --working-dir sandbox` is available)
@@ -134,6 +242,7 @@ All file operations are restricted to `sandbox/` — edits outside that director
 - Access Python, pip, or any other tooling
 - Read files outside the current project directory
 - Make HTTP POST requests or send authenticated requests
+- Create or modify plugins (only a separate agent with elevated access can do this)
 
 These restrictions are by design. Everything you need is available through Lumon primitives and direct file editing in `sandbox/`.
 

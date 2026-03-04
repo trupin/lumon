@@ -72,24 +72,29 @@ impl/<ns>.lumon      → Loaded on call (implementations)
 
 ## Validation Commands
 
-Two slash commands for validating correctness:
+Four slash commands for validating correctness:
 
-- `/test` — runs pytest (`/test` for full suite, `/test tests/test_types.py` for a specific file)
+- `/test` — runs pytest and CLI bash tests with code coverage (`/test` for full suite, `/test tests/test_types.py` for a specific file). Always measures coverage via `pytest-cov` and `COVERAGE_PROCESS_START` for subprocesses.
 - `/typecheck` — runs pyright (`/typecheck` for the lumon package, `/typecheck lumon/parser.py` for a specific file)
+- `/lint` — runs pylint (`/lint` for the lumon package, `/lint lumon/plugins.py` for a specific file)
+- `/review` — reviews recent changes for gaps, defects, missing tests, spec drift, and code quality issues
 
 ### When to run them
 
-- **After wrapping up a task** — always run both before considering a task done
+- **After wrapping up a task** — always run `/review`, `/test`, `/typecheck`, and `/lint` before considering a task done
 - **When debugging** — run `/test` with the relevant test file to get failure details
 - **Not after every small edit** — only when you need signal, not after each line change
 
 ### Definition of done
 
 A task is **not done** unless:
-1. It has a test designed for it
-2. That test passes
-3. No test regressions (all previously passing tests still pass)
-4. No pyright errors in modified files
+1. `/review` — no unaddressed FIX, TEST, or COVERAGE items remain
+2. It has a test designed for it
+3. That test passes (`/test`)
+4. No test regressions (all previously passing tests still pass)
+5. No pyright errors in modified files (`/typecheck`)
+6. No pylint errors in modified files (`/lint`)
+7. Code coverage on changed files is at least 90% (checked by `/test` and `/review`)
 
 ## Git Workflow
 
@@ -102,6 +107,16 @@ A task is **not done** unless:
 - **One commit per significant task.** Each commit is a coherent unit of work.
 - **One PR per session.** The PR summarizes all commits on the branch.
 - **Branch naming**: `feat/...`, `fix/...`, `refactor/...`, etc.
+
+## Python Guidelines
+
+- **Imports at the top of the file** — always. No inline/local imports unless resolving a circular dependency. Group: stdlib, third-party, local (separated by blank lines, sorted alphabetically within each group).
+- **`from __future__ import annotations`** as the first import in every module.
+- **Type annotations** on all function signatures. Use `object` as the Lumon value type.
+- **`tmp_path` fixture** for temporary directories in tests — never bare `tempfile.mkdtemp()`.
+- **`LumonError`** for all user-facing errors — never raw `Exception`.
+
+See `/python` for the full guidelines.
 
 ## Tooling
 

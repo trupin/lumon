@@ -66,6 +66,20 @@ assert_eq "inline: tag with payload" \
     "$(run 'return :error("oops")')"
 
 # ---------------------------------------------------------------------------
+# Long inline code (issue #12 — no OSError on strings exceeding path limit)
+# ---------------------------------------------------------------------------
+
+LONG_CODE="return 1 + $(python3 -c "print(' + '.join(['1'] * 300))")"
+assert_eq "inline: long string no OSError" \
+    '{"type": "result", "value": 301}' \
+    "$(run "$LONG_CODE")"
+
+# Code with newlines should be treated as inline, not a file path
+assert_eq "inline: multiline string" \
+    '{"type": "result", "value": 3}' \
+    "$(run "$(printf 'let x = 1\nlet y = 2\nreturn x + y')")"
+
+# ---------------------------------------------------------------------------
 # Stdin
 # ---------------------------------------------------------------------------
 
@@ -159,6 +173,10 @@ assert_contains "browse: built-in namespace http" \
     "http.get" \
     "$(run browse http)"
 
+assert_contains "browse: built-in namespace git" \
+    "git.status" \
+    "$(run browse git)"
+
 # Index includes built-in namespaces even without lumon/index.lumon on disk
 assert_contains "browse: index includes built-in io" \
     "io" \
@@ -166,6 +184,10 @@ assert_contains "browse: index includes built-in io" \
 
 assert_contains "browse: index includes built-in text" \
     "text" \
+    "$(run browse)"
+
+assert_contains "browse: index includes built-in git" \
+    "git" \
     "$(run browse)"
 
 # Index merges built-in and user namespaces
@@ -349,6 +371,27 @@ assert_contains "deploy: hook blocks Read outside current dir" \
     "BLOCKED" \
     "$(echo '{"tool_name": "Read", "tool_input": {"file_path": "../outside/secret.txt"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
 
+# Deploy: plugins directory
+assert_eq "deploy: plugins/ directory created" \
+    "yes" \
+    "$([ -d "$DEPLOY_ROOT/plugins" ] && echo yes || echo no)"
+
+assert_eq "deploy: plugins/CLAUDE.md deployed" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/plugins/CLAUDE.md" ] && echo yes || echo no)"
+
+assert_contains "deploy: plugins CLAUDE.md has protocol section" \
+    "plugin.exec" \
+    "$(cat "$DEPLOY_ROOT/plugins/CLAUDE.md")"
+
+assert_contains "deploy: plugins CLAUDE.md has directory structure" \
+    "manifest.lumon" \
+    "$(cat "$DEPLOY_ROOT/plugins/CLAUDE.md")"
+
+assert_eq "deploy: .lumon.json created at root" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/.lumon.json" ] && echo yes || echo no)"
+
 # ---------------------------------------------------------------------------
 # IO sandbox (--working-dir constrains io.read / io.write)
 # ---------------------------------------------------------------------------
@@ -431,6 +474,349 @@ assert_contains "version: prints version" \
 assert_contains "help: --help shows usage" \
     "lumon" \
     "$(run --help 2>&1 || true)"
+
+# ---------------------------------------------------------------------------
+# Plugin system (real subprocess)
+# ---------------------------------------------------------------------------
+
+PLUGIN_ROOT="$TMPDIR_ROOT/plugin_project"
+mkdir -p "$PLUGIN_ROOT/sandbox/lumon/manifests" "$PLUGIN_ROOT/plugins/ext"
+
+# Plugin manifest
+cat > "$PLUGIN_ROOT/plugins/ext/manifest.lumon" <<'EOF'
+define ext.greet
+  "Greet someone"
+  takes:
+    name: text "Name"
+  returns: text "Greeting"
+EOF
+
+# Plugin impl using plugin.exec
+cat > "$PLUGIN_ROOT/plugins/ext/impl.lumon" <<'EOF'
+implement ext.greet
+  let result = plugin.exec("python3 greet.py", {name: name})
+  return result
+EOF
+
+# A working plugin script
+cat > "$PLUGIN_ROOT/plugins/ext/greet.py" <<'PYEOF'
+import json, sys
+args = json.load(sys.stdin)
+name = args["name"]
+json.dump(f"Hello, {name}!", sys.stdout)
+PYEOF
+
+# .lumon.json at project root
+cat > "$PLUGIN_ROOT/.lumon.json" <<'EOF'
+{"plugins": {"ext": {}}}
+EOF
+
+# Test: plugin call with real subprocess
+assert_eq "plugin: real subprocess returns value" \
+    '{"type": "result", "value": "Hello, World!"}' \
+    "$(run --working-dir "$PLUGIN_ROOT/sandbox" 'return ext.greet("World")')"
+
+# Test: non-zero exit returns :error(stderr)
+PLUGIN_FAIL_ROOT="$TMPDIR_ROOT/plugin_fail"
+mkdir -p "$PLUGIN_FAIL_ROOT/sandbox/lumon" "$PLUGIN_FAIL_ROOT/plugins/ext"
+cp "$PLUGIN_ROOT/plugins/ext/manifest.lumon" "$PLUGIN_FAIL_ROOT/plugins/ext/manifest.lumon"
+cat > "$PLUGIN_FAIL_ROOT/plugins/ext/impl.lumon" <<'EOF'
+implement ext.greet
+  let result = plugin.exec("python3 fail.py", {name: name})
+  return result
+EOF
+cat > "$PLUGIN_FAIL_ROOT/plugins/ext/fail.py" <<'PYEOF'
+import sys
+print("something went wrong", file=sys.stderr)
+sys.exit(1)
+PYEOF
+cat > "$PLUGIN_FAIL_ROOT/.lumon.json" <<'EOF'
+{"plugins": {"ext": {}}}
+EOF
+
+assert_contains "plugin: non-zero exit returns :error" \
+    '"tag": "error"' \
+    "$(run --working-dir "$PLUGIN_FAIL_ROOT/sandbox" 'return ext.greet("test")')"
+
+# Test: browse shows plugin namespaces
+assert_contains "plugin: browse shows plugin namespace" \
+    "ext" \
+    "$(cd "$PLUGIN_ROOT/sandbox" && run browse)"
+
+# Test: browse shows plugin manifest
+assert_contains "plugin: browse shows plugin manifest" \
+    "ext.greet" \
+    "$(cd "$PLUGIN_ROOT/sandbox" && run browse ext)"
+
+# Test: contract violation → interpreter error
+PLUGIN_CONTRACT_ROOT="$TMPDIR_ROOT/plugin_contract"
+mkdir -p "$PLUGIN_CONTRACT_ROOT/sandbox/lumon" "$PLUGIN_CONTRACT_ROOT/plugins/web"
+
+cat > "$PLUGIN_CONTRACT_ROOT/plugins/web/manifest.lumon" <<'EOF'
+define web.search
+  "Search"
+  takes:
+    url: text "URL"
+  returns: text "Results"
+EOF
+cat > "$PLUGIN_CONTRACT_ROOT/plugins/web/impl.lumon" <<'EOF'
+implement web.search
+  let result = plugin.exec("echo ok", {url: url})
+  return result
+EOF
+cat > "$PLUGIN_CONTRACT_ROOT/.lumon.json" <<'EOF'
+{"plugins": {"web": {"search": {"url": "https://zillow.com/*"}}}}
+EOF
+
+assert_contains "plugin: contract violation returns error" \
+    '"type": "error"' \
+    "$(run --working-dir "$PLUGIN_CONTRACT_ROOT/sandbox" 'return web.search("https://redfin.com")')"
+
+# Test: unlisted plugin not accessible
+PLUGIN_UNLISTED_ROOT="$TMPDIR_ROOT/plugin_unlisted"
+mkdir -p "$PLUGIN_UNLISTED_ROOT/sandbox/lumon" "$PLUGIN_UNLISTED_ROOT/plugins/secret"
+cat > "$PLUGIN_UNLISTED_ROOT/plugins/secret/manifest.lumon" <<'EOF'
+define secret.fn
+  "Secret"
+  returns: text
+EOF
+cat > "$PLUGIN_UNLISTED_ROOT/plugins/secret/impl.lumon" <<'EOF'
+implement secret.fn
+  return "nope"
+EOF
+cat > "$PLUGIN_UNLISTED_ROOT/.lumon.json" <<'EOF'
+{"plugins": {}}
+EOF
+
+assert_contains "plugin: unlisted plugin not accessible" \
+    '"type": "error"' \
+    "$(run --working-dir "$PLUGIN_UNLISTED_ROOT/sandbox" 'return secret.fn()')"
+
+# ---------------------------------------------------------------------------
+# Multi-instance plugins
+# ---------------------------------------------------------------------------
+
+MULTI_ROOT="$TMPDIR_ROOT/multi_project"
+mkdir -p "$MULTI_ROOT/sandbox/lumon/manifests" "$MULTI_ROOT/plugins/browser"
+
+# Plugin manifest (source namespace: browser)
+cat > "$MULTI_ROOT/plugins/browser/manifest.lumon" <<'EOF'
+define browser.search
+  "Search the web"
+  takes:
+    url: text "URL to search"
+    max_results: number "Max results" = 10
+  returns: text "Results"
+EOF
+
+# Plugin impl
+cat > "$MULTI_ROOT/plugins/browser/impl.lumon" <<'EOF'
+implement browser.search
+  let result = plugin.exec("python3 search.py", {url: url, max_results: max_results})
+  return result
+EOF
+
+# Plugin script that returns instance name + url
+cat > "$MULTI_ROOT/plugins/browser/search.py" <<'PYEOF'
+import json, sys, os
+args = json.load(sys.stdin)
+instance = os.environ.get("LUMON_PLUGIN_INSTANCE", "unknown")
+json.dump(f"{instance}:{args['url']}", sys.stdout)
+PYEOF
+
+# Multi-instance config
+cat > "$MULTI_ROOT/.lumon.json" <<'EOF'
+{
+  "plugins": {
+    "zillow": {
+      "plugin": "browser",
+      "search": {
+        "url": "https://zillow.com/*",
+        "max_results": [1, 50]
+      }
+    },
+    "redfin": {
+      "plugin": "browser",
+      "search": {
+        "url": "https://redfin.com/*",
+        "max_results": [1, 20]
+      }
+    }
+  }
+}
+EOF
+
+# Test: multi-instance browse shows aliases
+assert_contains "multi-instance: browse shows zillow" \
+    "zillow" \
+    "$(cd "$MULTI_ROOT/sandbox" && run browse)"
+
+assert_contains "multi-instance: browse shows redfin" \
+    "redfin" \
+    "$(cd "$MULTI_ROOT/sandbox" && run browse)"
+
+# Test: browse manifest shows alias namespace
+assert_contains "multi-instance: browse manifest shows zillow.search" \
+    "zillow.search" \
+    "$(cd "$MULTI_ROOT/sandbox" && run browse zillow)"
+
+# Test: instance env var passed to script
+assert_eq "multi-instance: instance identity in script" \
+    '{"type": "result", "value": "zillow:https://zillow.com/homes"}' \
+    "$(run --working-dir "$MULTI_ROOT/sandbox" 'return zillow.search("https://zillow.com/homes")')"
+
+assert_eq "multi-instance: redfin instance identity" \
+    '{"type": "result", "value": "redfin:https://redfin.com/homes"}' \
+    "$(run --working-dir "$MULTI_ROOT/sandbox" 'return redfin.search("https://redfin.com/homes")')"
+
+# Test: cross-alias contract isolation
+assert_contains "multi-instance: zillow rejects redfin URL" \
+    '"type": "error"' \
+    "$(run --working-dir "$MULTI_ROOT/sandbox" 'return zillow.search("https://redfin.com/123")')"
+
+# ---------------------------------------------------------------------------
+# Forced parameter values
+# ---------------------------------------------------------------------------
+
+FORCED_ROOT="$TMPDIR_ROOT/forced_project"
+mkdir -p "$FORCED_ROOT/sandbox/lumon/manifests" "$FORCED_ROOT/plugins/api"
+
+cat > "$FORCED_ROOT/plugins/api/manifest.lumon" <<'EOF'
+define api.call
+  "Make an API call"
+  takes:
+    endpoint: text "API endpoint"
+    api_key: text "API key"
+  returns: text "Response"
+EOF
+
+cat > "$FORCED_ROOT/plugins/api/impl.lumon" <<'EOF'
+implement api.call
+  let result = plugin.exec("python3 call.py", {endpoint: endpoint, api_key: api_key})
+  return result
+EOF
+
+cat > "$FORCED_ROOT/plugins/api/call.py" <<'PYEOF'
+import json, sys
+args = json.load(sys.stdin)
+json.dump(f"{args['endpoint']}:{args['api_key']}", sys.stdout)
+PYEOF
+
+# Config with forced api_key
+cat > "$FORCED_ROOT/.lumon.json" <<'EOF'
+{"plugins": {"api": {"call": {"api_key": "sk-secret-123"}}}}
+EOF
+
+# Test: forced value injected (agent provides only endpoint)
+assert_eq "forced: api_key injected" \
+    '{"type": "result", "value": "/users:sk-secret-123"}' \
+    "$(run --working-dir "$FORCED_ROOT/sandbox" 'return api.call("/users")')"
+
+# Test: browse hides forced params
+BROWSE_FORCED="$(cd "$FORCED_ROOT/sandbox" && run browse api)"
+assert_contains "forced: browse shows endpoint" \
+    "endpoint" \
+    "$BROWSE_FORCED"
+
+# api_key should not appear in browse output (it's forced)
+if [[ "$BROWSE_FORCED" == *"api_key"* ]]; then
+    fail "forced: browse hides api_key" "(not contain) api_key" "$BROWSE_FORCED"
+else
+    pass "forced: browse hides api_key"
+fi
+
+# ---------------------------------------------------------------------------
+# Custom env vars
+# ---------------------------------------------------------------------------
+
+ENV_ROOT="$TMPDIR_ROOT/env_project"
+mkdir -p "$ENV_ROOT/sandbox/lumon/manifests" "$ENV_ROOT/plugins/svc"
+
+cat > "$ENV_ROOT/plugins/svc/manifest.lumon" <<'EOF'
+define svc.ping
+  "Ping the service"
+  returns: text "Response"
+EOF
+
+cat > "$ENV_ROOT/plugins/svc/impl.lumon" <<'EOF'
+implement svc.ping
+  let result = plugin.exec("python3 ping.py", {})
+  return result
+EOF
+
+cat > "$ENV_ROOT/plugins/svc/ping.py" <<'PYEOF'
+import json, sys, os
+api_key = os.environ.get("API_KEY", "none")
+base_url = os.environ.get("BASE_URL", "none")
+instance = os.environ.get("LUMON_PLUGIN_INSTANCE", "none")
+json.dump(f"{instance}:{api_key}:{base_url}", sys.stdout)
+PYEOF
+
+cat > "$ENV_ROOT/.lumon.json" <<'EOF'
+{
+  "plugins": {
+    "svc": {
+      "env": {
+        "API_KEY": "sk-test-456",
+        "BASE_URL": "https://api.example.com"
+      }
+    }
+  }
+}
+EOF
+
+assert_eq "env vars: custom env vars passed to script" \
+    '{"type": "result", "value": "svc:sk-test-456:https://api.example.com"}' \
+    "$(run --working-dir "$ENV_ROOT/sandbox" 'return svc.ping()')"
+
+# ---------------------------------------------------------------------------
+# Namespace conflict (issue #14)
+# ---------------------------------------------------------------------------
+
+CONFLICT_ROOT="$TMPDIR_ROOT/conflict_project"
+mkdir -p "$CONFLICT_ROOT/sandbox/lumon/manifests" "$CONFLICT_ROOT/plugins/ext"
+
+# Plugin manifest
+cat > "$CONFLICT_ROOT/plugins/ext/manifest.lumon" <<'EOF'
+define ext.greet
+  "Greet someone"
+  takes:
+    name: text "Name"
+  returns: text "Greeting"
+EOF
+
+# Plugin impl
+cat > "$CONFLICT_ROOT/plugins/ext/impl.lumon" <<'EOF'
+implement ext.greet
+  let result = plugin.exec("echo hi", {name: name})
+  return result
+EOF
+
+# .lumon.json enabling the plugin
+cat > "$CONFLICT_ROOT/.lumon.json" <<'EOF'
+{"plugins": {"ext": {}}}
+EOF
+
+# Conflicting disk manifest under the same namespace
+cat > "$CONFLICT_ROOT/sandbox/lumon/manifests/ext.lumon" <<'EOF'
+define ext.other
+  "Other fn"
+  returns: text "result"
+EOF
+
+assert_contains "namespace conflict: error on collision" \
+    "Namespace conflict" \
+    "$(run --working-dir "$CONFLICT_ROOT/sandbox" 'return 1')"
+
+# browse specific namespace should also detect conflict
+assert_contains "namespace conflict: browse ext detects conflict" \
+    "Namespace conflict" \
+    "$(cd "$CONFLICT_ROOT/sandbox" && run browse ext 2>&1 || true)"
+
+# browse index should also detect conflict
+assert_contains "namespace conflict: browse index detects conflict" \
+    "Namespace conflict" \
+    "$(cd "$CONFLICT_ROOT/sandbox" && run browse 2>&1 || true)"
 
 # ---------------------------------------------------------------------------
 # Summary

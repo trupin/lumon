@@ -300,3 +300,109 @@ class TestAccessOperators:
     def test_map_in_list_access(self, run):
         r = run('let items = [{name: "a"}, {name: "b"}]\nreturn items[1].name')
         assert r.value == "b"
+
+    def test_map_keyword_dot_access(self, run):
+        """Dot access with a keyword field name like .match (issue #15)."""
+        r = run(
+            'let m = map.set({}, "match", 99)\n'
+            'return m.match'
+        )
+        assert r.value == 99
+
+    def test_map_keyword_dot_access_true(self, run):
+        """Dot access with keyword .true (issue #15)."""
+        r = run(
+            'let m = map.set({}, "true", "yes")\n'
+            'return m.true'
+        )
+        assert r.value == "yes"
+
+    def test_map_chained_keyword_dot_access(self, run):
+        """Chained dot access with keyword field names (issue #15)."""
+        r = run(
+            'let inner = map.set({}, "none", 7)\n'
+            'let outer = map.set({}, "match", inner)\n'
+            'return outer.match.none'
+        )
+        assert r.value == 7
+
+
+# ===================================================================
+# Deep equality for tags, dicts, lists, none
+# ===================================================================
+
+
+class TestDeepEquality:
+    def test_tag_equality(self, run):
+        r = run("return :ok == :ok")
+        assert r.value is True
+
+    def test_tag_inequality(self, run):
+        r = run("return :ok == :error")
+        assert r.value is False
+
+    def test_tag_payload_equality(self, run):
+        r = run('return :ok("a") == :ok("a")')
+        assert r.value is True
+
+    def test_tag_payload_inequality(self, run):
+        r = run('return :ok("a") == :ok("b")')
+        assert r.value is False
+
+    def test_dict_equality(self, run):
+        r = run("return {a: 1, b: 2} == {a: 1, b: 2}")
+        assert r.value is True
+
+    def test_dict_inequality_values(self, run):
+        r = run("return {a: 1} == {a: 2}")
+        assert r.value is False
+
+    def test_dict_inequality_keys(self, run):
+        r = run("return {a: 1} == {b: 1}")
+        assert r.value is False
+
+    def test_list_equality(self, run):
+        r = run("return [1, 2, 3] == [1, 2, 3]")
+        assert r.value is True
+
+    def test_list_inequality_length(self, run):
+        r = run("return [1, 2] == [1, 2, 3]")
+        assert r.value is False
+
+    def test_none_equality(self, run):
+        r = run("return none == none")
+        assert r.value is True
+
+    def test_none_inequality(self, run):
+        r = run("return none == 1")
+        assert r.value is False
+
+    def test_value_vs_none(self, run):
+        r = run("return 1 == none")
+        assert r.value is False
+
+
+# ===================================================================
+# Pipe to lambda stored in variable
+# ===================================================================
+
+
+class TestPipeToVariable:
+    def test_pipe_to_lambda_var(self, run):
+        r = run("let double = fn(x) -> x * 2\nreturn 5 |> double")
+        assert r.value == 10
+
+    def test_pipe_to_lambda_inline(self, run):
+        r = run("return 5 |> fn(x) -> x + 1")
+        assert r.value == 6
+
+
+# ===================================================================
+# Operator error paths
+# ===================================================================
+
+
+class TestOperatorErrors:
+    def test_add_incompatible_types(self, run):
+        r = run('return 1 + "hello"')
+        assert r.type == "error"

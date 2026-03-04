@@ -18,12 +18,12 @@ This is fundamentally different from sandboxing. Sandboxing assumes the agent kn
 2. **Self-implementing agents** — agents write their own capabilities at runtime using only the language's primitives. They build their toolbox as they go.
 3. **Code is memory** — agent-authored functions persist as code. Because the language is compact pseudocode, reloading capabilities is cheap in tokens. The code is the agent's memory, not context.
 4. **Discoverable by design** — a hierarchical interface defines what capabilities can exist. Agents browse the interface (cheap) before loading implementations (expensive). Descriptions are part of the language, not comments.
-5. **Bounded extensibility** — users can add new primitives, consciously expanding the agent's reality. Each extension is an auditable decision.
+5. **Bounded extensibility** — users expand the agent's reality through plugins: self-contained directories with manifests, implementations, and scripts. A `.lumon.json` config controls which plugins are loaded and enforces parameter contracts (URL patterns, numeric ranges, enums). Each extension is an auditable decision.
 6. **Environment-agnostic** — the interpreter runs anywhere (local, cloud, hosted). The language is the same regardless.
 
 ## Architecture
 
-### Two layers
+### Three layers
 
 **Interface (community-maintained)**
 - Hierarchy of namespaces, function signatures, and semantic descriptions
@@ -36,6 +36,16 @@ This is fundamentally different from sandboxing. Sandboxing assumes the agent kn
 - Written by the agent at runtime, using only the language's primitives
 - Varies per user — same interface, different implementations depending on environment
 - New users start with a full interface and zero implementations
+
+**Plugins (project-author-controlled)**
+- Self-contained directories with manifests, implementations, and executable scripts
+- Extend the agent's reality with capabilities that require external programs (web APIs, databases, browsers)
+- Auto-discovered from `plugins/` directory, controlled by `.lumon.json` config
+- Parameter contracts (URL wildcards, numeric ranges, enums) enforce invariants before execution
+- Forced parameter values let project authors hardcode sensitive or policy-driven values (API keys, base URLs) — agents never see them
+- Multi-instance support: the same plugin directory can be mounted under different aliases with different configs and env vars
+- Each instance receives identity (`LUMON_PLUGIN_INSTANCE`) and custom env vars for namespaced storage
+- To the agent, plugin functions look like any other function — the plugin mechanism is invisible
 
 ### Trust model
 
@@ -248,6 +258,8 @@ Primitives have built-in restrictions that the agent cannot see or introspect. R
 2. **User blacklist** — a local config file the user maintains. Personal boundaries (e.g. no social media, no specific sites).
 
 The interpreter checks both before any request. Blocked URLs return `:error` — indistinguishable from "unreachable." The agent has no visibility into the blacklist's existence, contents, or the reason a URL failed.
+
+**Plugins (`plugin.exec`):** Plugin functions are defined with parameter contracts in `.lumon.json`. Contracts restrict parameter values (URL wildcards, numeric ranges, enum lists) and are enforced by the interpreter before execution. Contract violations produce interpreter errors — the agent sees a structured error and can self-correct. The agent discovers contracts via `lumon browse`, where they appear as annotations on parameters. The agent cannot modify contracts or create plugins.
 
 This is a general pattern for **invisible primitive config**: maintainers or users shape the agent's reality through config that the agent cannot introspect.
 

@@ -1,3 +1,4 @@
+import fnmatch
 import os
 from dataclasses import dataclass, field
 
@@ -73,6 +74,99 @@ class MockFS:
             if not has_children:
                 return {"tag": "error", "value": "directory not found"}
         return {"tag": "ok", "value": sorted(entries)}
+
+    def delete(self, path: str) -> dict:
+        norm = self._normalise(path)
+        if not self._is_within_root(norm):
+            return {"tag": "error", "value": "file not found"}
+        if norm not in self._files:
+            return {"tag": "error", "value": "file not found"}
+        del self._files[norm]
+        return {"tag": "ok"}
+
+    def find(self, path: str, pattern: str) -> dict:
+        norm = self._normalise(path)
+        if not self._is_within_root(norm):
+            return {"tag": "error", "value": "directory not found"}
+        prefix = norm + os.sep if norm != os.sep else os.sep
+        matches: list[str] = []
+        for fpath in self._files:
+            if fpath.startswith(prefix) or fpath == norm:
+                rel = fpath[len(prefix):]
+                basename = rel.rsplit(os.sep, 1)[-1] if os.sep in rel else rel
+                if fnmatch.fnmatch(basename, pattern):
+                    matches.append(rel)
+        return {"tag": "ok", "value": sorted(matches)}
+
+    def grep(self, path: str, pattern: str) -> dict:
+        norm = self._normalise(path)
+        if not self._is_within_root(norm):
+            return {"tag": "error", "value": "directory not found"}
+        prefix = norm + os.sep if norm != os.sep else os.sep
+        matches: list[str] = []
+        for fpath in sorted(self._files):
+            if fpath.startswith(prefix):
+                rel = fpath[len(prefix):]
+                content = self._files[fpath]
+                for lineno, line in enumerate(content.splitlines(), 1):
+                    if pattern in line:
+                        matches.append(f"{rel}:{lineno}:{line}")
+        return {"tag": "ok", "value": matches}
+
+    def head(self, path: str, n: float) -> dict:
+        norm = self._normalise(path)
+        if not self._is_within_root(norm):
+            return {"tag": "error", "value": "file not found"}
+        if norm not in self._files:
+            return {"tag": "error", "value": "file not found"}
+        lines = self._files[norm].splitlines()
+        return {"tag": "ok", "value": "\n".join(lines[: int(n)])}
+
+    def tail(self, path: str, n: float) -> dict:
+        norm = self._normalise(path)
+        if not self._is_within_root(norm):
+            return {"tag": "error", "value": "file not found"}
+        if norm not in self._files:
+            return {"tag": "error", "value": "file not found"}
+        lines = self._files[norm].splitlines()
+        count = int(n)
+        selected = lines[-count:] if count < len(lines) else lines
+        return {"tag": "ok", "value": "\n".join(selected)}
+
+    def replace(self, path: str, old: str, new: str) -> dict:
+        norm = self._normalise(path)
+        if not self._is_within_root(norm):
+            return {"tag": "error", "value": "file not found"}
+        if norm not in self._files:
+            return {"tag": "error", "value": "file not found"}
+        self._files[norm] = self._files[norm].replace(old, new)
+        return {"tag": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# MockGit — canned git responses for git.* built-ins
+# ---------------------------------------------------------------------------
+
+class MockGit:
+    """Canned git responses for git.* built-ins.
+
+    Seeded with status_output and log_entries.
+    """
+
+    def __init__(
+        self,
+        *,
+        status_output: str = "",
+        log_entries: list[str] | None = None,
+    ):
+        self._status = status_output
+        self._log = log_entries or []
+
+    def status(self) -> dict:
+        return {"tag": "ok", "value": self._status}
+
+    def log(self, n: float) -> dict:
+        return {"tag": "ok", "value": self._log[: int(n)]}
 
 
 # ---------------------------------------------------------------------------
@@ -180,8 +274,9 @@ class LumonRunner:
         *,
         io: MockFS | None = None,
         http: MockHTTP | None = None,
+        git: MockGit | None = None,
     ) -> RunResult:
-        raw = interpret(code, io_backend=io, http_backend=http)
+        raw = interpret(code, io_backend=io, http_backend=http, git_backend=git)
         return RunResult(output=raw)
 
 

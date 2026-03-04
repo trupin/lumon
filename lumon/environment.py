@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from lumon.ast_nodes import DefineBlock, ImplementBlock
 from lumon.errors import LumonError
 
 
@@ -26,6 +27,20 @@ class Environment:
         # Lazy loader for auto-loading namespaces from disk (shared)
         self._loader: Callable[[str], None] | None = None if parent is None else parent._loader
         self._loading: set[str] = set() if parent is None else parent._loading
+        # Plugin system (shared)
+        self._plugin_dirs: dict[str, str] = {} if parent is None else parent._plugin_dirs
+        self._plugin_contracts: dict[str, dict] = {} if parent is None else parent._plugin_contracts
+        self._plugin_forced_values: dict[str, dict[str, object]] = {} if parent is None else parent._plugin_forced_values
+        self._plugin_instances: dict[str, str] = {} if parent is None else parent._plugin_instances
+        self._plugin_env_vars: dict[str, dict[str, str]] = {} if parent is None else parent._plugin_env_vars
+        self._plugin_executor: Callable[..., object] | None = None if parent is None else parent._plugin_executor
+        # Active plugin state — shared mutable dict so nested calls see updates
+        # Keys: "dir" (str|None), "instance" (str|None), "env" (dict|None)
+        self._active_plugin: dict[str, object] = (
+            {"dir": None, "instance": None, "env": None} if parent is None else parent._active_plugin
+        )
+        # Working directory (shared)
+        self._working_dir: str | None = None if parent is None else parent._working_dir
 
     def get(self, name: str) -> object:
         if name in self._bindings:
@@ -55,6 +70,14 @@ class Environment:
         snap._response_queue = self._response_queue  # shared mutable list
         snap._loader = self._loader
         snap._loading = self._loading
+        snap._plugin_dirs = self._plugin_dirs
+        snap._plugin_contracts = self._plugin_contracts
+        snap._plugin_forced_values = self._plugin_forced_values
+        snap._plugin_instances = self._plugin_instances
+        snap._plugin_env_vars = self._plugin_env_vars
+        snap._plugin_executor = self._plugin_executor
+        snap._active_plugin = self._active_plugin
+        snap._working_dir = self._working_dir
         return snap
 
     def consume_response(self) -> tuple[object] | None:
@@ -73,14 +96,12 @@ class Environment:
         self._namespace_prefixes.add(prefix)
 
     def register_define(self, node: object) -> None:
-        from lumon.ast_nodes import DefineBlock
         assert isinstance(node, DefineBlock)
         self._defines[node.namespace_path] = node
         prefix = node.namespace_path.split(".")[0]
         self._namespace_prefixes.add(prefix)
 
     def register_implement(self, node: object) -> None:
-        from lumon.ast_nodes import ImplementBlock
         assert isinstance(node, ImplementBlock)
         self._implements[node.namespace_path] = node
 
@@ -88,29 +109,34 @@ class Environment:
         """Set the lazy loader callback for auto-loading namespaces from disk."""
         self._loader = loader
 
+    def trigger_loader(self, namespace: str) -> None:
+        """Trigger the lazy loader for a namespace if not already loading."""
+        if self._loader is not None and namespace not in self._loading:
+            self._loading.add(namespace)
+            try:
+                self._loader(namespace)
+            finally:
+                self._loading.discard(namespace)
+
     def is_namespace(self, name: str) -> bool:
         return name in self._namespace_prefixes
 
     def resolve_function(self, name: str) -> tuple[str, ...]:
-        """Resolve a namespace function. Returns ('builtin', callable) or ('user', define, implement)."""
+        """Resolve a namespace function.
+
+        Returns ('builtin', callable) or ('user', define, implement).
+        """
         if name in self._builtins:
             return ("builtin", self._builtins[name])  # type: ignore[return-value]
         if name in self._implements:
             define = self._defines.get(name)
             return ("user", define, self._implements[name])  # type: ignore[return-value]
         # Try lazy-loading the namespace from disk
-        if self._loader is not None:
-            ns = name.split(".")[0]
-            if ns not in self._loading:
-                self._loading.add(ns)
-                try:
-                    self._loader(ns)
-                finally:
-                    self._loading.discard(ns)
-                # Retry after loading
-                if name in self._implements:
-                    define = self._defines.get(name)
-                    return ("user", define, self._implements[name])  # type: ignore[return-value]
+        ns = name.split(".")[0]
+        self.trigger_loader(ns)
+        if name in self._implements:
+            define = self._defines.get(name)
+            return ("user", define, self._implements[name])  # type: ignore[return-value]
         raise LumonError(f"Undefined function: {name}")
 
     def push_call(self, name: str) -> None:
