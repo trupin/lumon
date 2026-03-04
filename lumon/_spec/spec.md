@@ -983,6 +983,18 @@ let msg = "total: \(n * 2 + 1)"       -- "total: 7"
 | `number.min` | `(a: number, b: number) -> number` | Smaller of two |
 | `number.max` | `(a: number, b: number) -> number` | Larger of two |
 | `number.parse` | `(s: text) -> number \| none` | Parse text to number (or none) |
+| `number.random` | `() -> number` | Random float in [0, 1) |
+| `number.random_int` | `(min: number, max: number) -> number` | Random integer in [min, max] inclusive |
+| `number.pow` | `(base: number, exp: number) -> number` | Raise base to exponent |
+| `number.sqrt` | `(n: number) -> number` | Square root |
+| `number.log` | `(n: number) -> number` | Natural logarithm |
+| `number.sign` | `(n: number) -> number` | Sign: 1, -1, or 0 |
+| `number.truncate` | `(n: number) -> number` | Truncate toward zero |
+| `number.clamp` | `(n: number, low: number, high: number) -> number` | Clamp between low and high |
+| `number.to_text` | `(n: number) -> text` | Number to text (no trailing .0) |
+| `number.pi` | `() -> number` | The constant pi |
+| `number.e` | `() -> number` | Euler's number |
+| `number.inf` | `() -> number` | Positive infinity |
 
 ### type
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import random
 
 from lumon.environment import Environment
 from lumon.errors import LumonError
@@ -68,6 +69,26 @@ def _text_from(value: object) -> str:
             return f":{value.name}"
         return f":{value.name}({_text_from(value.payload)})"
     return str(value)
+
+
+def _number_sqrt(n: float) -> float:
+    try:
+        return math.sqrt(n)
+    except ValueError:
+        raise LumonError("math domain error: sqrt of negative number") from None
+
+
+def _number_log(n: float) -> float:
+    try:
+        return math.log(n)
+    except ValueError:
+        raise LumonError("math domain error: log of non-positive number") from None
+
+
+def _number_to_text(n: object) -> str:
+    if isinstance(n, float) and math.isfinite(n) and n == int(n):
+        return str(int(n))
+    return str(n)
 
 
 def _number_parse(s: str) -> object:
@@ -202,6 +223,18 @@ def register_builtins(
     env.register_builtin("number.min", lambda a, b: min(a, b))
     env.register_builtin("number.max", lambda a, b: max(a, b))
     env.register_builtin("number.parse", _number_parse)
+    env.register_builtin("number.random", lambda: random.random())
+    env.register_builtin("number.random_int", lambda lo, hi: random.randint(int(lo), int(hi)))
+    env.register_builtin("number.pow", lambda base, exp: math.pow(base, exp))
+    env.register_builtin("number.sqrt", _number_sqrt)
+    env.register_builtin("number.log", _number_log)
+    env.register_builtin("number.sign", lambda n: (n > 0) - (n < 0))
+    env.register_builtin("number.truncate", lambda n: math.trunc(n))
+    env.register_builtin("number.clamp", lambda n, lo, hi: max(lo, min(hi, n)))
+    env.register_builtin("number.to_text", _number_to_text)
+    env.register_builtin("number.pi", lambda: math.pi)
+    env.register_builtin("number.e", lambda: math.e)
+    env.register_builtin("number.inf", lambda: math.inf)
 
     # --- type.* ---
     env.register_builtin("type.of", _type_of)

@@ -570,6 +570,164 @@ class TestNumberParse:
         assert r.value is None
 
 
+class TestNumberRandom:
+    def test_random_in_range(self, run):
+        r = run('return number.random()')
+        assert 0 <= r.value < 1
+
+    def test_random_is_float(self, run):
+        r = run('return number.random()')
+        assert isinstance(r.value, float)
+
+
+class TestNumberRandomInt:
+    def test_random_int_in_range(self, run):
+        r = run('return number.random_int(1, 10)')
+        assert 1 <= r.value <= 10
+        assert isinstance(r.value, int)
+
+    def test_random_int_min_equals_max(self, run):
+        r = run('return number.random_int(5, 5)')
+        assert r.value == 5
+
+
+class TestNumberPow:
+    def test_pow_integer(self, run):
+        r = run('return number.pow(2, 10)')
+        assert r.value == 1024.0
+
+    def test_pow_fractional(self, run):
+        r = run('return number.pow(4, 0.5)')
+        assert r.value == pytest.approx(2.0)
+
+    def test_pow_zero_exponent(self, run):
+        r = run('return number.pow(5, 0)')
+        assert r.value == 1.0
+
+
+class TestNumberSqrt:
+    def test_sqrt_perfect(self, run):
+        r = run('return number.sqrt(9)')
+        assert r.value == pytest.approx(3.0)
+
+    def test_sqrt_irrational(self, run):
+        r = run('return number.sqrt(2)')
+        assert r.value == pytest.approx(1.41421356, rel=1e-5)
+
+    def test_sqrt_negative_errors(self, run):
+        r = run('return number.sqrt(-1)')
+        assert r.error is not None
+        assert "sqrt" in r.error["message"]
+
+
+class TestNumberLog:
+    def test_log_one(self, run):
+        r = run('return number.log(1)')
+        assert r.value == pytest.approx(0.0)
+
+    def test_log_e(self, run):
+        r = run('return number.log(number.e())')
+        assert r.value == pytest.approx(1.0)
+
+    def test_log_zero_errors(self, run):
+        r = run('return number.log(0)')
+        assert r.error is not None
+        assert "log" in r.error["message"]
+
+    def test_log_negative_errors(self, run):
+        r = run('return number.log(-1)')
+        assert r.error is not None
+        assert "log" in r.error["message"]
+
+
+class TestNumberSign:
+    def test_sign_positive(self, run):
+        r = run('return number.sign(42)')
+        assert r.value == 1
+
+    def test_sign_negative(self, run):
+        r = run('return number.sign(-7)')
+        assert r.value == -1
+
+    def test_sign_zero(self, run):
+        r = run('return number.sign(0)')
+        assert r.value == 0
+
+    def test_sign_float(self, run):
+        r = run('return number.sign(-0.5)')
+        assert r.value == -1
+
+
+class TestNumberTruncate:
+    def test_truncate_positive(self, run):
+        r = run('return number.truncate(3.9)')
+        assert r.value == 3
+
+    def test_truncate_negative(self, run):
+        r = run('return number.truncate(-3.9)')
+        assert r.value == -3
+
+
+class TestNumberClamp:
+    def test_clamp_below(self, run):
+        r = run('return number.clamp(1, 5, 10)')
+        assert r.value == 5
+
+    def test_clamp_within(self, run):
+        r = run('return number.clamp(7, 5, 10)')
+        assert r.value == 7
+
+    def test_clamp_above(self, run):
+        r = run('return number.clamp(15, 5, 10)')
+        assert r.value == 10
+
+
+class TestNumberToText:
+    def test_to_text_integer(self, run):
+        r = run('return number.to_text(5)')
+        assert r.value == "5"
+
+    def test_to_text_float_no_trailing_zero(self, run):
+        r = run('return number.to_text(5.0)')
+        assert r.value == "5"
+
+    def test_to_text_float(self, run):
+        r = run('return number.to_text(3.14)')
+        assert r.value == "3.14"
+
+    def test_to_text_negative(self, run):
+        r = run('return number.to_text(-5.0)')
+        assert r.value == "-5"
+
+    def test_to_text_negative_float(self, run):
+        r = run('return number.to_text(-3.14)')
+        assert r.value == "-3.14"
+
+    def test_to_text_infinity(self, run):
+        r = run('return number.to_text(number.inf())')
+        assert r.value == "inf"
+
+
+class TestNumberPi:
+    def test_pi(self, run):
+        r = run('return number.pi()')
+        assert r.value == pytest.approx(3.14159265, rel=1e-5)
+
+
+class TestNumberE:
+    def test_e(self, run):
+        r = run('return number.e()')
+        assert r.value == pytest.approx(2.71828182, rel=1e-5)
+
+
+class TestNumberInf:
+    def test_inf(self, run):
+        import math
+        r = run('return number.inf()')
+        assert math.isinf(r.value)
+        assert r.value > 0
+
+
 # ===================================================================
 # type.*
 # ===================================================================
