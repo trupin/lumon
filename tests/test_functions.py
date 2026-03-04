@@ -203,6 +203,52 @@ class TestDefineImplement:
         )
         assert r.value == {"tag": "error", "value": "division by zero"}
 
+    def test_keyword_none_in_tag_return_type(self, run):
+        """Keyword 'none' is accepted in tag type expressions like :ok(none) (issue #15)."""
+        r = run(
+            'define browser.close_page\n'
+            '  "Close a page"\n'
+            '  takes:\n'
+            '    id: text "Page ID"\n'
+            '  returns: :ok(none) | :error(text) "Result"\n'
+            '\n'
+            'implement browser.close_page\n'
+            '  return :ok(none)\n'
+            '\n'
+            'return browser.close_page("p1")'
+        )
+        assert r.value == {"tag": "ok"}
+
+    def test_keyword_none_as_standalone_return_type(self, run):
+        """Keyword 'none' is accepted as a standalone return type (issue #15)."""
+        r = run(
+            'define util.noop\n'
+            '  "Do nothing"\n'
+            '  returns: none "Nothing"\n'
+            '\n'
+            'implement util.noop\n'
+            '  return none\n'
+            '\n'
+            'return util.noop()'
+        )
+        assert r.value is None
+
+    def test_keyword_none_in_takes_type(self, run):
+        """Keyword 'none' is accepted as a parameter type (issue #15)."""
+        r = run(
+            'define util.identity\n'
+            '  "Return input"\n'
+            '  takes:\n'
+            '    x: none "A none value"\n'
+            '  returns: none "Same none"\n'
+            '\n'
+            'implement util.identity\n'
+            '  return x\n'
+            '\n'
+            'return util.identity(none)'
+        )
+        assert r.value is None
+
 
 # ===================================================================
 # Lambdas

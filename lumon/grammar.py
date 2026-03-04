@@ -169,7 +169,7 @@ spawn_expects: "expects:" type_expr
             | struct_type
             | tag_type
             | fn_type
-            | IDENT -> type_name
+            | _ident_or_kw -> type_name
 struct_type: "{" IDENT ":" type_expr ("," IDENT ":" type_expr)* "}"
 tag_type: ":" IDENT ("(" type_expr ")")?
 fn_type: FN_KW "(" (type_expr ("," type_expr)*)? ")" ARROW type_expr
