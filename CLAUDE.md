@@ -74,7 +74,7 @@ impl/<ns>.lumon      → Loaded on call (implementations)
 
 Four slash commands for validating correctness:
 
-- `/test` — runs pytest (`/test` for full suite, `/test tests/test_types.py` for a specific file)
+- `/test` — runs pytest and CLI bash tests with code coverage (`/test` for full suite, `/test tests/test_types.py` for a specific file). Always measures coverage via `pytest-cov` and `COVERAGE_PROCESS_START` for subprocesses.
 - `/typecheck` — runs pyright (`/typecheck` for the lumon package, `/typecheck lumon/parser.py` for a specific file)
 - `/lint` — runs pylint (`/lint` for the lumon package, `/lint lumon/plugins.py` for a specific file)
 - `/review` — reviews recent changes for gaps, defects, missing tests, spec drift, and code quality issues
@@ -88,12 +88,13 @@ Four slash commands for validating correctness:
 ### Definition of done
 
 A task is **not done** unless:
-1. `/review` — no unaddressed FIX or TEST items remain
+1. `/review` — no unaddressed FIX, TEST, or COVERAGE items remain
 2. It has a test designed for it
 3. That test passes (`/test`)
 4. No test regressions (all previously passing tests still pass)
 5. No pyright errors in modified files (`/typecheck`)
 6. No pylint errors in modified files (`/lint`)
+7. Code coverage on changed files is at least 90% (checked by `/test` and `/review`)
 
 ## Git Workflow
 

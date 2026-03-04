@@ -8,5 +8,9 @@ build/
 # Virtual environment
 .venv/
 
+# Coverage
+.coverage
+.coverage.*
+
 # Plans
 plans/

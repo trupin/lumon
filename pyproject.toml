@@ -9,7 +9,7 @@ dependencies = ["lark>=1.3"]
 lumon = "lumon.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest", "pyright", "pylint"]
+dev = ["pytest", "pytest-cov", "pyright", "pylint"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -61,6 +61,15 @@ max-line-length = 120
 [tool.pylint.basic]
 # sandbox-guard.py is a deployed hook, not a regular module
 module-naming-style = "any"
+
+[tool.coverage.run]
+source = ["lumon"]
+parallel = true
+omit = ["lumon/_deploy/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
 
 [tool.pyright]
 venvPath = "."

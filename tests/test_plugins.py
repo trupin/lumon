@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
 
 from lumon import interpret
+from lumon.ast_nodes import DefineBlock, ParamDef
 from lumon.errors import LumonError
 from lumon.plugins import (
     classify_contract,
@@ -1506,3 +1508,196 @@ class TestNamespaceConflict:
         assert r["type"] == "error"
         assert "Namespace conflict" in r["message"]
         assert "zillow" in r["message"]
+
+
+# ---------------------------------------------------------------------------
+# exec_plugin_script — real subprocess path (no injected executor)
+# ---------------------------------------------------------------------------
+
+
+class TestExecPluginScriptSubprocess:
+    """Exercise exec_plugin_script lines 258-292 (real subprocess)."""
+
+    def test_success_json_output(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        root = str(tmp_path)
+        script = os.path.join(root, "run.py")
+        with open(script, "w", encoding="utf-8") as f:
+            f.write(
+                'import sys, json\n'
+                'data = json.load(sys.stdin)\n'
+                'json.dump({"tag": "ok", "value": data.get("x", 0)}, sys.stdout)\n'
+            )
+        result = exec_plugin_script(
+            plugin_dir=root,
+            command=f"{sys.executable} {script}",
+            args={"x": 42},
+        )
+        assert isinstance(result, LumonTag)
+        assert result.name == "ok"
+        assert result.payload == 42
+
+    def test_nonzero_exit_returns_error_tag(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        root = str(tmp_path)
+        script = os.path.join(root, "fail.py")
+        with open(script, "w", encoding="utf-8") as f:
+            f.write('import sys\nprint("bad input", file=sys.stderr)\nsys.exit(1)\n')
+        result = exec_plugin_script(
+            plugin_dir=root,
+            command=f"{sys.executable} {script}",
+            args={},
+        )
+        assert isinstance(result, LumonTag)
+        assert result.name == "error"
+        assert "bad input" in str(result.payload)
+
+    def test_invalid_json_on_exit_0_raises(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        root = str(tmp_path)
+        script = os.path.join(root, "badjson.py")
+        with open(script, "w", encoding="utf-8") as f:
+            f.write('print("not valid json{")\n')
+        with pytest.raises(LumonError, match="invalid JSON"):
+            exec_plugin_script(
+                plugin_dir=root,
+                command=f"{sys.executable} {script}",
+                args={},
+            )
+
+    def test_executable_not_found_raises(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        with pytest.raises(LumonError, match="not found"):
+            exec_plugin_script(
+                plugin_dir=str(tmp_path),
+                command="nonexistent_binary_xyz",
+                args={},
+            )
+
+    def test_env_vars_passed_to_subprocess(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        root = str(tmp_path)
+        script = os.path.join(root, "env.py")
+        with open(script, "w", encoding="utf-8") as f:
+            f.write(
+                'import os, json, sys\n'
+                'json.dump(os.environ.get("MY_VAR", ""), sys.stdout)\n'
+            )
+        result = exec_plugin_script(
+            plugin_dir=root,
+            command=f"{sys.executable} {script}",
+            args={},
+            env_vars={"MY_VAR": "hello"},
+        )
+        assert result == "hello"
+
+    def test_instance_passed_as_env_var(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        root = str(tmp_path)
+        script = os.path.join(root, "inst.py")
+        with open(script, "w", encoding="utf-8") as f:
+            f.write(
+                'import os, json, sys\n'
+                'json.dump(os.environ.get("LUMON_PLUGIN_INSTANCE", ""), sys.stdout)\n'
+            )
+        result = exec_plugin_script(
+            plugin_dir=root,
+            command=f"{sys.executable} {script}",
+            args={},
+            instance="my-instance",
+        )
+        assert result == "my-instance"
+
+
+# ---------------------------------------------------------------------------
+# discover_plugins — edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverPluginsEdgeCases:
+    def test_missing_plugin_dir_skipped(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        root = str(tmp_path)
+        plugins_dir = os.path.join(root, "..", "plugins")
+        os.makedirs(plugins_dir)
+        # Config lists a plugin that doesn't exist on disk
+        config = {"plugins": {"nonexistent": {}}}
+        result = discover_plugins(root, config)
+        assert result == []
+
+    def test_missing_manifest_skipped(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        root = str(tmp_path)
+        plugins_dir = os.path.join(root, "..", "plugins", "myplugin")
+        os.makedirs(plugins_dir)
+        # Plugin dir exists but has no manifest.lumon
+        config = {"plugins": {"myplugin": {}}}
+        result = discover_plugins(root, config)
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# validate_contracts — uncovered branches
+# ---------------------------------------------------------------------------
+
+
+class TestValidateContractsEdgeCases:
+    def test_no_params_returns_immediately(self) -> None:
+        """Line 179: define.params is empty."""
+        define = DefineBlock(
+            namespace_path="test.fn",
+            description="Test",
+            params=[],
+            return_type=None,
+            return_description="",
+        )
+        # Should not raise
+        validate_contracts("test.fn", ("value",), define, {"x": "pattern"})
+
+    def test_contract_on_missing_arg_skipped(self) -> None:
+        """Line 186: i >= len(args)."""
+        define = DefineBlock(
+            namespace_path="test.fn",
+            description="Test",
+            params=[ParamDef(name="x", type_expr="text", description="arg")],
+            return_type=None,
+            return_description="",
+        )
+        # Contract exists but no args passed — should not raise
+        validate_contracts("test.fn", (), define, {"x": "pattern"})
+
+    def test_text_contract_on_non_string_raises(self) -> None:
+        """Line 194: text wildcard on non-string value."""
+        define = DefineBlock(
+            namespace_path="test.fn",
+            description="Test",
+            params=[ParamDef(name="x", type_expr="text", description="arg")],
+            return_type=None,
+            return_description="",
+        )
+        with pytest.raises(LumonError, match="expected text"):
+            validate_contracts("test.fn", (42,), define, {"x": "pattern*"})
+
+    def test_number_range_on_non_number_raises(self) -> None:
+        """Line 209: number range on non-number value."""
+        define = DefineBlock(
+            namespace_path="test.fn",
+            description="Test",
+            params=[ParamDef(name="x", type_expr="number", description="arg")],
+            return_type=None,
+            return_description="",
+        )
+        with pytest.raises(LumonError, match="expected number"):
+            validate_contracts("test.fn", ("hello",), define, {"x": [0, 100]})
+
+    def test_enum_on_non_string_raises(self) -> None:
+        """Line 222: enum contract on non-string value."""
+        define = DefineBlock(
+            namespace_path="test.fn",
+            description="Test",
+            params=[ParamDef(name="x", type_expr="text", description="arg")],
+            return_type=None,
+            return_description="",
+        )
+        with pytest.raises(LumonError, match="expected text"):
+            validate_contracts("test.fn", (42,), define, {"x": ["a", "b", "c"]})

@@ -336,3 +336,87 @@ class TestValueSerialization:
     def test_tag_with_payload_to_json(self, run):
         r = run('return :error("fail")')
         assert r.value == {"tag": "error", "value": "fail"}
+
+
+# ===================================================================
+# String interpolation with various types
+# ===================================================================
+
+
+class TestInterpolation:
+    def test_interpolate_none(self, run):
+        r = run('let x = none\nreturn "val: \\(x)"')
+        assert r.value == "val: none"
+
+    def test_interpolate_true(self, run):
+        r = run('return "val: \\(true)"')
+        assert r.value == "val: true"
+
+    def test_interpolate_false(self, run):
+        r = run('return "val: \\(false)"')
+        assert r.value == "val: false"
+
+    def test_interpolate_float(self, run):
+        r = run('return "val: \\(1.5)"')
+        assert r.value == "val: 1.5"
+
+    def test_interpolate_float_whole(self, run):
+        r = run('return "val: \\(2.0)"')
+        assert r.value == "val: 2"
+
+    def test_interpolate_list(self, run):
+        r = run('let xs = [1, 2, 3]\nreturn "val: \\(xs)"')
+        assert r.value == "val: [1, 2, 3]"
+
+    def test_interpolate_map(self, run):
+        r = run('let m = {a: 1}\nreturn "val: \\(m)"')
+        assert r.value == "val: {a: 1}"
+
+    def test_interpolate_tag_no_payload(self, run):
+        r = run('let t = :ok\nreturn "val: \\(t)"')
+        assert r.value == "val: :ok"
+
+    def test_interpolate_tag_with_payload(self, run):
+        r = run('let t = :ok("yes")\nreturn "val: \\(t)"')
+        assert r.value == "val: :ok(yes)"
+
+
+# ===================================================================
+# Index access error paths
+# ===================================================================
+
+
+class TestIndexAccessErrors:
+    def test_index_out_of_bounds(self, run):
+        r = run("return [1, 2, 3][10]")
+        assert r.type == "error"
+
+    def test_index_non_list(self, run):
+        r = run("let x = 42\nreturn x[0]")
+        assert r.type == "error"
+
+
+# ===================================================================
+# Spread on non-map
+# ===================================================================
+
+
+class TestSpreadError:
+    def test_spread_non_map(self, run):
+        r = run("let x = 42\nreturn {...x}")
+        assert r.type == "error"
+
+
+# ===================================================================
+# Field access errors
+# ===================================================================
+
+
+class TestFieldAccessErrors:
+    def test_field_access_non_map(self, run):
+        r = run("let s = 42\nreturn s.length")
+        assert r.type == "error"
+
+    def test_field_access_missing_key(self, run):
+        r = run("return {a: 1}.b")
+        assert r.type == "error"

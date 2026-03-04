@@ -54,12 +54,19 @@ Work through each category below. For each problem found, note the file, line, a
 - Are existing tests still covering the right behavior after changes to shared code?
 - Are there public API changes that aren't reflected in the CLI?
 
+### F. Code coverage
+
+- Run `.venv/bin/python -m coverage report --show-missing` (uses data from last `/test` run)
+- Flag any changed files with coverage below 90%
+- Flag any new functions/methods with 0% coverage
+
 ## 3. Produce the action list
 
 Output a numbered list of **concrete actions**. Each action must be one of:
 
 - **FIX**: A defect or incorrect behavior → describe what's wrong and what correct looks like
 - **TEST**: A missing test → describe the test case (input, expected output)
+- **COVERAGE**: A file or function with insufficient coverage → describe what's uncovered
 - **SPEC**: A gap or ambiguity in the spec → describe what's unclear and suggest resolution
 - **CLEAN**: A code quality issue → describe the problem and the fix
 
@@ -76,9 +83,10 @@ If there are no issues in a category, skip it — don't pad with non-issues.
 
 Order the list by severity:
 1. FIX items (correctness) first
-2. TEST items (coverage) second
-3. SPEC items third
-4. CLEAN items last
+2. TEST items (coverage gaps) second
+3. COVERAGE items (low code coverage) third
+4. SPEC items fourth
+5. CLEAN items last
 
 ## Rules
 

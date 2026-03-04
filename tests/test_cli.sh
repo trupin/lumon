@@ -173,6 +173,10 @@ assert_contains "browse: built-in namespace http" \
     "http.get" \
     "$(run browse http)"
 
+assert_contains "browse: built-in namespace git" \
+    "git.status" \
+    "$(run browse git)"
+
 # Index includes built-in namespaces even without lumon/index.lumon on disk
 assert_contains "browse: index includes built-in io" \
     "io" \
@@ -180,6 +184,10 @@ assert_contains "browse: index includes built-in io" \
 
 assert_contains "browse: index includes built-in text" \
     "text" \
+    "$(run browse)"
+
+assert_contains "browse: index includes built-in git" \
+    "git" \
     "$(run browse)"
 
 # Index merges built-in and user namespaces

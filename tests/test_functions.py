@@ -587,3 +587,100 @@ class TestAutoLoading:
             result = interpret('return missing.func()', working_dir=wd)
             r = RunResult(output=result)
             assert r.type == "error"
+
+
+# ===================================================================
+# Calling non-callable
+# ===================================================================
+
+
+class TestCallErrors:
+    def test_call_non_callable(self, run):
+        r = run("let x = 42\nreturn x(1)")
+        assert r.type == "error"
+
+
+# ===================================================================
+# Pipe to user-defined function
+# ===================================================================
+
+
+class TestUserFunctionPipe:
+    def test_pipe_to_user_function(self, run):
+        code = (
+            'define math.double\n'
+            '  "Double it"\n'
+            '  takes:\n'
+            '    n: number "The number"\n'
+            '  returns: number "Result"\n'
+            '\n'
+            'implement math.double\n'
+            '  return n * 2\n'
+            '\n'
+            'return 5 |> math.double'
+        )
+        r = run(code)
+        assert r.value == 10
+
+
+# ===================================================================
+# User-defined function stored in variable and called
+# ===================================================================
+
+
+class TestUserFunctionRef:
+    def test_store_user_fn_in_variable(self, run):
+        code = (
+            'define math.double\n'
+            '  "Double it"\n'
+            '  takes:\n'
+            '    n: number "The number"\n'
+            '  returns: number "Result"\n'
+            '\n'
+            'implement math.double\n'
+            '  return n * 2\n'
+            '\n'
+            'let f = math.double\n'
+            'return f(21)'
+        )
+        r = run(code)
+        assert r.value == 42
+
+    def test_pass_user_fn_to_map(self, run):
+        code = (
+            'define math.double\n'
+            '  "Double it"\n'
+            '  takes:\n'
+            '    n: number "The number"\n'
+            '  returns: number "Result"\n'
+            '\n'
+            'implement math.double\n'
+            '  return n * 2\n'
+            '\n'
+            'return [1, 2, 3] |> list.map(math.double)'
+        )
+        r = run(code)
+        assert r.value == [2, 4, 6]
+
+
+# ===================================================================
+# Recursion limit
+# ===================================================================
+
+
+class TestRecursionLimit:
+    def test_recursion_error(self):
+        with tempfile.TemporaryDirectory() as wd:
+            code = (
+                'define foo.bar\n'
+                '  "Recurse"\n'
+                '  returns: number "Result"\n'
+                '\n'
+                'implement foo.bar\n'
+                '  return foo.bar()\n'
+                '\n'
+                'return foo.bar()\n'
+            )
+            result = interpret(code, working_dir=wd)
+            assert result["type"] == "error"
+            assert "depth" in result.get("message", "").lower()

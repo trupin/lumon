@@ -134,3 +134,57 @@ class TestPersistence:
             # Neither directory should exist since there are no user blocks
             assert not os.path.exists(impl_dir) or not os.listdir(impl_dir)
             assert not os.path.exists(manifest_dir) or not os.listdir(manifest_dir)
+
+    def test_persist_saves_define(self):
+        """persist=True saves define blocks to disk."""
+        with tempfile.TemporaryDirectory() as wd:
+            code = (
+                'define inbox.read\n'
+                '  "Read messages"\n'
+                '  returns: list<text> "The messages"\n'
+            )
+            result = interpret(code, working_dir=wd, persist=True)
+            assert result["type"] == "result"
+            manifest = os.path.join(wd, "lumon", "manifests", "inbox.lumon")
+            assert os.path.isfile(manifest)
+
+    def test_persist_with_return(self):
+        """persist=True with a return statement returns the value."""
+        with tempfile.TemporaryDirectory() as wd:
+            code = (
+                'define inbox.read\n'
+                '  "Read"\n'
+                '  returns: text "The result"\n'
+                'return 42'
+            )
+            result = interpret(code, working_dir=wd, persist=True)
+            assert result["type"] == "result"
+            assert result["value"] == 42
+
+    def test_loader_malformed_manifest_error(self):
+        """Loader wraps non-LumonError exceptions from malformed files."""
+        with tempfile.TemporaryDirectory() as wd:
+            manifest_dir = os.path.join(wd, "lumon", "manifests")
+            os.makedirs(manifest_dir)
+            with open(os.path.join(manifest_dir, "bad.lumon"), "w", encoding="utf-8") as f:
+                f.write("this is not valid lumon code @@@@\n")
+            result = interpret('return bad.fn()', working_dir=wd)
+            assert result["type"] == "error"
+
+    def test_loader_malformed_impl_error(self):
+        """Loader wraps exceptions from malformed impl files."""
+        with tempfile.TemporaryDirectory() as wd:
+            manifest_dir = os.path.join(wd, "lumon", "manifests")
+            impl_dir = os.path.join(wd, "lumon", "impl")
+            os.makedirs(manifest_dir)
+            os.makedirs(impl_dir)
+            with open(os.path.join(manifest_dir, "bad.lumon"), "w", encoding="utf-8") as f:
+                f.write(
+                    'define bad.fn\n'
+                    '  "A function"\n'
+                    '  returns: text "Result"\n'
+                )
+            with open(os.path.join(impl_dir, "bad.lumon"), "w", encoding="utf-8") as f:
+                f.write("this is not valid lumon @@@@\n")
+            result = interpret('return bad.fn()', working_dir=wd)
+            assert result["type"] == "error"
