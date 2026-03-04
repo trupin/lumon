@@ -243,10 +243,42 @@ IO_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
         (TText(),),
         TUnion((TTag("ok", TList(TText())), TTag("error", TText()))),
     ),
+    "io.delete": (
+        (TText(),),
+        TUnion((TTag("ok"), TTag("error", TText()))),
+    ),
+    "io.find": (
+        (TText(), TText()),
+        TUnion((TTag("ok", TList(TText())), TTag("error", TText()))),
+    ),
+    "io.grep": (
+        (TText(), TText()),
+        TUnion((TTag("ok", TList(TText())), TTag("error", TText()))),
+    ),
+    "io.head": (
+        (TText(), TNumber()),
+        TUnion((TTag("ok", TText()), TTag("error", TText()))),
+    ),
+    "io.tail": (
+        (TText(), TNumber()),
+        TUnion((TTag("ok", TText()), TTag("error", TText()))),
+    ),
+    "io.replace": (
+        (TText(), TText(), TText()),
+        TUnion((TTag("ok"), TTag("error", TText()))),
+    ),
 }
 
 HTTP_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
     "http.get": ((TText(),), TUnion((TTag("ok", TText()), TTag("error", TText())))),
+}
+
+GIT_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
+    "git.status": ((), TUnion((TTag("ok", TText()), TTag("error", TText())))),
+    "git.log": (
+        (TNumber(),),
+        TUnion((TTag("ok", TList(TText())), TTag("error", TText()))),
+    ),
 }
 
 
@@ -664,6 +696,7 @@ def type_check(
     *,
     io_backend: object = None,
     http_backend: object = None,
+    git_backend: object = None,
 ) -> None:
     """Run static type checking on a parsed AST. Raises LumonError on type errors."""
     sigs = dict(BUILTIN_SIGS)
@@ -671,5 +704,7 @@ def type_check(
         sigs.update(IO_SIGS)
     if http_backend is not None:
         sigs.update(HTTP_SIGS)
+    if git_backend is not None:
+        sigs.update(GIT_SIGS)
     env = TypeEnv()
     check_node(ast, env, sigs)

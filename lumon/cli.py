@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from lumon import __version__
-from lumon.backends import RealFS
+from lumon.backends import RealFS, RealGit
 from lumon.interpreter import interpret
 from lumon.plugins import disk_manifest_namespaces, load_config, split_contracts
 from lumon.serializer import deserialize
@@ -85,9 +85,11 @@ def cmd_run_code(code: str) -> int:
         responses = []
 
     io_backend = RealFS(".")
+    git_backend = RealGit(".")
     result = interpret(
         code,
         io_backend=io_backend,
+        git_backend=git_backend,
         responses=responses if responses else None,
         working_dir=".",
         persist=True,

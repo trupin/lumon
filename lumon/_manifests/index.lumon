@@ -5,3 +5,4 @@ number -- Numeric operations
 type   -- Type introspection
 io     -- File system I/O
 http   -- HTTP requests (read-only, blacklist-filtered)
+git    -- Git repository operations

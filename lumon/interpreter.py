@@ -154,6 +154,7 @@ def interpret(
     *,
     io_backend: object = None,
     http_backend: object = None,
+    git_backend: object = None,
     responses: list[object] | None = None,
     working_dir: str | None = None,
     persist: bool = False,
@@ -169,11 +170,11 @@ def interpret(
     """
     try:
         ast = parse(code)
-        type_check(ast, io_backend=io_backend, http_backend=http_backend)
+        type_check(ast, io_backend=io_backend, http_backend=http_backend, git_backend=git_backend)
         env = Environment()
         if responses:
             env._response_queue.extend(responses)
-        register_builtins(env, io_backend, http_backend)
+        register_builtins(env, io_backend, http_backend, git_backend)
         if working_dir is not None:
             env._working_dir = working_dir
             _setup_loader(env, working_dir)

@@ -16,3 +16,45 @@ define io.list_dir
   takes:
     path: text "The directory path"
   returns: :ok(list<text>) | :error(text) "List of file names or error"
+
+define io.delete
+  "Delete a file"
+  takes:
+    path: text "The file to delete"
+  returns: :ok | :error(text) "Success or error with message"
+
+define io.find
+  "Find files matching a glob pattern"
+  takes:
+    path: text "The directory to search from"
+    pattern: text "Glob pattern to match (e.g. *.md)"
+  returns: :ok(list<text>) | :error(text) "List of relative file paths or error"
+
+define io.grep
+  "Search files for a substring"
+  takes:
+    path: text "The directory to search from"
+    pattern: text "Substring to search for"
+  returns: :ok(list<text>) | :error(text) "List of filepath:line:content matches or error"
+
+define io.head
+  "Read the first n lines of a file"
+  takes:
+    path: text "The file to read"
+    n: number "Number of lines"
+  returns: :ok(text) | :error(text) "The first n lines or error"
+
+define io.tail
+  "Read the last n lines of a file"
+  takes:
+    path: text "The file to read"
+    n: number "Number of lines"
+  returns: :ok(text) | :error(text) "The last n lines or error"
+
+define io.replace
+  "Replace all occurrences of a substring in a file"
+  takes:
+    path: text "The file to modify"
+    old: text "The substring to find"
+    new: text "The replacement substring"
+  returns: :ok | :error(text) "Success or error with message"

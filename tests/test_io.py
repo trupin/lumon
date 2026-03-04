@@ -140,3 +140,228 @@ class TestIoPathSecurity:
         # Both should be :error — the agent can't tell the difference
         assert r_traversal.tag_name == "error"
         assert r_missing.tag_name == "error"
+
+    def test_delete_path_traversal_blocked(self, run):
+        fs = MockFS()
+        r = run('return io.delete("../../evil.md")', io=fs)
+        assert r.tag_name == "error"
+
+    def test_delete_absolute_path_blocked(self, run):
+        fs = MockFS()
+        r = run('return io.delete("/etc/passwd")', io=fs)
+        assert r.tag_name == "error"
+
+    def test_find_path_traversal_blocked(self, run):
+        fs = MockFS()
+        r = run('return io.find("../../", "*.md")', io=fs)
+        assert r.tag_name == "error"
+
+    def test_find_absolute_path_blocked(self, run):
+        fs = MockFS()
+        r = run('return io.find("/etc", "*")', io=fs)
+        assert r.tag_name == "error"
+
+    def test_grep_path_traversal_blocked(self, run):
+        fs = MockFS()
+        r = run('return io.grep("../../", "secret")', io=fs)
+        assert r.tag_name == "error"
+
+    def test_grep_absolute_path_blocked(self, run):
+        fs = MockFS()
+        r = run('return io.grep("/etc", "root")', io=fs)
+        assert r.tag_name == "error"
+
+    def test_head_path_traversal_blocked(self, run):
+        fs = MockFS()
+        r = run('return io.head("../../etc/passwd", 5)', io=fs)
+        assert r.tag_name == "error"
+
+    def test_head_absolute_path_blocked(self, run):
+        fs = MockFS()
+        r = run('return io.head("/etc/passwd", 5)', io=fs)
+        assert r.tag_name == "error"
+
+    def test_tail_path_traversal_blocked(self, run):
+        fs = MockFS()
+        r = run('return io.tail("../../etc/passwd", 5)', io=fs)
+        assert r.tag_name == "error"
+
+    def test_tail_absolute_path_blocked(self, run):
+        fs = MockFS()
+        r = run('return io.tail("/etc/passwd", 5)', io=fs)
+        assert r.tag_name == "error"
+
+    def test_replace_path_traversal_blocked(self, run):
+        fs = MockFS()
+        r = run('return io.replace("../../evil.md", "a", "b")', io=fs)
+        assert r.tag_name == "error"
+
+    def test_replace_absolute_path_blocked(self, run):
+        fs = MockFS()
+        r = run('return io.replace("/etc/passwd", "a", "b")', io=fs)
+        assert r.tag_name == "error"
+
+    def test_traversal_errors_indistinguishable(self, run):
+        """All sandbox violations look identical to missing-file errors."""
+        fs = MockFS()
+        fns = [
+            ('io.delete("../../x")', 'io.delete("nope")'),
+            ('io.head("../../x", 1)', 'io.head("nope", 1)'),
+            ('io.tail("../../x", 1)', 'io.tail("nope", 1)'),
+            ('io.replace("../../x", "a", "b")', 'io.replace("nope", "a", "b")'),
+        ]
+        for escape_code, missing_code in fns:
+            r_escape = run(f'return {escape_code}', io=fs)
+            r_missing = run(f'return {missing_code}', io=fs)
+            assert r_escape.tag_name == "error"
+            assert r_missing.tag_name == "error"
+
+
+# ===================================================================
+# io.delete
+# ===================================================================
+
+class TestIoDelete:
+    def test_delete_existing(self, run):
+        fs = MockFS({"file.md": "content"})
+        r = run('return io.delete("file.md")', io=fs)
+        assert r.tag_name == "ok"
+
+    def test_delete_missing(self, run):
+        fs = MockFS()
+        r = run('return io.delete("missing.md")', io=fs)
+        assert r.tag_name == "error"
+
+    def test_write_then_delete_then_read(self, run):
+        fs = MockFS({"file.md": "content"})
+        r = run(
+            'let d = io.delete("file.md")\n'
+            'return io.read("file.md")',
+            io=fs,
+        )
+        assert r.tag_name == "error"
+
+
+# ===================================================================
+# io.find
+# ===================================================================
+
+class TestIoFind:
+    def test_find_by_pattern(self, run):
+        fs = MockFS({"a.md": "a", "b.txt": "b", "c.md": "c"})
+        r = run('return io.find(".", "*.md")', io=fs)
+        assert r.tag_name == "ok"
+        assert sorted(r.tag_value) == ["a.md", "c.md"]
+
+    def test_find_no_matches(self, run):
+        fs = MockFS({"a.txt": "a"})
+        r = run('return io.find(".", "*.md")', io=fs)
+        assert r.tag_name == "ok"
+        assert r.tag_value == []
+
+    def test_find_nested_dirs(self, run):
+        fs = MockFS({"dir/sub/file.md": "x", "dir/other.txt": "y"})
+        r = run('return io.find("dir", "*.md")', io=fs)
+        assert r.tag_name == "ok"
+        assert "sub/file.md" in r.tag_value
+
+
+# ===================================================================
+# io.grep
+# ===================================================================
+
+class TestIoGrep:
+    def test_grep_match_found(self, run):
+        fs = MockFS({"file.md": "hello world\ngoodbye"})
+        r = run('return io.grep(".", "hello")', io=fs)
+        assert r.tag_name == "ok"
+        assert len(r.tag_value) == 1
+        assert "hello" in r.tag_value[0]
+        assert ":1:" in r.tag_value[0]
+
+    def test_grep_no_match(self, run):
+        fs = MockFS({"file.md": "hello world"})
+        r = run('return io.grep(".", "xyz")', io=fs)
+        assert r.tag_name == "ok"
+        assert r.tag_value == []
+
+    def test_grep_multi_file(self, run):
+        fs = MockFS({"a.md": "foo bar", "b.md": "baz foo"})
+        r = run('return io.grep(".", "foo")', io=fs)
+        assert r.tag_name == "ok"
+        assert len(r.tag_value) == 2
+
+
+# ===================================================================
+# io.head
+# ===================================================================
+
+class TestIoHead:
+    def test_head_first_3_lines(self, run):
+        fs = MockFS({"file.md": "a\nb\nc\nd\ne"})
+        r = run('return io.head("file.md", 3)', io=fs)
+        assert r.tag_name == "ok"
+        assert r.tag_value == "a\nb\nc"
+
+    def test_head_n_larger_than_file(self, run):
+        fs = MockFS({"file.md": "a\nb"})
+        r = run('return io.head("file.md", 10)', io=fs)
+        assert r.tag_name == "ok"
+        assert r.tag_value == "a\nb"
+
+    def test_head_empty_file(self, run):
+        fs = MockFS({"file.md": ""})
+        r = run('return io.head("file.md", 3)', io=fs)
+        assert r.tag_name == "ok"
+        assert r.tag_value == ""
+
+    def test_head_missing_file(self, run):
+        fs = MockFS()
+        r = run('return io.head("missing.md", 3)', io=fs)
+        assert r.tag_name == "error"
+
+
+# ===================================================================
+# io.tail
+# ===================================================================
+
+class TestIoTail:
+    def test_tail_last_3_lines(self, run):
+        fs = MockFS({"file.md": "a\nb\nc\nd\ne"})
+        r = run('return io.tail("file.md", 3)', io=fs)
+        assert r.tag_name == "ok"
+        assert r.tag_value == "c\nd\ne"
+
+    def test_tail_n_larger_than_file(self, run):
+        fs = MockFS({"file.md": "a\nb"})
+        r = run('return io.tail("file.md", 10)', io=fs)
+        assert r.tag_name == "ok"
+        assert r.tag_value == "a\nb"
+
+    def test_tail_missing_file(self, run):
+        fs = MockFS()
+        r = run('return io.tail("missing.md", 3)', io=fs)
+        assert r.tag_name == "error"
+
+
+# ===================================================================
+# io.replace
+# ===================================================================
+
+class TestIoReplace:
+    def test_replace_all_occurrences(self, run):
+        fs = MockFS({"file.md": "foo bar foo"})
+        r = run('return io.replace("file.md", "foo", "baz")', io=fs)
+        assert r.tag_name == "ok"
+        assert fs.read("file.md") == {"tag": "ok", "value": "baz bar baz"}
+
+    def test_replace_no_match_still_ok(self, run):
+        fs = MockFS({"file.md": "hello"})
+        r = run('return io.replace("file.md", "xyz", "abc")', io=fs)
+        assert r.tag_name == "ok"
+        assert fs.read("file.md") == {"tag": "ok", "value": "hello"}
+
+    def test_replace_missing_file(self, run):
+        fs = MockFS()
+        r = run('return io.replace("missing.md", "a", "b")', io=fs)
+        assert r.tag_name == "error"

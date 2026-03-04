@@ -883,6 +883,12 @@ Built-in signatures use type variables (`a`, `b`) for generic operations. The ty
 | `io.read` | `(path: text) -> :ok(text) \| :error(text)` | Read a file's contents |
 | `io.write` | `(path: text, content: text) -> :ok \| :error(text)` | Write content to a file |
 | `io.list_dir` | `(path: text) -> :ok(list<text>) \| :error(text)` | List files in a directory |
+| `io.delete` | `(path: text) -> :ok \| :error(text)` | Delete a file |
+| `io.find` | `(path: text, pattern: text) -> :ok(list<text>) \| :error(text)` | Find files matching a glob pattern (recursive) |
+| `io.grep` | `(path: text, pattern: text) -> :ok(list<text>) \| :error(text)` | Search files for substring, returns `filepath:line:content` |
+| `io.head` | `(path: text, n: number) -> :ok(text) \| :error(text)` | First n lines of a file |
+| `io.tail` | `(path: text, n: number) -> :ok(text) \| :error(text)` | Last n lines of a file |
+| `io.replace` | `(path: text, old: text, new: text) -> :ok \| :error(text)` | Replace all occurrences of old with new in a file |
 
 All paths are relative to the **root directory**, which is the working directory where the interpreter is launched. The interpreter normalizes paths and resolves symlinks before checking — paths that resolve outside the root return `:error` (indistinguishable from "file not found"). The agent is not aware that path restrictions exist.
 
@@ -893,6 +899,15 @@ All paths are relative to the **root directory**, which is the working directory
 | `http.get` | `(url: text) -> :ok(text) \| :error(text)` | Fetch a URL's content (read-only, blacklist-filtered) |
 
 No POST, no auth, no headers. Blacklisted URLs return `:error` (indistinguishable from unreachable).
+
+### git
+
+| Function | Signature | Description |
+| :---- | :---- | :---- |
+| `git.status` | `() -> :ok(text) \| :error(text)` | Porcelain git status output |
+| `git.log` | `(n: number) -> :ok(list<text>) \| :error(text)` | Last n commits as `"hash subject"` strings |
+
+Git functions are only available when a git backend is provided. In the CLI, this is automatic. The git backend runs real git commands via subprocess.
 
 ### text
 
