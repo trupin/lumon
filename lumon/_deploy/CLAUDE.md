@@ -4,6 +4,53 @@ You are an agent operating inside Lumon, a safe interpreted language. You intera
 
 **IMPORTANT**: All `lumon` commands MUST use `--working-dir sandbox` to stay sandboxed inside the `sandbox/` directory. Never omit this flag.
 
+## Code organization — files first, always
+
+**Never pass inline Lumon code to the CLI.** Always write code to `.lumon` files in the `sandbox/` directory and run them from there.
+
+- Write all `define`, `implement`, and `test` blocks to files using the Edit/Write tools
+- Run scripts with `lumon --working-dir sandbox path/to/script.lumon`
+- This ensures your code is saved, versioned, and reusable across sessions
+
+### Library structure
+
+Organize your code as a **library of small, reusable functions**. Every function you write should be general enough to use in multiple contexts — not hardcoded to a single task.
+
+```
+sandbox/
+  lumon/
+    manifests/       # define blocks (function signatures)
+      inbox.lumon
+      tasks.lumon
+      utils.lumon    # general-purpose helpers
+    impl/            # implement blocks (function bodies)
+      inbox.lumon
+      tasks.lumon
+      utils.lumon
+    tests/           # test blocks
+      inbox.lumon
+      tasks.lumon
+      utils.lumon
+  scripts/           # top-level scripts that compose library functions
+    process_inbox.lumon
+    daily_report.lumon
+```
+
+**Separation of concerns:**
+- `manifests/` and `impl/` hold your **library** — reusable functions organized by namespace
+- `scripts/` holds **task-specific scripts** that compose library functions to do real work
+- Never put task-specific logic inside library functions — keep them generic
+
+### Refactoring discipline
+
+Regularly refactor your library to keep it clean and reusable:
+
+- **After completing a task**, review the functions you wrote. Extract any hardcoded logic into parameters. If a function does two things, split it.
+- **Before starting a task**, check if existing library functions can be composed to solve it. Reuse before writing new code.
+- **When you notice duplication** across namespaces, extract a shared helper into a `utils` namespace.
+- **Keep functions small** — each function should do one thing. If an `implement` block is longer than ~15 lines, it probably needs to be split.
+- **Name for reuse** — `tasks.filter_by_status(items, status)` is reusable; `tasks.get_urgent_from_inbox()` is not.
+
 ## How to read the language spec
 
 ```bash
@@ -27,10 +74,20 @@ Read the signatures carefully — they include parameter types, descriptions, an
 
 ## How to implement functions
 
-Write `implement` blocks by passing Lumon code to the CLI. The interpreter saves them to disk automatically.
+Write `define` blocks to manifest files and `implement` blocks to impl files using the Edit/Write tools, then run them to register:
 
-```bash
-lumon --working-dir sandbox 'implement inbox.read
+**Step 1** — Write the signature to `sandbox/lumon/manifests/inbox.lumon`:
+```
+define inbox.read
+  "Extract list items from a markdown file"
+  takes:
+    path: text "Path to the markdown file"
+  returns: :ok(list<text>) | :error(text) "The list items or an error"
+```
+
+**Step 2** — Write the implementation to `sandbox/lumon/impl/inbox.lumon`:
+```
+implement inbox.read
   let result = io.read(path)
   match result
     :error(m) -> return :error(m)
@@ -40,23 +97,31 @@ lumon --working-dir sandbox 'implement inbox.read
         |> list.filter(fn(l) -> text.starts_with(l, "- "))
         |> list.map(fn(l) -> text.slice(l, 2, text.length(l)))
       return :ok(items)
-'
+```
+
+**Step 3** — Use the function from a script file (e.g., `sandbox/scripts/process.lumon`):
+```
+let result = inbox.read("INBOX.md")
+match result
+  :ok(items) -> return items
+  :error(m) -> return "failed: " + m
+```
+
+**Step 4** — Run the script:
+```bash
+lumon --working-dir sandbox scripts/process.lumon
 ```
 
 ## How to run code
 
+Always write code to a `.lumon` file first, then run it:
+
 ```bash
-# Inline expression
-lumon --working-dir sandbox 'return list.sort([3, 1, 2])'
+# Run a script file
+lumon --working-dir sandbox scripts/my_task.lumon
 
-# Call a function you implemented
-lumon --working-dir sandbox 'return inbox.read("INBOX.md")'
-
-# From a file
-lumon --working-dir sandbox impl/inbox.lumon
-
-# From stdin
-echo 'return 42' | lumon --working-dir sandbox
+# Run a test file
+lumon --working-dir sandbox test inbox
 ```
 
 All output is structured JSON:
