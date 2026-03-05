@@ -1003,6 +1003,22 @@ let msg = "total: \(n * 2 + 1)"       -- "total: 7"
 | `type.of` | `(value: a) -> text` | Returns type name: "text", "number", etc. |
 | `type.is` | `(value: a, t: text) -> bool` | Check if value is of type |
 
+### time
+
+All timestamps are Unix epoch milliseconds (UTC).
+
+| Function | Signature | Description |
+| :---- | :---- | :---- |
+| `time.now` | `() -> number` | Current UTC timestamp in milliseconds |
+| `time.wait` | `(ms: number) -> none` | Sleep for ms; error if ms < 0 or > 60000 |
+| `time.format` | `(timestamp: number, pattern: text) -> text` | Format timestamp with strftime pattern |
+| `time.parse` | `(text: text, pattern: text) -> number \| none` | Parse date string to timestamp (none on failure) |
+| `time.since` | `(timestamp: number) -> number` | Milliseconds elapsed since timestamp |
+| `time.date` | `() -> map` | Current UTC date as {year, month, day, hour, minute, second} |
+| `time.add` | `(timestamp: number, ms: number) -> number` | Add ms to timestamp |
+| `time.diff` | `(a: number, b: number) -> number` | Difference a - b in milliseconds |
+| `time.timeout` | `(ms: number, fn() -> a) -> :ok(a) \| :timeout` | Run fn with timeout; error if ms < 0 or > 60000 |
+
 ---
 
 ## 10. Execution Model

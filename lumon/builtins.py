@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import concurrent.futures
 import math
 import random
+import time as _time
+from datetime import datetime, timezone
 
 from lumon.environment import Environment
-from lumon.errors import LumonError
+from lumon.errors import AskSignal, LumonError, ReturnSignal, SpawnSignal
 from lumon.plugins import exec_plugin_script
 from lumon.values import LumonFunction, LumonTag, is_truthy
 
@@ -134,6 +137,73 @@ def _list_deduplicate(items: list) -> list:
     return result
 
 
+_TIME_CAP_MS = 60000
+
+
+def _time_wait(ms: float) -> None:
+    if ms < 0:
+        raise LumonError("time.wait: ms must not be negative")
+    if ms > _TIME_CAP_MS:
+        raise LumonError("time.wait: ms exceeds 60000ms cap")
+    _time.sleep(ms / 1000)
+
+
+def _time_format(timestamp: float, pattern: str) -> str:
+    try:
+        dt = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
+        return dt.strftime(pattern)
+    except (ValueError, OSError) as exc:
+        raise LumonError(f"time.format: {exc}") from None
+
+
+def _time_parse(text: str, pattern: str) -> object:
+    try:
+        dt = datetime.strptime(text, pattern).replace(tzinfo=timezone.utc)
+        return dt.timestamp() * 1000
+    except (ValueError, OverflowError):
+        return None
+
+
+def _time_date() -> dict:
+    now = datetime.now(tz=timezone.utc)
+    return {
+        "year": now.year,
+        "month": now.month,
+        "day": now.day,
+        "hour": now.hour,
+        "minute": now.minute,
+        "second": now.second,
+    }
+
+
+def _time_timeout(ms: float, fn_val: object) -> LumonTag:
+    if ms < 0:
+        raise LumonError("time.timeout: ms must not be negative")
+    if ms > _TIME_CAP_MS:
+        raise LumonError("time.timeout: ms exceeds 60000ms cap")
+
+    exc_holder: list[Exception] = []
+
+    def _run() -> object:
+        try:
+            return _call_fn(fn_val, [])
+        except (LumonError, AskSignal, SpawnSignal, ReturnSignal) as e:
+            exc_holder.append(e)
+            raise
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(_run)
+        try:
+            result = future.result(timeout=ms / 1000)
+            return LumonTag("ok", result)
+        except concurrent.futures.TimeoutError:
+            return LumonTag("timeout")
+        except Exception as exc:
+            if exc_holder:
+                raise exc_holder[0] from exc
+            raise
+
+
 def _wrap_tag_result(backend_result: dict) -> LumonTag:
     """Convert a MockFS/MockHTTP dict result to a LumonTag."""
     tag_name = backend_result.get("tag", "error")
@@ -239,6 +309,17 @@ def register_builtins(
     # --- type.* ---
     env.register_builtin("type.of", _type_of)
     env.register_builtin("type.is", _type_is)
+
+    # --- time.* ---
+    env.register_builtin("time.now", lambda: _time.time() * 1000)
+    env.register_builtin("time.wait", _time_wait)
+    env.register_builtin("time.format", _time_format)
+    env.register_builtin("time.parse", _time_parse)
+    env.register_builtin("time.since", lambda ts: _time.time() * 1000 - ts)
+    env.register_builtin("time.date", _time_date)
+    env.register_builtin("time.add", lambda ts, ms: ts + ms)
+    env.register_builtin("time.diff", lambda a, b: a - b)
+    env.register_builtin("time.timeout", _time_timeout)
 
     # --- io.* ---
     if io_backend is not None:

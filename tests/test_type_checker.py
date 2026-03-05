@@ -257,3 +257,57 @@ class TestLambdaTypeMismatch:
         """list.filter expects fn(a) -> bool, passing fn returning number is an error."""
         r = run('return list.filter([1, 2, 3], fn(x) -> x * 2)')
         assert r.type == "error"
+
+
+# ===================================================================
+# time.* type errors
+# ===================================================================
+
+class TestTimeTypeErrors:
+    def test_wait_with_text(self, run):
+        r = run('return time.wait("100")')
+        assert r.type == "error"
+
+    def test_format_first_arg_text(self, run):
+        r = run('return time.format("not-a-number", "%Y")')
+        assert r.type == "error"
+
+    def test_format_second_arg_number(self, run):
+        r = run('return time.format(1000, 42)')
+        assert r.type == "error"
+
+    def test_parse_first_arg_number(self, run):
+        r = run('return time.parse(12345, "%Y")')
+        assert r.type == "error"
+
+    def test_parse_second_arg_number(self, run):
+        r = run('return time.parse("2024", 42)')
+        assert r.type == "error"
+
+    def test_now_with_args(self, run):
+        r = run('return time.now(42)')
+        assert r.type == "error"
+
+    def test_add_with_text(self, run):
+        r = run('return time.add(1000, "500")')
+        assert r.type == "error"
+
+    def test_timeout_non_function(self, run):
+        r = run('return time.timeout(1000, 42)')
+        assert r.type == "error"
+
+    def test_timeout_wrong_arity(self, run):
+        r = run('return time.timeout(1000, fn(x) -> x)')
+        assert r.type == "error"
+
+    def test_since_with_text(self, run):
+        r = run('return time.since("hello")')
+        assert r.type == "error"
+
+    def test_diff_with_text(self, run):
+        r = run('return time.diff("a", "b")')
+        assert r.type == "error"
+
+    def test_date_with_args(self, run):
+        r = run('return time.date(42)')
+        assert r.type == "error"

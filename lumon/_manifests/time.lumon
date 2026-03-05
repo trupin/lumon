@@ -1,0 +1,54 @@
+define time.now
+  "Current UTC timestamp in milliseconds since epoch"
+  returns: number "Unix epoch milliseconds"
+
+define time.wait
+  "Sleep for the given number of milliseconds (max 60000)"
+  takes:
+    ms: number "Milliseconds to wait"
+  returns: none "Nothing"
+
+define time.format
+  "Format a timestamp using a strftime pattern"
+  takes:
+    timestamp: number "Unix epoch milliseconds"
+    pattern: text "strftime format pattern"
+  returns: text "Formatted date/time string"
+
+define time.parse
+  "Parse a date/time string using a strftime pattern (none on failure)"
+  takes:
+    text: text "Date/time string to parse"
+    pattern: text "strftime format pattern"
+  returns: number | none "Unix epoch milliseconds or none"
+
+define time.since
+  "Milliseconds elapsed since the given timestamp"
+  takes:
+    timestamp: number "Unix epoch milliseconds"
+  returns: number "Elapsed milliseconds"
+
+define time.date
+  "Current UTC date/time as a map with year, month, day, hour, minute, second"
+  returns: map "Date components"
+
+define time.add
+  "Add milliseconds to a timestamp"
+  takes:
+    timestamp: number "Unix epoch milliseconds"
+    ms: number "Milliseconds to add"
+  returns: number "New timestamp"
+
+define time.diff
+  "Difference between two timestamps (a - b)"
+  takes:
+    a: number "First timestamp"
+    b: number "Second timestamp"
+  returns: number "Difference in milliseconds"
+
+define time.timeout
+  "Run a function with a timeout (max 60000ms)"
+  takes:
+    ms: number "Timeout in milliseconds"
+    fn: fn() -> a "Function to execute"
+  returns: :ok(a) | :timeout "Result or timeout tag"

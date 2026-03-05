@@ -243,6 +243,16 @@ BUILTIN_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
     # type.*
     "type.of": ((TAny(),), TText()),
     "type.is": ((TAny(), TText()), TBool()),
+    # time.*
+    "time.now": ((), TNumber()),
+    "time.wait": ((TNumber(),), TNone()),
+    "time.format": ((TNumber(), TText()), TText()),
+    "time.parse": ((TText(), TText()), TUnion((TNumber(), TNone()))),
+    "time.since": ((TNumber(),), TNumber()),
+    "time.date": ((), TMap()),
+    "time.add": ((TNumber(), TNumber()), TNumber()),
+    "time.diff": ((TNumber(), TNumber()), TNumber()),
+    "time.timeout": ((TNumber(), TFn((), _A)), TUnion((TTag("ok", _A), TTag("timeout")))),
 }
 
 IO_SIGS: dict[str, tuple[tuple[object, ...], object]] = {

@@ -177,6 +177,10 @@ assert_contains "browse: built-in namespace git" \
     "git.status" \
     "$(run browse git)"
 
+assert_contains "browse: built-in namespace time" \
+    "time.now" \
+    "$(run browse time)"
+
 # Index includes built-in namespaces even without lumon/index.lumon on disk
 assert_contains "browse: index includes built-in io" \
     "io" \
