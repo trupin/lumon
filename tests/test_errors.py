@@ -3,7 +3,7 @@ and recoverable errors (tag returns, execution continues)."""
 
 import pytest
 
-from tests.conftest import MockFS, MockHTTP
+from tests.conftest import MockFS
 
 
 @pytest.fixture
@@ -104,18 +104,6 @@ class TestRecoverableErrors:
         )
         assert r.type == "result"
         assert r.value.startswith("handled:")
-
-    def test_http_error_then_continue(self, run):
-        http = MockHTTP()
-        r = run(
-            'let result = http.get("https://missing.com")\n'
-            'return match result\n'
-            '  :ok(body) -> body\n'
-            '  :error(m) -> "failed"',
-            http=http,
-        )
-        assert r.type == "result"
-        assert r.value == "failed"
 
     def test_multiple_recoverable_errors(self, run):
         """Multiple io operations can fail and be handled without halting."""

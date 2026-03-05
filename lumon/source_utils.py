@@ -69,7 +69,7 @@ def save_blocks(working_dir: str, blocks: list[tuple[str, str, str]]) -> None:
     function or appends if not found.
     """
     # Builtin namespaces that should not be persisted
-    builtin_ns = {"text", "list", "map", "number", "type", "io", "http"}
+    builtin_ns = {"text", "list", "map", "number", "type", "time", "io"}
 
     for block_type, ns_path, source_text in blocks:
         namespace = ns_path.split(".")[0]

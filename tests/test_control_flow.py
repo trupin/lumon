@@ -3,13 +3,13 @@ with/then/else, ask, spawn, async/await."""
 
 import pytest
 
-from tests.conftest import MockFS, MockHTTP
+from tests.conftest import MockFS
 
 
 @pytest.fixture
 def run(runner):
-    def _run(code, *, io=None, http=None):
-        return runner.run(code, io=io, http=http)
+    def _run(code, *, io=None):
+        return runner.run(code, io=io)
     return _run
 
 

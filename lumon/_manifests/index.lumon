@@ -5,5 +5,4 @@ number -- Numeric operations
 type   -- Type introspection
 time   -- Time operations and formatting
 io     -- File system I/O
-http   -- HTTP requests (read-only, blacklist-filtered)
 git    -- Git repository operations

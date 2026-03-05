@@ -291,10 +291,6 @@ IO_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
     ),
 }
 
-HTTP_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
-    "http.get": ((TText(),), TUnion((TTag("ok", TText()), TTag("error", TText())))),
-}
-
 GIT_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
     "git.status": ((), TUnion((TTag("ok", TText()), TTag("error", TText())))),
     "git.log": (
@@ -717,15 +713,12 @@ def type_check(
     ast: object,
     *,
     io_backend: object = None,
-    http_backend: object = None,
     git_backend: object = None,
 ) -> None:
     """Run static type checking on a parsed AST. Raises LumonError on type errors."""
     sigs = dict(BUILTIN_SIGS)
     if io_backend is not None:
         sigs.update(IO_SIGS)
-    if http_backend is not None:
-        sigs.update(HTTP_SIGS)
     if git_backend is not None:
         sigs.update(GIT_SIGS)
     env = TypeEnv()

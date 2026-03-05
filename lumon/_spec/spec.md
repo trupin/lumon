@@ -469,14 +469,14 @@ Components:
 
 Unified parallelism model. Everything runs in an event loop internally. All calls **auto-await by default** — code reads like synchronous pseudocode. `async` suppresses auto-await and returns a handle. `await` / `await_all` collects handles explicitly.
 
-No colored functions — `ask`, `spawn`, `http.get`, and user-authored functions all behave the same way under the hood.
+No colored functions — `ask`, `spawn`, plugin calls, and user-authored functions all behave the same way under the hood.
 
 Safe by construction: since all bindings are immutable, parallel execution cannot produce race conditions.
 
 **Default behavior (auto-await) — reads like synchronous code:**
 
 ```
-let page = http.get("url")       -- auto-awaited, page is the result
+let page = web.fetch("url")       -- auto-awaited, page is the result
 let items = inbox.read()          -- auto-awaited
 let decision = ask                -- auto-awaited
   "Which item first?"
@@ -487,9 +487,9 @@ let decision = ask                -- auto-awaited
 **Parallel I/O — `async` suppresses auto-await:**
 
 ```
-let h1 = async http.get("url1")  -- fires, returns handle
-let h2 = async http.get("url2")  -- fires, returns handle
-let h3 = async http.get("url3")  -- fires, returns handle
+let h1 = async web.fetch("url1")  -- fires, returns handle
+let h2 = async web.fetch("url2")  -- fires, returns handle
+let h3 = async web.fetch("url3")  -- fires, returns handle
 let pages = await_all [h1, h2, h3]
 ```
 
@@ -511,7 +511,7 @@ return header + "Bias: \(bias.score), Tone: \(tone.tone)"
 **Batch pattern:**
 
 ```
-let handles = urls |> list.map(fn(u) -> async http.get(u))
+let handles = urls |> list.map(fn(u) -> async web.fetch(u))
 let pages = await_all handles
 -- pages is a list of results, same order as handles
 ```
@@ -891,14 +891,6 @@ Built-in signatures use type variables (`a`, `b`) for generic operations. The ty
 | `io.replace` | `(path: text, old: text, new: text) -> :ok \| :error(text)` | Replace all occurrences of old with new in a file |
 
 All paths are relative to the **root directory**, which is the working directory where the interpreter is launched. The interpreter normalizes paths and resolves symlinks before checking — paths that resolve outside the root return `:error` (indistinguishable from "file not found"). The agent is not aware that path restrictions exist.
-
-### http
-
-| Function | Signature | Description |
-| :---- | :---- | :---- |
-| `http.get` | `(url: text) -> :ok(text) \| :error(text)` | Fetch a URL's content (read-only, blacklist-filtered) |
-
-No POST, no auth, no headers. Blacklisted URLs return `:error` (indistinguishable from unreachable).
 
 ### git
 
@@ -1449,7 +1441,7 @@ define news.fetch_and_summarize
   returns: :ok({articles: number, path: text}) | :error(text) "Summary of what was written, or error"
 
 implement news.fetch_and_summarize
-  let page = http.get(source_url)
+  let page = web.fetch(source_url)
   match page
     :error(m) -> return :error("Could not fetch \(source_url): \(m)")
     :ok(html) ->
@@ -1462,7 +1454,7 @@ implement news.fetch_and_summarize
       -- fetch each article's content (recoverable — skip failures)
       let contents = articles
         |> list.map(fn(a) ->
-          match http.get(a.url)
+          match web.fetch(a.url)
             :ok(body) -> {...a, body: body}
             :error(_) -> {...a, body: "Could not fetch"}
         )
@@ -1515,7 +1507,7 @@ implement inbox.process_and_enrich
 
           -- with block: chain fallible steps, bail to else on any none
           let context = with
-            page = http.get("https://search.api/q=\(clean)")
+            page = web.fetch("https://search.api/q=\(clean)")
             body = match page
               :ok(t) -> t
               :error(_) -> none

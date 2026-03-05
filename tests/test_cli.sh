@@ -169,10 +169,6 @@ assert_contains "browse: built-in namespace type" \
     "type.of" \
     "$(run browse type)"
 
-assert_contains "browse: built-in namespace http" \
-    "http.get" \
-    "$(run browse http)"
-
 assert_contains "browse: built-in namespace git" \
     "git.status" \
     "$(run browse git)"

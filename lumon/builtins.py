@@ -218,7 +218,6 @@ def _is_truthy_for_filter(value: object) -> bool:
 def register_builtins(
     env: Environment,
     io_backend: object | None = None,
-    http_backend: object | None = None,
     git_backend: object | None = None,
 ) -> None:
     """Register all built-in functions in the environment."""
@@ -352,13 +351,6 @@ def register_builtins(
         env.register_builtin(
             "io.replace",
             lambda path, old, new: _wrap_tag_result(_io.replace(path, old, new)),  # type: ignore[union-attr]
-        )
-
-    # --- http.* ---
-    if http_backend is not None:
-        _http = http_backend
-        env.register_builtin(
-            "http.get", lambda url: _wrap_tag_result(_http.get(url))  # type: ignore[union-attr]
         )
 
     # --- git.* ---
