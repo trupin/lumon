@@ -1,6 +1,8 @@
 ---
+name: test
 description: Run pytest and CLI bash tests with code coverage. Use when wrapping up a task to verify correctness and catch regressions. A task is not done unless its tests pass with no regressions.
 allowed-tools: Bash
+argument-hint: "[test-file-or-pattern]"
 ---
 
 Run the full test suite for this project with code coverage measurement. There are two test suites:

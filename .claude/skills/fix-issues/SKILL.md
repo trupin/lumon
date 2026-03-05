@@ -1,4 +1,5 @@
 ---
+name: fix-issues
 description: Read ISSUES.md from the lumon-test sandbox, plan fixes for open issues, implement them, then mark them as fixed.
 ---
 

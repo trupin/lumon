@@ -392,6 +392,34 @@ assert_eq "deploy: .lumon.json created at root" \
     "yes" \
     "$([ -f "$DEPLOY_ROOT/.lumon.json" ] && echo yes || echo no)"
 
+assert_eq "deploy: skills directory created" \
+    "yes" \
+    "$([ -d "$DEPLOY_ROOT/.claude/skills" ] && echo yes || echo no)"
+
+assert_eq "deploy: ask-spawn skill deployed" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/.claude/skills/ask-spawn/SKILL.md" ] && echo yes || echo no)"
+
+assert_eq "deploy: workflow skill deployed" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/.claude/skills/workflow/SKILL.md" ] && echo yes || echo no)"
+
+assert_eq "deploy: code-organization skill deployed" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/.claude/skills/code-organization/SKILL.md" ] && echo yes || echo no)"
+
+assert_eq "deploy: issues skill deployed" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/.claude/skills/issues/SKILL.md" ] && echo yes || echo no)"
+
+assert_eq "deploy: lumon skill deployed" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/.claude/skills/lumon/SKILL.md" ] && echo yes || echo no)"
+
+assert_eq "deploy: plugins-issues skill deployed" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/.claude/skills/plugins-issues/SKILL.md" ] && echo yes || echo no)"
+
 # ---------------------------------------------------------------------------
 # IO sandbox (--working-dir constrains io.read / io.write)
 # ---------------------------------------------------------------------------

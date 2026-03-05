@@ -15,8 +15,10 @@ from lumon.cli import (
     _annotate_manifest,
     _bundled_manifest,
     _clear_state,
+    _deploy_skills,
     _format_contract,
     _load_state,
+    _prompt_overwrite,
     _STATE_FILE,
     _save_state,
     cmd_browse,
@@ -298,8 +300,13 @@ class TestCmdDeploy:
         assert os.path.isdir(os.path.join(target, "sandbox"))
         assert os.path.isdir(os.path.join(target, "plugins"))
         assert os.path.isfile(os.path.join(target, ".lumon.json"))
+        # Skills deployed
+        skills_dir = os.path.join(target, ".claude", "skills")
+        assert os.path.isdir(skills_dir)
+        for skill in ("ask-spawn", "code-organization", "issues", "lumon", "plugins-issues", "workflow"):
+            assert os.path.isfile(os.path.join(skills_dir, skill, "SKILL.md"))
 
-    def test_deploy_skips_existing(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+    def test_deploy_identical_is_noop(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
         target = os.path.join(str(tmp_path), "project")
         os.makedirs(target)
@@ -307,24 +314,160 @@ class TestCmdDeploy:
         args = argparse.Namespace(target=target, force=False)
         cmd_deploy(args)
         capsys.readouterr()
-        # Second deploy — should skip
+        # Second deploy — identical files silently skipped
         result = cmd_deploy(args)
         assert result == 0
         captured = capsys.readouterr()
-        assert "Skipped" in captured.out
+        assert "Nothing to deploy" in captured.out
 
-    def test_deploy_force_overwrites(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+    def test_deploy_modified_file_prompts(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         assert isinstance(tmp_path, os.PathLike)
         target = os.path.join(str(tmp_path), "project")
         os.makedirs(target)
         args = argparse.Namespace(target=target, force=False)
         cmd_deploy(args)
         capsys.readouterr()
+        # Modify CLAUDE.md
+        claude_md = os.path.join(target, "CLAUDE.md")
+        with open(claude_md, "a", encoding="utf-8") as f:
+            f.write("\n# user edit\n")
+        # Redeploy — answer No
+        monkeypatch.setattr("builtins.input", lambda _: "n")
+        result = cmd_deploy(args)
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "Skipped" in captured.out
+        assert "CLAUDE.md" in captured.out
+
+    def test_deploy_force_overwrites_modified(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: object
+    ) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        target = os.path.join(str(tmp_path), "project")
+        os.makedirs(target)
+        args = argparse.Namespace(target=target, force=False)
+        cmd_deploy(args)
+        capsys.readouterr()
+        # Modify CLAUDE.md
+        claude_md = os.path.join(target, "CLAUDE.md")
+        with open(claude_md, "a", encoding="utf-8") as f:
+            f.write("\n# user edit\n")
+        # Force deploy — overwrites without prompt
         args = argparse.Namespace(target=target, force=True)
         result = cmd_deploy(args)
         assert result == 0
         captured = capsys.readouterr()
         assert "Deployed" in captured.out
+        with open(claude_md, encoding="utf-8") as f:
+            assert "# user edit" not in f.read()
+
+    def test_deploy_skills_identical_skipped_silently(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: object
+    ) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        target = os.path.join(str(tmp_path), "project")
+        os.makedirs(target)
+        args = argparse.Namespace(target=target, force=False)
+        cmd_deploy(args)
+        capsys.readouterr()
+        # Second deploy — identical skills should not appear in output at all
+        cmd_deploy(args)
+        captured = capsys.readouterr()
+        assert "ask-spawn" not in captured.out
+
+    def test_deploy_skills_conflict_prompt_no(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        target = os.path.join(str(tmp_path), "project")
+        os.makedirs(target)
+        args = argparse.Namespace(target=target, force=False)
+        cmd_deploy(args)
+        capsys.readouterr()
+        # Modify a skill
+        skill_path = os.path.join(target, ".claude", "skills", "workflow", "SKILL.md")
+        with open(skill_path, "a", encoding="utf-8") as f:
+            f.write("\n# user edit\n")
+        # Redeploy — answer No
+        monkeypatch.setattr("builtins.input", lambda _: "n")
+        cmd_deploy(args)
+        captured = capsys.readouterr()
+        assert "workflow" in captured.out
+        assert "Skipped" in captured.out
+        # Verify the user edit is preserved
+        with open(skill_path, encoding="utf-8") as f:
+            assert "# user edit" in f.read()
+
+    def test_deploy_skills_conflict_prompt_yes(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        target = os.path.join(str(tmp_path), "project")
+        os.makedirs(target)
+        args = argparse.Namespace(target=target, force=False)
+        cmd_deploy(args)
+        capsys.readouterr()
+        # Modify a skill
+        skill_path = os.path.join(target, ".claude", "skills", "ask-spawn", "SKILL.md")
+        with open(skill_path, "a", encoding="utf-8") as f:
+            f.write("\n# user edit\n")
+        # Redeploy — answer Yes
+        monkeypatch.setattr("builtins.input", lambda _: "y")
+        cmd_deploy(args)
+        captured = capsys.readouterr()
+        assert "ask-spawn" in captured.out
+        assert "Deployed" in captured.out
+        # Verify the user edit is gone (overwritten)
+        with open(skill_path, encoding="utf-8") as f:
+            assert "# user edit" not in f.read()
+
+    def test_deploy_skills_force_skips_prompt(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: object
+    ) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        target = os.path.join(str(tmp_path), "project")
+        os.makedirs(target)
+        args = argparse.Namespace(target=target, force=False)
+        cmd_deploy(args)
+        capsys.readouterr()
+        # Modify a skill
+        skill_path = os.path.join(target, ".claude", "skills", "workflow", "SKILL.md")
+        with open(skill_path, "a", encoding="utf-8") as f:
+            f.write("\n# user edit\n")
+        # Force deploy — no prompt, overwrites
+        args = argparse.Namespace(target=target, force=True)
+        cmd_deploy(args)
+        captured = capsys.readouterr()
+        assert "Deployed" in captured.out
+        with open(skill_path, encoding="utf-8") as f:
+            assert "# user edit" not in f.read()
+
+    def test_deploy_prompt_eof_skips(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        target = os.path.join(str(tmp_path), "project")
+        os.makedirs(target)
+        args = argparse.Namespace(target=target, force=False)
+        cmd_deploy(args)
+        capsys.readouterr()
+        # Modify CLAUDE.md
+        claude_md = os.path.join(target, "CLAUDE.md")
+        with open(claude_md, "a", encoding="utf-8") as f:
+            f.write("\n# user edit\n")
+        # Simulate EOFError (non-interactive stdin)
+        def raise_eof(_: str) -> str:
+            raise EOFError
+        monkeypatch.setattr("builtins.input", raise_eof)
+        result = cmd_deploy(args)
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "Skipped" in captured.out
+        # User edit preserved
+        with open(claude_md, encoding="utf-8") as f:
+            assert "# user edit" in f.read()
 
     def test_deploy_missing_target(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
@@ -332,6 +475,28 @@ class TestCmdDeploy:
         args = argparse.Namespace(target=target, force=False)
         result = cmd_deploy(args)
         assert result == 1
+
+
+class TestDeploySkills:
+    def test_deploy_skills_returns_expected_skills(self) -> None:
+        skills = _deploy_skills()
+        assert isinstance(skills, dict)
+        assert sorted(skills.keys()) == ["ask-spawn", "code-organization", "issues", "lumon", "plugins-issues", "workflow"]
+        for name, content in skills.items():
+            assert len(content) > 0, f"Skill '{name}' has empty content"
+            assert "---" in content, f"Skill '{name}' missing frontmatter"
+
+    def test_prompt_overwrite_eof_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def raise_eof(_: str) -> str:
+            raise EOFError
+        monkeypatch.setattr("builtins.input", raise_eof)
+        assert _prompt_overwrite("test.md") is False
+
+    def test_prompt_overwrite_keyboard_interrupt_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def raise_ki(_: str) -> str:
+            raise KeyboardInterrupt
+        monkeypatch.setattr("builtins.input", raise_ki)
+        assert _prompt_overwrite("test.md") is False
 
 
 class TestBundledManifest:

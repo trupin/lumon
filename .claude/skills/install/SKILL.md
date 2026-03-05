@@ -1,4 +1,5 @@
 ---
+name: install
 description: Install lumon globally as a standalone CLI tool and verify it works.
 allowed-tools: Bash
 ---

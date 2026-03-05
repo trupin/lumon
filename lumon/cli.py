@@ -57,6 +57,18 @@ def _deploy_files() -> dict[str, str]:
     return result
 
 
+def _deploy_skills() -> dict[str, str]:
+    """Return {skill_name: SKILL.md content} for all bundled deploy skills."""
+    pkg = importlib.resources.files("lumon._deploy.skills")
+    result: dict[str, str] = {}
+    # Iterate over skill directories
+    for item in pkg.iterdir():
+        skill_file = item / "SKILL.md"
+        if skill_file.is_file():
+            result[item.name] = skill_file.read_text(encoding="utf-8")
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Command implementations
 # ---------------------------------------------------------------------------
@@ -340,6 +352,40 @@ def cmd_test(args: argparse.Namespace) -> int:
     return 0 if failed == 0 else 1
 
 
+def _prompt_overwrite(rel_path: str) -> bool:
+    """Ask the user whether to overwrite a file that differs from the bundled version."""
+    try:
+        answer = input(f"  '{rel_path}' differs from bundled version. Overwrite? [y/N] ")
+        return answer.strip().lower() in ("y", "yes")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+
+
+def _deploy_file(
+    dest: Path,
+    content: str,
+    rel: str,
+    force: bool,
+    deployed: list[str],
+    skipped: list[str],
+) -> None:
+    """Deploy a single file with conflict detection."""
+    if dest.exists():
+        existing = dest.read_text(encoding="utf-8")
+        if existing == content:
+            return  # identical — skip silently
+        if force or _prompt_overwrite(rel):
+            dest.write_text(content, encoding="utf-8")
+            deployed.append(rel)
+        else:
+            skipped.append(rel)
+    else:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(content, encoding="utf-8")
+        deployed.append(rel)
+
+
 def cmd_deploy(args: argparse.Namespace) -> int:
     """Copy the bundled Claude Code agent config to a target directory."""
     target = Path(args.target).expanduser().resolve()
@@ -371,22 +417,25 @@ def cmd_deploy(args: argparse.Namespace) -> int:
             dest = hooks_dir / filename
         else:
             dest = claude_dir / filename
-        if dest.exists() and not args.force:
-            skipped.append(str(dest.relative_to(target)))
-            continue
-        dest.write_text(content, encoding="utf-8")
-        deployed.append(str(dest.relative_to(target)))
+        rel = str(dest.relative_to(target))
+        _deploy_file(dest, content, rel, args.force, deployed, skipped)
+
+    # Deploy skills
+    skills = _deploy_skills()
+    skills_dir = claude_dir / "skills"
+    skills_dir.mkdir(exist_ok=True)
+
+    for skill_name, content in sorted(skills.items()):
+        skill_dir = skills_dir / skill_name
+        skill_dir.mkdir(exist_ok=True)
+        dest = skill_dir / "SKILL.md"
+        rel = str(dest.relative_to(target))
+        _deploy_file(dest, content, rel, args.force, deployed, skipped)
 
     # Create starter .lumon.json at target root
     lumon_json = target / ".lumon.json"
-    if not lumon_json.exists() or args.force:
-        lumon_json.write_text(
-            json.dumps({"plugins": {}}, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        deployed.append(".lumon.json")
-    else:
-        skipped.append(".lumon.json")
+    starter = json.dumps({"plugins": {}}, indent=2) + "\n"
+    _deploy_file(lumon_json, starter, ".lumon.json", args.force, deployed, skipped)
 
     if deployed:
         print(f"Deployed to {target}:")
@@ -394,7 +443,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
             print(f"  + {f}")
 
     if skipped:
-        print(f"\nSkipped (already exist — use --force to overwrite):")
+        print(f"\nSkipped (differ — use --force to overwrite):")
         for f in skipped:
             print(f"  ~ {f}")
 
