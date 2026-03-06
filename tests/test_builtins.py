@@ -49,6 +49,32 @@ class TestTextJoin:
         r = run('return text.join(["a", "b"], "")')
         assert r.value == "ab"
 
+    def test_join_non_string_item(self, run):
+        r = run('return text.join([1, 2], ",")')
+        assert r.error
+        assert "text.join" in r.error["message"]
+
+    def test_join_dict_item(self, run):
+        r = run('return text.join([{a: 1}], ",")')
+        assert r.error
+        assert "text.join" in r.error["message"]
+
+    def test_join_non_string_item_runtime(self):
+        """text.join validates items at runtime when type checker is bypassed."""
+        from lumon.builtins import _text_join
+        from lumon.errors import LumonError
+
+        with pytest.raises(LumonError, match="expected text"):
+            _text_join([1, 2], ",")
+
+    def test_join_dict_item_runtime(self):
+        """text.join rejects dict items at runtime."""
+        from lumon.builtins import _text_join
+        from lumon.errors import LumonError
+
+        with pytest.raises(LumonError, match="expected text"):
+            _text_join([{"a": 1}], ",")
+
 
 class TestTextContains:
     def test_contains_true(self, run):

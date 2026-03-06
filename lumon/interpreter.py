@@ -21,7 +21,7 @@ from lumon.serializer import serialize
 from lumon.source_utils import extract_blocks, save_blocks
 from lumon.type_checker import type_check
 
-_PLUGIN_RESERVED_KEYS = {"plugin", "env"}
+_PLUGIN_RESERVED_KEYS = {"plugin", "env", "expose"}
 
 
 def _setup_loader(env: Environment, working_dir: str) -> None:
@@ -114,6 +114,17 @@ def _setup_plugins(
         instance_config = plugin_config.get(plugin.alias, {})
         if not isinstance(instance_config, dict):
             instance_config = {}
+
+        # Filter by expose list if present
+        if "expose" in instance_config:
+            expose_list = instance_config["expose"]
+            if not isinstance(expose_list, list):
+                raise LumonError(f"'expose' for plugin '{plugin.alias}' must be a list")
+            allowed_fns = {plugin.alias + "." + name for name in expose_list}
+            for fn_name in list(env._defines.keys()):
+                if fn_name.startswith(plugin.alias + ".") and fn_name not in allowed_fns:
+                    env._defines.pop(fn_name)
+                    env._implements.pop(fn_name, None)
 
         # Extract env vars from "env" key
         custom_env: dict[str, str] = {}

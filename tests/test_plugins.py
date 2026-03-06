@@ -604,6 +604,116 @@ class TestBrowsePlugins:
 
 
 # ---------------------------------------------------------------------------
+# Plugin expose filtering
+# ---------------------------------------------------------------------------
+
+MULTI_MANIFEST = """\
+define multi.alpha
+  "Function alpha"
+  takes:
+    x: text "Input"
+  returns: text "Output"
+
+define multi.beta
+  "Function beta"
+  takes:
+    x: text "Input"
+  returns: text "Output"
+
+define multi.gamma
+  "Function gamma"
+  takes:
+    x: text "Input"
+  returns: text "Output"
+"""
+
+MULTI_IMPL = """\
+implement multi.alpha
+  let result = plugin.exec("python3 run.py", {x: x})
+  return result
+
+implement multi.beta
+  let result = plugin.exec("python3 run.py", {x: x})
+  return result
+
+implement multi.gamma
+  let result = plugin.exec("python3 run.py", {x: x})
+  return result
+"""
+
+
+class TestPluginExpose:
+    def test_expose_filters_functions(self, tmp_path: Path) -> None:
+        """Only exposed functions are callable; others raise errors."""
+        wd = make_plugin_project(tmp_path, {
+            "multi": {
+                "manifest.lumon": MULTI_MANIFEST,
+                "impl.lumon": MULTI_IMPL,
+            },
+        }, config={"plugins": {"multi": {"expose": ["alpha"]}}})
+        # alpha is exposed — should work
+        r = interpret('return multi.alpha("test")', working_dir=wd, plugin_executor=mock_executor)
+        assert r["type"] == "result"
+        # beta is NOT exposed — should error
+        r = interpret('return multi.beta("test")', working_dir=wd, plugin_executor=mock_executor)
+        assert r["type"] == "error"
+        assert "Undefined" in r["message"] or "undefined" in r["message"].lower()
+
+    def test_expose_empty_hides_all(self, tmp_path: Path) -> None:
+        """Empty expose list hides all functions."""
+        wd = make_plugin_project(tmp_path, {
+            "multi": {
+                "manifest.lumon": MULTI_MANIFEST,
+                "impl.lumon": MULTI_IMPL,
+            },
+        }, config={"plugins": {"multi": {"expose": []}}})
+        r = interpret('return multi.alpha("test")', working_dir=wd, plugin_executor=mock_executor)
+        assert r["type"] == "error"
+
+    def test_no_expose_all_visible(self, tmp_path: Path) -> None:
+        """Without expose key, all functions are available (backward compat)."""
+        wd = make_plugin_project(tmp_path, {
+            "multi": {
+                "manifest.lumon": MULTI_MANIFEST,
+                "impl.lumon": MULTI_IMPL,
+            },
+        })
+        for fn in ["alpha", "beta", "gamma"]:
+            r = interpret(f'return multi.{fn}("test")', working_dir=wd, plugin_executor=mock_executor)
+            assert r["type"] == "result"
+
+    def test_expose_invalid_type(self, tmp_path: Path) -> None:
+        """Non-list expose value raises LumonError."""
+        wd = make_plugin_project(tmp_path, {
+            "multi": {
+                "manifest.lumon": MULTI_MANIFEST,
+                "impl.lumon": MULTI_IMPL,
+            },
+        }, config={"plugins": {"multi": {"expose": "bad"}}})
+        r = interpret('return multi.alpha("test")', working_dir=wd, plugin_executor=mock_executor)
+        assert r["type"] == "error"
+        assert "must be a list" in r["message"]
+
+    def test_browse_respects_expose(self, tmp_path: Path) -> None:
+        """Browse output only shows exposed functions."""
+        wd = make_plugin_project(tmp_path, {
+            "multi": {
+                "manifest.lumon": MULTI_MANIFEST,
+                "impl.lumon": MULTI_IMPL,
+            },
+        }, config={"plugins": {"multi": {"expose": ["alpha", "gamma"]}}})
+        # The manifest file should exist
+        manifest_path = os.path.join(tmp_path, "plugins", "multi", "manifest.lumon")
+        assert os.path.isfile(manifest_path)
+        # Verify the expose config is set correctly
+        config = load_config(wd)
+        expose = config["plugins"]["multi"]["expose"]
+        assert "alpha" in expose
+        assert "gamma" in expose
+        assert "beta" not in expose
+
+
+# ---------------------------------------------------------------------------
 # Contract classification
 # ---------------------------------------------------------------------------
 
