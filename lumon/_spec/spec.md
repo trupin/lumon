@@ -469,14 +469,14 @@ Components:
 
 Unified parallelism model. Everything runs in an event loop internally. All calls **auto-await by default** — code reads like synchronous pseudocode. `async` suppresses auto-await and returns a handle. `await` / `await_all` collects handles explicitly.
 
-No colored functions — `ask`, `spawn`, `http.get`, and user-authored functions all behave the same way under the hood.
+No colored functions — `ask`, `spawn`, plugin calls, and user-authored functions all behave the same way under the hood.
 
 Safe by construction: since all bindings are immutable, parallel execution cannot produce race conditions.
 
 **Default behavior (auto-await) — reads like synchronous code:**
 
 ```
-let page = http.get("url")       -- auto-awaited, page is the result
+let page = web.fetch("url")       -- auto-awaited, page is the result
 let items = inbox.read()          -- auto-awaited
 let decision = ask                -- auto-awaited
   "Which item first?"
@@ -487,9 +487,9 @@ let decision = ask                -- auto-awaited
 **Parallel I/O — `async` suppresses auto-await:**
 
 ```
-let h1 = async http.get("url1")  -- fires, returns handle
-let h2 = async http.get("url2")  -- fires, returns handle
-let h3 = async http.get("url3")  -- fires, returns handle
+let h1 = async web.fetch("url1")  -- fires, returns handle
+let h2 = async web.fetch("url2")  -- fires, returns handle
+let h3 = async web.fetch("url3")  -- fires, returns handle
 let pages = await_all [h1, h2, h3]
 ```
 
@@ -511,7 +511,7 @@ return header + "Bias: \(bias.score), Tone: \(tone.tone)"
 **Batch pattern:**
 
 ```
-let handles = urls |> list.map(fn(u) -> async http.get(u))
+let handles = urls |> list.map(fn(u) -> async web.fetch(u))
 let pages = await_all handles
 -- pages is a list of results, same order as handles
 ```
@@ -892,14 +892,6 @@ Built-in signatures use type variables (`a`, `b`) for generic operations. The ty
 
 All paths are relative to the **root directory**, which is the working directory where the interpreter is launched. The interpreter normalizes paths and resolves symlinks before checking — paths that resolve outside the root return `:error` (indistinguishable from "file not found"). The agent is not aware that path restrictions exist.
 
-### http
-
-| Function | Signature | Description |
-| :---- | :---- | :---- |
-| `http.get` | `(url: text) -> :ok(text) \| :error(text)` | Fetch a URL's content (read-only, blacklist-filtered) |
-
-No POST, no auth, no headers. Blacklisted URLs return `:error` (indistinguishable from unreachable).
-
 ### git
 
 | Function | Signature | Description |
@@ -935,6 +927,13 @@ let msg = "total: \(n * 2 + 1)"       -- "total: 7"
 | `text.starts_with` | `(s: text, prefix: text) -> bool` | Check prefix |
 | `text.ends_with` | `(s: text, suffix: text) -> bool` | Check suffix |
 | `text.from` | `(value: a) -> text` | Convert any value to text |
+| `text.match` | `(s: text, pattern: text) -> bool` | Glob match (`*`, `?`, `[abc]`, `[!abc]`) |
+| `text.index_of` | `(s: text, sub: text) -> number \| none` | First position of substring, or none |
+| `text.lines` | `(s: text) -> list<text>` | Split by newline |
+| `text.split_first` | `(s: text, sep: text) -> map` | Split at first occurrence → `{before, after}` |
+| `text.extract` | `(s: text, start: text, end: text) -> list<text>` | All segments between delimiters |
+| `text.pad_start` | `(s: text, len: number, fill: text) -> text` | Left-pad to length |
+| `text.pad_end` | `(s: text, len: number, fill: text) -> text` | Right-pad to length |
 
 ### list
 
@@ -983,6 +982,18 @@ let msg = "total: \(n * 2 + 1)"       -- "total: 7"
 | `number.min` | `(a: number, b: number) -> number` | Smaller of two |
 | `number.max` | `(a: number, b: number) -> number` | Larger of two |
 | `number.parse` | `(s: text) -> number \| none` | Parse text to number (or none) |
+| `number.random` | `() -> number` | Random float in [0, 1) |
+| `number.random_int` | `(min: number, max: number) -> number` | Random integer in [min, max] inclusive |
+| `number.pow` | `(base: number, exp: number) -> number` | Raise base to exponent |
+| `number.sqrt` | `(n: number) -> number` | Square root |
+| `number.log` | `(n: number) -> number` | Natural logarithm |
+| `number.sign` | `(n: number) -> number` | Sign: 1, -1, or 0 |
+| `number.truncate` | `(n: number) -> number` | Truncate toward zero |
+| `number.clamp` | `(n: number, low: number, high: number) -> number` | Clamp between low and high |
+| `number.to_text` | `(n: number) -> text` | Number to text (no trailing .0) |
+| `number.pi` | `() -> number` | The constant pi |
+| `number.e` | `() -> number` | Euler's number |
+| `number.inf` | `() -> number` | Positive infinity |
 
 ### type
 
@@ -990,6 +1001,22 @@ let msg = "total: \(n * 2 + 1)"       -- "total: 7"
 | :---- | :---- | :---- |
 | `type.of` | `(value: a) -> text` | Returns type name: "text", "number", etc. |
 | `type.is` | `(value: a, t: text) -> bool` | Check if value is of type |
+
+### time
+
+All timestamps are Unix epoch milliseconds (UTC).
+
+| Function | Signature | Description |
+| :---- | :---- | :---- |
+| `time.now` | `() -> number` | Current UTC timestamp in milliseconds |
+| `time.wait` | `(ms: number) -> none` | Sleep for ms; error if ms < 0 or > 60000 |
+| `time.format` | `(timestamp: number, pattern: text) -> text` | Format timestamp with strftime pattern |
+| `time.parse` | `(text: text, pattern: text) -> number \| none` | Parse date string to timestamp (none on failure) |
+| `time.since` | `(timestamp: number) -> number` | Milliseconds elapsed since timestamp |
+| `time.date` | `() -> map` | Current UTC date as {year, month, day, hour, minute, second} |
+| `time.add` | `(timestamp: number, ms: number) -> number` | Add ms to timestamp |
+| `time.diff` | `(a: number, b: number) -> number` | Difference a - b in milliseconds |
+| `time.timeout` | `(ms: number, fn() -> a) -> :ok(a) \| :timeout` | Run fn with timeout; error if ms < 0 or > 60000 |
 
 ---
 
@@ -1421,7 +1448,7 @@ define news.fetch_and_summarize
   returns: :ok({articles: number, path: text}) | :error(text) "Summary of what was written, or error"
 
 implement news.fetch_and_summarize
-  let page = http.get(source_url)
+  let page = web.fetch(source_url)
   match page
     :error(m) -> return :error("Could not fetch \(source_url): \(m)")
     :ok(html) ->
@@ -1434,7 +1461,7 @@ implement news.fetch_and_summarize
       -- fetch each article's content (recoverable — skip failures)
       let contents = articles
         |> list.map(fn(a) ->
-          match http.get(a.url)
+          match web.fetch(a.url)
             :ok(body) -> {...a, body: body}
             :error(_) -> {...a, body: "Could not fetch"}
         )
@@ -1487,7 +1514,7 @@ implement inbox.process_and_enrich
 
           -- with block: chain fallible steps, bail to else on any none
           let context = with
-            page = http.get("https://search.api/q=\(clean)")
+            page = web.fetch("https://search.api/q=\(clean)")
             body = match page
               :ok(t) -> t
               :error(_) -> none

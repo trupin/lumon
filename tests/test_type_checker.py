@@ -42,6 +42,19 @@ class TestOperatorTypeMismatch:
         # If truthy/falsy is allowed: r.value == 2
         assert r.type in ("result", "error")
 
+    def test_any_plus_text_should_not_error(self, run):
+        """TAny + text should pass type checking (e.g. match result + string)."""
+        code = '''\
+let x = :ok("hello")
+let a = match x
+  :ok(v) -> v
+  _ -> "default"
+let b = a + "y"
+return b + "z"'''
+        r = run(code)
+        assert r.type == "result"
+        assert r.value == "helloyz"
+
 
 # ===================================================================
 # Union type not handled
@@ -156,14 +169,14 @@ class TestTagExhaustiveness:
     def test_non_exhaustive_match_on_define_return(self, run):
         """Missing a tag from a define's return type should be flagged."""
         r = run(
-            'define test.fn\n'
-            '  "test"\n'
+            'define demo.fn\n'
+            '  "demo"\n'
             '  returns: :ok(text) | :error(text) "result"\n'
             '\n'
-            'implement test.fn\n'
+            'implement demo.fn\n'
             '  return :ok("data")\n'
             '\n'
-            'let r = test.fn()\n'
+            'let r = demo.fn()\n'
             'return match r\n'
             '  :ok(v) -> v'
             # Missing :error case
@@ -174,14 +187,14 @@ class TestTagExhaustiveness:
     def test_exhaustive_with_wildcard(self, run):
         """Wildcard _ should satisfy exhaustiveness."""
         r = run(
-            'define test.fn\n'
-            '  "test"\n'
+            'define demo.fn\n'
+            '  "demo"\n'
             '  returns: :ok(text) | :error(text) "result"\n'
             '\n'
-            'implement test.fn\n'
+            'implement demo.fn\n'
             '  return :ok("data")\n'
             '\n'
-            'let r = test.fn()\n'
+            'let r = demo.fn()\n'
             'return match r\n'
             '  :ok(v) -> v\n'
             '  _ -> "fallback"'
@@ -226,14 +239,14 @@ class TestReturnTypeMismatch:
 
     def test_implement_returns_wrong_tag(self, run):
         r = run(
-            'define test.fn\n'
-            '  "test"\n'
+            'define demo.fn\n'
+            '  "demo"\n'
             '  returns: :ok(text) | :error(text) "result"\n'
             '\n'
-            'implement test.fn\n'
+            'implement demo.fn\n'
             '  return :unknown("oops")\n'
             '\n'
-            'return test.fn()'
+            'return demo.fn()'
         )
         assert r.type == "error"
 
@@ -256,4 +269,88 @@ class TestLambdaTypeMismatch:
     def test_filter_lambda_returns_non_bool(self, run):
         """list.filter expects fn(a) -> bool, passing fn returning number is an error."""
         r = run('return list.filter([1, 2, 3], fn(x) -> x * 2)')
+        assert r.type == "error"
+
+
+# ===================================================================
+# time.* type errors
+# ===================================================================
+
+class TestTimeTypeErrors:
+    def test_wait_with_text(self, run):
+        r = run('return time.wait("100")')
+        assert r.type == "error"
+
+    def test_format_first_arg_text(self, run):
+        r = run('return time.format("not-a-number", "%Y")')
+        assert r.type == "error"
+
+    def test_format_second_arg_number(self, run):
+        r = run('return time.format(1000, 42)')
+        assert r.type == "error"
+
+    def test_parse_first_arg_number(self, run):
+        r = run('return time.parse(12345, "%Y")')
+        assert r.type == "error"
+
+    def test_parse_second_arg_number(self, run):
+        r = run('return time.parse("2024", 42)')
+        assert r.type == "error"
+
+    def test_now_with_args(self, run):
+        r = run('return time.now(42)')
+        assert r.type == "error"
+
+    def test_add_with_text(self, run):
+        r = run('return time.add(1000, "500")')
+        assert r.type == "error"
+
+    def test_timeout_non_function(self, run):
+        r = run('return time.timeout(1000, 42)')
+        assert r.type == "error"
+
+    def test_timeout_wrong_arity(self, run):
+        r = run('return time.timeout(1000, fn(x) -> x)')
+        assert r.type == "error"
+
+    def test_since_with_text(self, run):
+        r = run('return time.since("hello")')
+        assert r.type == "error"
+
+    def test_diff_with_text(self, run):
+        r = run('return time.diff("a", "b")')
+        assert r.type == "error"
+
+    def test_date_with_args(self, run):
+        r = run('return time.date(42)')
+        assert r.type == "error"
+
+
+class TestTextTypeErrors:
+    def test_match_with_number(self, run):
+        r = run('return text.match(42, "*.py")')
+        assert r.type == "error"
+
+    def test_index_of_with_number(self, run):
+        r = run('return text.index_of("hello", 5)')
+        assert r.type == "error"
+
+    def test_pad_start_wrong_types(self, run):
+        r = run('return text.pad_start("x", "5", "0")')
+        assert r.type == "error"
+
+    def test_extract_wrong_arg_count(self, run):
+        r = run('return text.extract("hello", "[")')
+        assert r.type == "error"
+
+    def test_lines_with_number(self, run):
+        r = run('return text.lines(42)')
+        assert r.type == "error"
+
+    def test_split_first_with_number(self, run):
+        r = run('return text.split_first(42, "=")')
+        assert r.type == "error"
+
+    def test_pad_end_wrong_types(self, run):
+        r = run('return text.pad_end("x", "5", "0")')
         assert r.type == "error"

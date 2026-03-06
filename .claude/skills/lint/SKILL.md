@@ -1,6 +1,8 @@
 ---
+name: lint
 description: Run pylint linter. Use when wrapping up a task to catch code quality issues, or when debugging lint-related problems.
 allowed-tools: Bash
+argument-hint: "[file-or-directory]"
 ---
 
 Run pylint on the project.

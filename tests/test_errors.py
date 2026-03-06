@@ -3,7 +3,7 @@ and recoverable errors (tag returns, execution continues)."""
 
 import pytest
 
-from tests.conftest import MockFS, MockHTTP
+from tests.conftest import MockFS
 
 
 @pytest.fixture
@@ -52,32 +52,32 @@ class TestInterpreterErrors:
     def test_error_includes_trace(self, run):
         """Interpreter errors should include a trace field."""
         r = run(
-            'define test.fn\n'
-            '  "test"\n'
+            'define demo.fn\n'
+            '  "demo"\n'
             '  returns: number "n"\n'
             '\n'
-            'implement test.fn\n'
+            'implement demo.fn\n'
             '  return undefined_var\n'
             '\n'
-            'return test.fn()'
+            'return demo.fn()'
         )
         assert r.type == "error"
         assert "trace" in r.error
 
     def test_error_includes_function(self, run):
         r = run(
-            'define test.fn\n'
-            '  "test"\n'
+            'define demo.fn\n'
+            '  "demo"\n'
             '  returns: number "n"\n'
             '\n'
-            'implement test.fn\n'
+            'implement demo.fn\n'
             '  return undefined_var\n'
             '\n'
-            'return test.fn()'
+            'return demo.fn()'
         )
         assert r.type == "error"
         assert "function" in r.error
-        assert r.error["function"] == "test.fn"
+        assert r.error["function"] == "demo.fn"
 
 
 # ===================================================================
@@ -104,18 +104,6 @@ class TestRecoverableErrors:
         )
         assert r.type == "result"
         assert r.value.startswith("handled:")
-
-    def test_http_error_then_continue(self, run):
-        http = MockHTTP()
-        r = run(
-            'let result = http.get("https://missing.com")\n'
-            'return match result\n'
-            '  :ok(body) -> body\n'
-            '  :error(m) -> "failed"',
-            http=http,
-        )
-        assert r.type == "result"
-        assert r.value == "failed"
 
     def test_multiple_recoverable_errors(self, run):
         """Multiple io operations can fail and be handled without halting."""

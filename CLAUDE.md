@@ -54,9 +54,9 @@ impl/<ns>.lumon      → Loaded on call (implementations)
 
 ### Test approach
 - **E2E / black-box**: tests invoke the interpreter with Lumon code and assert on JSON output
-- **Only mock I/O and network**: `io.*` uses a mock filesystem, `http.*` uses a mock network layer. Everything else (parsing, type checking, execution) runs for real
+- **Only mock I/O**: `io.*` uses a mock filesystem. Everything else (parsing, type checking, execution) runs for real
 - **Framework**: `pytest`
-- **Invocation**: thin Python API (`interpret(code) -> json`) with injected `io`/`http` backends — black-box from the language's perspective
+- **Invocation**: thin Python API (`interpret(code) -> json`) with injected `io` backend — black-box from the language's perspective
 
 ### Test structure (one file per spec area)
 - `test_types.py` — literals, tags, type checking
@@ -66,7 +66,6 @@ impl/<ns>.lumon      → Loaded on call (implementations)
 - `test_functions.py` — define, implement, lambdas, closures, recursion
 - `test_builtins.py` — text.*, list.*, map.*, number.*, type.*
 - `test_io.py` — io.read, io.write, io.list_dir (mocked filesystem)
-- `test_http.py` — http.get (mocked network, blacklist)
 - `test_type_checker.py` — all static type errors
 - `test_errors.py` — error model (recoverable vs interpreter)
 

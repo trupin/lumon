@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from lumon.ast_nodes import (
+    AssertStatement,
     BinaryOp,
     Block,
     BoolLiteral,
@@ -30,6 +31,7 @@ from lumon.ast_nodes import (
     ReturnStatement,
     SpreadEntry,
     TagLiteral,
+    TestBlock,
     TextLiteral,
     InterpolatedText,
     UnaryOp,
@@ -194,6 +196,13 @@ BUILTIN_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
     "text.starts_with": ((TText(), TText()), TBool()),
     "text.ends_with": ((TText(), TText()), TBool()),
     "text.from": ((TAny(),), TText()),
+    "text.match": ((TText(), TText()), TBool()),
+    "text.index_of": ((TText(), TText()), TUnion((TNumber(), TNone()))),
+    "text.lines": ((TText(),), TList(TText())),
+    "text.split_first": ((TText(), TText()), TMap()),
+    "text.extract": ((TText(), TText(), TText()), TList(TText())),
+    "text.pad_start": ((TText(), TNumber(), TText()), TText()),
+    "text.pad_end": ((TText(), TNumber(), TText()), TText()),
     # list.*
     "list.map": ((TList(_A), TFn((_A,), _B)), TList(_B)),
     "list.filter": ((TList(_A), TFn((_A,), TBool())), TList(_A)),
@@ -228,9 +237,32 @@ BUILTIN_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
     "number.min": ((TNumber(), TNumber()), TNumber()),
     "number.max": ((TNumber(), TNumber()), TNumber()),
     "number.parse": ((TText(),), TUnion((TNumber(), TNone()))),
+    "number.random": ((), TNumber()),
+    "number.random_int": ((TNumber(), TNumber()), TNumber()),
+    "number.mod": ((TNumber(), TNumber()), TNumber()),
+    "number.pow": ((TNumber(), TNumber()), TNumber()),
+    "number.sqrt": ((TNumber(),), TNumber()),
+    "number.log": ((TNumber(),), TNumber()),
+    "number.sign": ((TNumber(),), TNumber()),
+    "number.truncate": ((TNumber(),), TNumber()),
+    "number.clamp": ((TNumber(), TNumber(), TNumber()), TNumber()),
+    "number.to_text": ((TNumber(),), TText()),
+    "number.pi": ((), TNumber()),
+    "number.e": ((), TNumber()),
+    "number.inf": ((), TNumber()),
     # type.*
     "type.of": ((TAny(),), TText()),
     "type.is": ((TAny(), TText()), TBool()),
+    # time.*
+    "time.now": ((), TNumber()),
+    "time.wait": ((TNumber(),), TNone()),
+    "time.format": ((TNumber(), TText()), TText()),
+    "time.parse": ((TText(), TText()), TUnion((TNumber(), TNone()))),
+    "time.since": ((TNumber(),), TNumber()),
+    "time.date": ((), TMap()),
+    "time.add": ((TNumber(), TNumber()), TNumber()),
+    "time.diff": ((TNumber(), TNumber()), TNumber()),
+    "time.timeout": ((TNumber(), TFn((), _A)), TUnion((TTag("ok", _A), TTag("timeout")))),
 }
 
 IO_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
@@ -267,10 +299,6 @@ IO_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
         (TText(), TText(), TText()),
         TUnion((TTag("ok"), TTag("error", TText()))),
     ),
-}
-
-HTTP_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
-    "http.get": ((TText(),), TUnion((TTag("ok", TText()), TTag("error", TText())))),
 }
 
 GIT_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
@@ -433,6 +461,8 @@ def check_node(node: object, env: TypeEnv, sigs: dict[str, tuple[tuple[object, .
             return TNumber()
         if node.op == "+":
             _check_addable(left_t, right_t)
+            if isinstance(left_t, TAny) or isinstance(right_t, TAny):
+                return TAny()
             if isinstance(left_t, TText):
                 return TText()
             return TNumber()
@@ -535,6 +565,15 @@ def check_node(node: object, env: TypeEnv, sigs: dict[str, tuple[tuple[object, .
                         f"Type error: implement {node.namespace_path} returns "
                         f"{_type_name(body_type)}, expected {_type_name(declared)}"
                     )
+        return TAny()
+
+    if isinstance(node, TestBlock):
+        test_env = env.child()
+        _check_body(node.body, test_env, sigs)
+        return TAny()
+
+    if isinstance(node, AssertStatement):
+        check_node(node.expr, env, sigs)
         return TAny()
 
     if isinstance(node, Program):
@@ -695,15 +734,12 @@ def type_check(
     ast: object,
     *,
     io_backend: object = None,
-    http_backend: object = None,
     git_backend: object = None,
 ) -> None:
     """Run static type checking on a parsed AST. Raises LumonError on type errors."""
     sigs = dict(BUILTIN_SIGS)
     if io_backend is not None:
         sigs.update(IO_SIGS)
-    if http_backend is not None:
-        sigs.update(HTTP_SIGS)
     if git_backend is not None:
         sigs.update(GIT_SIGS)
     env = TypeEnv()

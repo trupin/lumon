@@ -7,10 +7,10 @@ import re
 
 
 def extract_blocks(source: str) -> list[tuple[str, str, str]]:
-    """Extract define/implement blocks from Lumon source code.
+    """Extract define/implement/test blocks from Lumon source code.
 
     Returns a list of (block_type, namespace_path, source_text) tuples.
-    block_type is "define" or "implement".
+    block_type is "define", "implement", or "test".
     """
     blocks: list[tuple[str, str, str]] = []
     lines = source.split("\n")
@@ -20,7 +20,7 @@ def extract_blocks(source: str) -> list[tuple[str, str, str]]:
         line = lines[i]
         stripped = line.strip()
 
-        match = re.match(r"^(define|implement)\s+(\S+)", stripped)
+        match = re.match(r"^(define|implement|test)\s+(\S+)", stripped)
         if match:
             block_type = match.group(1)
             ns_path = match.group(2)
@@ -69,7 +69,7 @@ def save_blocks(working_dir: str, blocks: list[tuple[str, str, str]]) -> None:
     function or appends if not found.
     """
     # Builtin namespaces that should not be persisted
-    builtin_ns = {"text", "list", "map", "number", "type", "io", "http"}
+    builtin_ns = {"text", "list", "map", "number", "type", "time", "io"}
 
     for block_type, ns_path, source_text in blocks:
         namespace = ns_path.split(".")[0]
@@ -78,6 +78,8 @@ def save_blocks(working_dir: str, blocks: list[tuple[str, str, str]]) -> None:
 
         if block_type == "define":
             dir_path = os.path.join(working_dir, "lumon", "manifests")
+        elif block_type == "test":
+            dir_path = os.path.join(working_dir, "lumon", "tests")
         else:
             dir_path = os.path.join(working_dir, "lumon", "impl")
 
@@ -104,7 +106,7 @@ def _replace_or_append(existing: str, block_type: str, ns_path: str, new_source:
     while i < len(lines):
         line = lines[i]
         stripped = line.strip()
-        match = re.match(r"^(define|implement)\s+(\S+)", stripped)
+        match = re.match(r"^(define|implement|test)\s+(\S+)", stripped)
 
         if match and match.group(1) == block_type and match.group(2) == ns_path:
             # Skip the old block

@@ -169,13 +169,13 @@ assert_contains "browse: built-in namespace type" \
     "type.of" \
     "$(run browse type)"
 
-assert_contains "browse: built-in namespace http" \
-    "http.get" \
-    "$(run browse http)"
-
 assert_contains "browse: built-in namespace git" \
     "git.status" \
     "$(run browse git)"
+
+assert_contains "browse: built-in namespace time" \
+    "time.now" \
+    "$(run browse time)"
 
 # Index includes built-in namespaces even without lumon/index.lumon on disk
 assert_contains "browse: index includes built-in io" \
@@ -391,6 +391,42 @@ assert_contains "deploy: plugins CLAUDE.md has directory structure" \
 assert_eq "deploy: .lumon.json created at root" \
     "yes" \
     "$([ -f "$DEPLOY_ROOT/.lumon.json" ] && echo yes || echo no)"
+
+assert_eq "deploy: skills directory created" \
+    "yes" \
+    "$([ -d "$DEPLOY_ROOT/.claude/skills" ] && echo yes || echo no)"
+
+assert_eq "deploy: ask-spawn skill deployed" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/.claude/skills/ask-spawn/SKILL.md" ] && echo yes || echo no)"
+
+assert_eq "deploy: workflow skill deployed" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/.claude/skills/workflow/SKILL.md" ] && echo yes || echo no)"
+
+assert_eq "deploy: code-organization skill deployed" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/.claude/skills/code-organization/SKILL.md" ] && echo yes || echo no)"
+
+assert_eq "deploy: issues skill deployed" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/.claude/skills/issues/SKILL.md" ] && echo yes || echo no)"
+
+assert_eq "deploy: lumon skill deployed" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/.claude/skills/lumon/SKILL.md" ] && echo yes || echo no)"
+
+assert_eq "deploy: plugins-issues skill deployed" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/.claude/skills/plugins-issues/SKILL.md" ] && echo yes || echo no)"
+
+assert_eq "deploy: review skill deployed" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/.claude/skills/review/SKILL.md" ] && echo yes || echo no)"
+
+assert_eq "deploy: plugin fix-issues skill deployed" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/plugins/.claude/skills/fix-issues/SKILL.md" ] && echo yes || echo no)"
 
 # ---------------------------------------------------------------------------
 # IO sandbox (--working-dir constrains io.read / io.write)

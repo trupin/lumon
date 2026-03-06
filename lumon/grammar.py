@@ -6,6 +6,8 @@ start: _NL* (statement (_NL+ statement)*)? _NL*
 // === Statements ===
 ?statement: define_block
           | implement_block
+          | test_block
+          | assert_stmt
           | let_binding
           | return_stmt
           | if_stmt
@@ -25,11 +27,22 @@ returns_clause: "returns:" type_expr ESCAPED_STRING
 
 implement_block: "implement" namespace_path _NL _INDENT impl_body _DEDENT
 impl_body: (impl_statement _NL)* impl_statement?
-?impl_statement: let_binding
+?impl_statement: assert_stmt
+               | let_binding
                | return_stmt
                | if_stmt
                | match_expr
                | expression
+
+test_block: "test" namespace_path _NL _INDENT test_body _DEDENT
+test_body: (test_statement _NL)* test_statement?
+?test_statement: assert_stmt
+               | let_binding
+               | return_stmt
+               | if_stmt
+               | match_expr
+               | expression
+assert_stmt: "assert" expression
 
 // === Expressions (precedence climbing) ===
 ?expression: lambda_expr
@@ -85,7 +98,7 @@ arguments: expression ("," expression)*
 namespace_path: IDENT ("." _ident_or_kw)+
 namespace_ref: namespace_path
 
-!_ident_or_kw: IDENT | FN_KW | "let" | "define" | "implement" | "return"
+!_ident_or_kw: IDENT | FN_KW | "let" | "define" | "implement" | "test" | "return"
              | "match" | "if" | "else" | "with" | "then" | "ask" | "spawn"
              | "async" | "await" | "await_all" | "not" | "and" | "or"
              | "true" | "false" | "none"
@@ -105,7 +118,8 @@ if_stmt: "if" expression _NL _INDENT block _DEDENT _NL? else_clause?
 else_clause: "else" _NL _INDENT block _DEDENT
 
 block: (block_statement _NL)* block_statement?
-?block_statement: let_binding
+?block_statement: assert_stmt
+                | let_binding
                 | return_stmt
                 | if_stmt
                 | match_expr
@@ -199,7 +213,7 @@ COMMENT: /--[^\n]*/
 %declare _INDENT _DEDENT
 _NL: /(\r?\n[\t ]*)+/
 
-IDENT: /(?!(?:let|define|implement|takes|returns|return|match|if|else|with|then|ask|spawn|fork|context|expects|async|await|await_all|assert|true|false|none|and|or|not)\b)[a-zA-Z_][a-zA-Z0-9_]*/
+IDENT: /(?!(?:let|define|implement|test|takes|returns|return|match|if|else|with|then|ask|spawn|fork|context|expects|async|await|await_all|assert|true|false|none|and|or|not)\b)[a-zA-Z_][a-zA-Z0-9_]*/
 NUMBER: /\d+(\.\d+)?/
 ESCAPED_STRING: "\"" /([^\"\\]|\\[\\\"nrt]|\\\([^)]*\))*/ "\""
 """

@@ -1,6 +1,8 @@
 ---
+name: pr
 description: Open a pull request for the current branch. One PR per session — summarizes all commits on the branch.
 allowed-tools: Bash
+argument-hint: "[title-guidance]"
 ---
 
 Open a pull request for the current session's work:

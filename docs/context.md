@@ -205,7 +205,7 @@ A personal assistant agent that manages an Obsidian vault and reads the open web
 
 ### Why this proves the concept
 
-**Safety without gates.** The agent reads arbitrary web content — including adversarial pages with prompt injection. It cannot act on injected instructions because the concepts (execute code, send data, call APIs) don't exist in its language. The worst it can do is write odd notes to your vault. A blacklist of unlawful domains is maintained as config checked by the `http.get` primitive — the agent doesn't even know the blacklist exists.
+**Safety without gates.** The agent reads arbitrary web content — including adversarial pages with prompt injection. It cannot act on injected instructions because the concepts (execute code, send data, call APIs) don't exist in its language. The worst it can do is write odd notes to your vault. HTTP access is exposed via plugins with URL contract enforcement — the agent doesn't even know the restrictions exist.
 
 **Self-implementing, not pre-built.** Day 1, you say "check my inbox." The agent has no `inbox` namespace implemented. It reads the interface, finds `inbox.read` and `inbox.summarize`, writes implementations using `io.read` and `text.*` primitives, and saves them. Those functions now exist as code on disk.
 
@@ -237,7 +237,6 @@ Session 20: "Check my inbox, cross-reference with my diet plan,
 | Namespace | Primitives | Safety note |
 | :---- | :---- | :---- |
 | `io` | `read`, `write`, `list_dir` | Bounded to root directory (cwd) |
-| `http` | `get` | Read-only, blacklist-filtered, no POST/auth |
 | `text` | `split`, `join`, `contains`, `replace`, `slice`, `length` | Pure functions |
 | `list` | `map`, `filter`, `fold`, `flat_map`, `sort_by`, `take`, `deduplicate`, `length` | Pure functions |
 | `map` | `get`, `set`, `keys`, `values`, `merge` | Pure (returns new map) |
@@ -252,10 +251,7 @@ Primitives have built-in restrictions that the agent cannot see or introspect. R
 
 **Filesystem (`io.*`):** All paths are relative to the **root directory** — the working directory where the interpreter is launched. The interpreter normalizes paths and resolves symlinks before checking. Paths that resolve outside the root return `:error` (indistinguishable from "file not found"). The agent can read and write anywhere within the root.
 
-**HTTP (`http.get`):** Filtered by two blacklist layers:
-
-1. **Built-in blacklist** — shipped with the interpreter, maintained by the project maintainers. Covers illegal content, malware domains, etc. Users cannot disable it.
-2. **User blacklist** — a local config file the user maintains. Personal boundaries (e.g. no social media, no specific sites).
+**HTTP (via plugins):** HTTP access is not a built-in — it is exposed via plugins with URL contract enforcement. Each plugin declares which URLs it can access (e.g., `"url": "https://zillow.com/*"`), and the interpreter rejects calls to URLs outside the contract. The agent cannot see or bypass these restrictions.
 
 The interpreter checks both before any request. Blocked URLs return `:error` — indistinguishable from "unreachable." The agent has no visibility into the blacklist's existence, contents, or the reason a URL failed.
 

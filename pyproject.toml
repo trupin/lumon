@@ -20,7 +20,7 @@ include = ["lumon*"]
 
 [tool.setuptools.package-data]
 "lumon._spec" = ["*.md"]
-"lumon._deploy" = ["*.md", "*.json", "*.py"]
+"lumon._deploy" = ["*.md", "*.json", "*.py", "skills/*/SKILL.md", "plugin_skills/*/SKILL.md"]
 "lumon._manifests" = ["*.lumon"]
 
 [tool.pylint.main]

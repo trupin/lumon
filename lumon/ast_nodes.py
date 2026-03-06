@@ -270,6 +270,19 @@ class AwaitAllExpr:
     expr: object
 
 
+# --- Testing ---
+
+@dataclass(frozen=True)
+class TestBlock:
+    name: str
+    body: tuple[object, ...]
+
+
+@dataclass(frozen=True)
+class AssertStatement:
+    expr: object
+
+
 # --- Program ---
 
 @dataclass(frozen=True)

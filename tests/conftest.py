@@ -170,34 +170,6 @@ class MockGit:
 
 
 # ---------------------------------------------------------------------------
-# MockHTTP — canned HTTP responses for http.* built-ins
-# ---------------------------------------------------------------------------
-
-class MockHTTP:
-    """Canned HTTP responses seeded with {url: body} pairs.
-
-    URLs not in the map return :error("unreachable").
-    A blacklist can be provided; blacklisted URLs also return :error.
-    """
-
-    def __init__(
-        self,
-        responses: dict[str, str] | None = None,
-        *,
-        blacklist: list[str] | None = None,
-    ):
-        self._responses = dict(responses or {})
-        self._blacklist = set(blacklist or [])
-
-    def get(self, url: str) -> dict:
-        if url in self._blacklist:
-            return {"tag": "error", "value": "unreachable"}
-        if url not in self._responses:
-            return {"tag": "error", "value": "unreachable"}
-        return {"tag": "ok", "value": self._responses[url]}
-
-
-# ---------------------------------------------------------------------------
 # RunResult — structured wrapper around interpreter output
 # ---------------------------------------------------------------------------
 
@@ -273,10 +245,9 @@ class LumonRunner:
         code: str,
         *,
         io: MockFS | None = None,
-        http: MockHTTP | None = None,
         git: MockGit | None = None,
     ) -> RunResult:
-        raw = interpret(code, io_backend=io, http_backend=http, git_backend=git)
+        raw = interpret(code, io_backend=io, git_backend=git)
         return RunResult(output=raw)
 
 
@@ -292,8 +263,3 @@ def runner() -> LumonRunner:
 @pytest.fixture
 def mock_fs() -> MockFS:
     return MockFS()
-
-
-@pytest.fixture
-def mock_http() -> MockHTTP:
-    return MockHTTP()

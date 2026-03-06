@@ -41,3 +41,78 @@ define number.parse
   takes:
     s: text "The text to parse"
   returns: number | none "Parsed number or none"
+
+define number.random
+  "Random float in [0, 1)"
+  returns: number "Random value"
+
+define number.random_int
+  "Random integer in [min, max] inclusive"
+  takes:
+    min: number "Lower bound"
+    max: number "Upper bound"
+  returns: number "Random integer"
+
+define number.mod
+  "Modulo (remainder after division)"
+  takes:
+    a: number "Dividend"
+    b: number "Divisor"
+  returns: number "a mod b"
+
+define number.pow
+  "Raise base to exponent"
+  takes:
+    base: number "The base"
+    exp: number "The exponent"
+  returns: number "base^exp"
+
+define number.sqrt
+  "Square root"
+  takes:
+    n: number "The number"
+  returns: number "Square root"
+
+define number.log
+  "Natural logarithm"
+  takes:
+    n: number "The number"
+  returns: number "ln(n)"
+
+define number.sign
+  "Sign of a number: 1, -1, or 0"
+  takes:
+    n: number "The number"
+  returns: number "Sign value"
+
+define number.truncate
+  "Truncate toward zero"
+  takes:
+    n: number "The number"
+  returns: number "Truncated value"
+
+define number.clamp
+  "Clamp n between low and high"
+  takes:
+    n: number "The number"
+    low: number "Lower bound"
+    high: number "Upper bound"
+  returns: number "Clamped value"
+
+define number.to_text
+  "Convert number to text (no trailing .0 for integers)"
+  takes:
+    n: number "The number"
+  returns: text "Text representation"
+
+define number.pi
+  "The constant pi"
+  returns: number "3.14159..."
+
+define number.e
+  "Euler's number"
+  returns: number "2.71828..."
+
+define number.inf
+  "Positive infinity"
+  returns: number "Infinity"

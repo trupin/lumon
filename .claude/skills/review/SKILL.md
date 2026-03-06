@@ -1,5 +1,7 @@
 ---
+name: review
 description: Review recent implementation work for gaps, defects, missing tests, spec drift, and code quality issues. Run this after completing a task to catch problems before committing.
+argument-hint: "[focus-area]"
 ---
 
 Review the implementation work done so far in this session. The goal is to produce a concrete, actionable list of problems to fix — not praise or commentary.

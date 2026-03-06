@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import concurrent.futures
+import fnmatch
 import math
+import random
+import time as _time
+from datetime import datetime, timezone
 
 from lumon.environment import Environment
-from lumon.errors import LumonError
+from lumon.errors import AskSignal, LumonError, ReturnSignal
 from lumon.plugins import exec_plugin_script
 from lumon.values import LumonFunction, LumonTag, is_truthy
 
@@ -70,6 +75,26 @@ def _text_from(value: object) -> str:
     return str(value)
 
 
+def _number_sqrt(n: float) -> float:
+    try:
+        return math.sqrt(n)
+    except ValueError:
+        raise LumonError("math domain error: sqrt of negative number") from None
+
+
+def _number_log(n: float) -> float:
+    try:
+        return math.log(n)
+    except ValueError:
+        raise LumonError("math domain error: log of non-positive number") from None
+
+
+def _number_to_text(n: object) -> str:
+    if isinstance(n, float) and math.isfinite(n) and n == int(n):
+        return str(int(n))
+    return str(n)
+
+
 def _number_parse(s: str) -> object:
     try:
         if "." in s:
@@ -113,11 +138,133 @@ def _list_deduplicate(items: list) -> list:
     return result
 
 
+_TIME_CAP_MS = 60000
+
+
+def _time_wait(ms: float) -> None:
+    if ms < 0:
+        raise LumonError("time.wait: ms must not be negative")
+    if ms > _TIME_CAP_MS:
+        raise LumonError("time.wait: ms exceeds 60000ms cap")
+    _time.sleep(ms / 1000)
+
+
+def _time_format(timestamp: float, pattern: str) -> str:
+    try:
+        dt = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
+        return dt.strftime(pattern)
+    except (ValueError, OSError) as exc:
+        raise LumonError(f"time.format: {exc}") from None
+
+
+def _time_parse(text: str, pattern: str) -> object:
+    try:
+        dt = datetime.strptime(text, pattern).replace(tzinfo=timezone.utc)
+        return dt.timestamp() * 1000
+    except (ValueError, OverflowError):
+        return None
+
+
+def _time_date() -> dict:
+    now = datetime.now(tz=timezone.utc)
+    return {
+        "year": now.year,
+        "month": now.month,
+        "day": now.day,
+        "hour": now.hour,
+        "minute": now.minute,
+        "second": now.second,
+    }
+
+
+def _time_timeout(ms: float, fn_val: object) -> LumonTag:
+    if ms < 0:
+        raise LumonError("time.timeout: ms must not be negative")
+    if ms > _TIME_CAP_MS:
+        raise LumonError("time.timeout: ms exceeds 60000ms cap")
+
+    exc_holder: list[Exception] = []
+
+    def _run() -> object:
+        try:
+            return _call_fn(fn_val, [])
+        except (LumonError, AskSignal, ReturnSignal) as e:
+            exc_holder.append(e)
+            raise
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(_run)
+        try:
+            result = future.result(timeout=ms / 1000)
+            return LumonTag("ok", result)
+        except concurrent.futures.TimeoutError:
+            return LumonTag("timeout")
+        except Exception as exc:
+            if exc_holder:
+                raise exc_holder[0] from exc
+            raise
+
+
 def _wrap_tag_result(backend_result: dict) -> LumonTag:
     """Convert a MockFS/MockHTTP dict result to a LumonTag."""
     tag_name = backend_result.get("tag", "error")
     payload = backend_result.get("value")
     return LumonTag(tag_name, payload)
+
+
+def _text_match(s: str, pattern: str) -> bool:
+    return fnmatch.fnmatch(s, pattern)
+
+
+def _text_index_of(s: str, sub: str) -> object:
+    idx = s.find(sub)
+    return None if idx == -1 else idx
+
+
+def _text_split_first(s: str, sep: str) -> dict:
+    idx = s.find(sep)
+    if idx == -1:
+        return {"before": s, "after": ""}
+    return {"before": s[:idx], "after": s[idx + len(sep):]}
+
+
+def _text_extract(s: str, start: str, end: str) -> list[str]:
+    if not start or not end:
+        raise LumonError("text.extract: delimiters must not be empty")
+    results: list[str] = []
+    i = 0
+    while i < len(s):
+        si = s.find(start, i)
+        if si == -1:
+            break
+        ei = s.find(end, si + len(start))
+        if ei == -1:
+            break
+        results.append(s[si + len(start):ei])
+        i = ei + len(end)
+    return results
+
+
+def _text_pad_start(s: str, length: float, fill: str) -> str:
+    if not fill:
+        raise LumonError("text.pad_start: fill must not be empty")
+    target = int(length)
+    if len(s) >= target:
+        return s
+    pad_needed = target - len(s)
+    full_pad = (fill * ((pad_needed // len(fill)) + 1))[:pad_needed]
+    return full_pad + s
+
+
+def _text_pad_end(s: str, length: float, fill: str) -> str:
+    if not fill:
+        raise LumonError("text.pad_end: fill must not be empty")
+    target = int(length)
+    if len(s) >= target:
+        return s
+    pad_needed = target - len(s)
+    full_pad = (fill * ((pad_needed // len(fill)) + 1))[:pad_needed]
+    return s + full_pad
 
 
 def _is_truthy_for_filter(value: object) -> bool:
@@ -127,7 +274,6 @@ def _is_truthy_for_filter(value: object) -> bool:
 def register_builtins(
     env: Environment,
     io_backend: object | None = None,
-    http_backend: object | None = None,
     git_backend: object | None = None,
 ) -> None:
     """Register all built-in functions in the environment."""
@@ -148,6 +294,13 @@ def register_builtins(
     env.register_builtin("text.starts_with", lambda s, prefix: s.startswith(prefix))
     env.register_builtin("text.ends_with", lambda s, suffix: s.endswith(suffix))
     env.register_builtin("text.from", _text_from)
+    env.register_builtin("text.match", _text_match)
+    env.register_builtin("text.index_of", _text_index_of)
+    env.register_builtin("text.lines", lambda s: s.split("\n"))
+    env.register_builtin("text.split_first", _text_split_first)
+    env.register_builtin("text.extract", _text_extract)
+    env.register_builtin("text.pad_start", _text_pad_start)
+    env.register_builtin("text.pad_end", _text_pad_end)
 
     # --- list.* ---
     env.register_builtin(
@@ -202,10 +355,34 @@ def register_builtins(
     env.register_builtin("number.min", lambda a, b: min(a, b))
     env.register_builtin("number.max", lambda a, b: max(a, b))
     env.register_builtin("number.parse", _number_parse)
+    env.register_builtin("number.random", lambda: random.random())
+    env.register_builtin("number.random_int", lambda lo, hi: random.randint(int(lo), int(hi)))
+    env.register_builtin("number.mod", lambda a, b: a % b)
+    env.register_builtin("number.pow", lambda base, exp: math.pow(base, exp))
+    env.register_builtin("number.sqrt", _number_sqrt)
+    env.register_builtin("number.log", _number_log)
+    env.register_builtin("number.sign", lambda n: (n > 0) - (n < 0))
+    env.register_builtin("number.truncate", lambda n: math.trunc(n))
+    env.register_builtin("number.clamp", lambda n, lo, hi: max(lo, min(hi, n)))
+    env.register_builtin("number.to_text", _number_to_text)
+    env.register_builtin("number.pi", lambda: math.pi)
+    env.register_builtin("number.e", lambda: math.e)
+    env.register_builtin("number.inf", lambda: math.inf)
 
     # --- type.* ---
     env.register_builtin("type.of", _type_of)
     env.register_builtin("type.is", _type_is)
+
+    # --- time.* ---
+    env.register_builtin("time.now", lambda: _time.time() * 1000)
+    env.register_builtin("time.wait", _time_wait)
+    env.register_builtin("time.format", _time_format)
+    env.register_builtin("time.parse", _time_parse)
+    env.register_builtin("time.since", lambda ts: _time.time() * 1000 - ts)
+    env.register_builtin("time.date", _time_date)
+    env.register_builtin("time.add", lambda ts, ms: ts + ms)
+    env.register_builtin("time.diff", lambda a, b: a - b)
+    env.register_builtin("time.timeout", _time_timeout)
 
     # --- io.* ---
     if io_backend is not None:
@@ -238,13 +415,6 @@ def register_builtins(
         env.register_builtin(
             "io.replace",
             lambda path, old, new: _wrap_tag_result(_io.replace(path, old, new)),  # type: ignore[union-attr]
-        )
-
-    # --- http.* ---
-    if http_backend is not None:
-        _http = http_backend
-        env.register_builtin(
-            "http.get", lambda url: _wrap_tag_result(_http.get(url))  # type: ignore[union-attr]
         )
 
     # --- git.* ---

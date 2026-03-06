@@ -1,4 +1,5 @@
 ---
+name: python
 description: General Python coding guidelines for this project. Enforced automatically — Claude should follow these when writing any Python code.
 ---
 

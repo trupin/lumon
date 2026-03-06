@@ -1,6 +1,8 @@
 ---
+name: typecheck
 description: Run pyright type checker. Use when wrapping up a task to catch type errors, or when debugging type-related issues.
 allowed-tools: Bash
+argument-hint: "[file-or-directory]"
 ---
 
 Run pyright on the project.

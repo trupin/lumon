@@ -9,6 +9,7 @@ from lark.indenter import DedentError, Indenter
 
 from lumon.ast_nodes import (
     AskExpr,
+    AssertStatement,
     AsyncExpr,
     AwaitAllExpr,
     AwaitExpr,
@@ -45,6 +46,7 @@ from lumon.ast_nodes import (
     SpreadEntry,
     TagLiteral,
     TagPattern,
+    TestBlock,
     TextLiteral,
     UnaryOp,
     VarRef,
@@ -760,6 +762,17 @@ class LumonTransformer(Transformer):
 
     def implement_block(self, ns_path: str, body: tuple[object, ...]) -> ImplementBlock:
         return ImplementBlock(ns_path, body)
+
+    # --- Test / Assert ---
+
+    def test_block(self, ns_path: str, body: tuple[object, ...]) -> TestBlock:
+        return TestBlock(ns_path, body)
+
+    def test_body(self, *statements: object) -> tuple[object, ...]:
+        return tuple(s for s in statements if s is not None)
+
+    def assert_stmt(self, expr: object) -> AssertStatement:
+        return AssertStatement(expr)
 
     # --- Program ---
 

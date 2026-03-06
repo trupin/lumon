@@ -36,6 +36,18 @@ class TestArithmeticAdd:
         r = run('return "" + "hello"')
         assert r.value == "hello"
 
+    def test_concat_after_match(self, run):
+        """String concatenation with + after match returns TAny, chained concat should work."""
+        code = '''\
+let x = :ok("hello")
+let a = match x
+  :ok(v) -> v
+  _ -> "default"
+let b = a + "y"
+return b + "z"'''
+        r = run(code)
+        assert r.value == "helloyz"
+
 
 class TestArithmeticSubtract:
     def test_subtract(self, run):

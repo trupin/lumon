@@ -1,6 +1,8 @@
 ---
+name: commit
 description: Commit current changes. One commit per significant task. Never commit directly to main/master — create a feature branch first if not already on one.
 allowed-tools: Bash
+argument-hint: "[commit-message-guidance]"
 ---
 
 Commit the current changes following these rules:
@@ -22,7 +24,7 @@ Commit the current changes following these rules:
    - Use `git add -u` to stage all tracked changes (modifications + deletions). This is safe and handles deleted files correctly.
    - Then `git add <path>` for any new untracked files you want to include.
    - Never use `git add` on deleted files by name — it will fail. Use `git add -u` instead.
-   - Include `.claude/commands/` changes when relevant (slash commands are project config).
+   - Include `.claude/skills/` changes when relevant (skills are project config).
    - Exclude secrets, build artifacts, and unrelated changes.
 
 6. **If `git commit` fails with `index.lock` exists**, wait a moment and retry once. If it still fails, report the error.

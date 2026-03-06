@@ -3,13 +3,13 @@ with/then/else, ask, spawn, async/await."""
 
 import pytest
 
-from tests.conftest import MockFS, MockHTTP
+from tests.conftest import MockFS
 
 
 @pytest.fixture
 def run(runner):
-    def _run(code, *, io=None, http=None):
-        return runner.run(code, io=io, http=http)
+    def _run(code, *, io=None):
+        return runner.run(code, io=io)
     return _run
 
 
@@ -314,14 +314,14 @@ class TestMatchExhaustiveness:
     def test_exhaustive_match_on_tags_is_ok(self, run):
         """Matching all tags from a known set should not warn."""
         code = (
-            'define test.fn\n'
-            '  "test"\n'
+            'define demo.fn\n'
+            '  "demo"\n'
             '  returns: :ok | :error(text) "result"\n'
             '\n'
-            'implement test.fn\n'
+            'implement demo.fn\n'
             '  return :ok\n'
             '\n'
-            'let r = test.fn()\n'
+            'let r = demo.fn()\n'
             'return match r\n'
             '  :ok -> "ok"\n'
             '  :error(m) -> m'
@@ -333,14 +333,14 @@ class TestMatchExhaustiveness:
     def test_non_exhaustive_match_warns(self, run):
         """Missing a tag from a known set should produce a warning or error."""
         code = (
-            'define test.fn\n'
-            '  "test"\n'
+            'define demo.fn\n'
+            '  "demo"\n'
             '  returns: :ok | :error(text) "result"\n'
             '\n'
-            'implement test.fn\n'
+            'implement demo.fn\n'
             '  return :ok\n'
             '\n'
-            'let r = test.fn()\n'
+            'let r = demo.fn()\n'
             'return match r\n'
             '  :ok -> "ok"'
         )
@@ -471,6 +471,43 @@ class TestSpawn:
             '  expects: {result: text}'
         )
         assert r.type in ("spawn_batch", "ask")
+
+    def test_multiple_spawns_batched(self, run):
+        """Multiple spawn expressions should be batched together."""
+        r = run(
+            'let a = spawn\n'
+            '  "Task A"\n'
+            '  context: "data a"\n'
+            '  expects: text\n'
+            'let b = spawn\n'
+            '  "Task B"\n'
+            '  context: "data b"\n'
+            '  expects: text\n'
+            'return {a: a, b: b}'
+        )
+        assert r.type == "spawn_batch"
+        assert "spawns" in r.output
+        assert len(r.output["spawns"]) == 2
+        assert r.output["spawns"][0]["prompt"] == "Task A"
+        assert r.output["spawns"][1]["prompt"] == "Task B"
+
+    def test_multiple_spawns_replay(self):
+        """Responding to multiple spawns should resolve all handles."""
+        from lumon.interpreter import interpret
+        code = (
+            'let a = spawn\n'
+            '  "Task A"\n'
+            '  context: "data a"\n'
+            '  expects: text\n'
+            'let b = spawn\n'
+            '  "Task B"\n'
+            '  context: "data b"\n'
+            '  expects: text\n'
+            'return {a: a, b: b}'
+        )
+        result = interpret(code, responses=["result A", "result B"])
+        assert result["type"] == "result"
+        assert result["value"] == {"a": "result A", "b": "result B"}
 
 
 # ===================================================================
