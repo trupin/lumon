@@ -1077,6 +1077,10 @@ class TestListGroupBy:
         r = run('return list.group_by([], fn(x) -> "a")')
         assert r.value == {}
 
+    def test_group_by_non_text_key(self, run):
+        r = run('return list.group_by([1, 2, 3], fn(x) -> x)')
+        assert r.type == "error"
+
 
 class TestListIndexOf:
     def test_index_of_found(self, run):
@@ -1169,6 +1173,11 @@ class TestMapFromEntries:
         )
         assert r.value == {"x": 10, "y": 20}
 
+    def test_malformed_entries(self, run):
+        r = run('return map.from_entries([{name: "a"}])')
+        assert r.type == "error"
+        assert "key" in r.error["message"] and "value" in r.error["message"]
+
 
 class TestMapSize:
     def test_size(self, run):
@@ -1227,6 +1236,11 @@ class TestTextDecodeBase64:
         r = run('return text.decode_base64(text.encode_base64("test data"))')
         assert r.value == "test data"
 
+    def test_invalid_input(self, run):
+        r = run('return text.decode_base64("!!!not-valid!!!")')
+        assert r.type == "error"
+        assert "invalid base64" in r.error["message"]
+
 
 # ===================================================================
 # text pattern matching
@@ -1262,6 +1276,14 @@ class TestTextMatchPattern:
         assert r.type == "error"
         assert "unknown pattern" in r.error["message"]
 
+    def test_phone_valid(self, run):
+        r = run('return text.match_pattern("+1 (555) 123-4567", :phone)')
+        assert r.value is True
+
+    def test_non_tag_argument_errors(self, run):
+        r = run('return text.match_pattern("test", "email")')
+        assert r.type == "error"
+
 
 class TestTextFindPattern:
     def test_find_emails(self, run):
@@ -1280,6 +1302,10 @@ class TestTextFindPattern:
         r = run('return text.find_pattern("no emails here", :email)')
         assert r.value == []
 
+    def test_find_phones(self, run):
+        r = run('return text.find_pattern("Call +1 555-123-4567 or (800) 555-0100", :phone)')
+        assert len(r.value) == 2
+
 
 # ===================================================================
 # log
@@ -1294,6 +1320,16 @@ class TestLog:
         r = run('log("hello")\nlog(42)\nreturn 1')
         assert r.value == 1
         assert r.raw.get("logs") == ["hello", 42]
+
+    def test_log_complex_values(self, run):
+        r = run('log({a: 1})\nlog(:ok("done"))\nreturn 1')
+        assert r.value == 1
+        assert r.raw["logs"] == [{"a": 1}, {"tag": "ok", "value": "done"}]
+
+    def test_log_in_error_envelope(self, run):
+        r = run('log("before")\nlet x = 1 / 0\nreturn x')
+        assert r.type == "error"
+        assert r.raw.get("logs") == ["before"]
 
     def test_no_logs_when_empty(self, run):
         r = run('return 1')
@@ -1320,6 +1356,10 @@ class TestNumberRange:
     def test_range_empty(self, run):
         r = run('return number.range(5, 3)')
         assert r.value == []
+
+    def test_range_at_cap(self, run):
+        r = run('return list.length(number.range(1, 10000))')
+        assert r.value == 10000
 
     def test_range_too_large(self, run):
         r = run('return number.range(1, 20000)')

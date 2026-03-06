@@ -1,0 +1,37 @@
+define json.parse
+  "Parse JSON text into a Lumon value"
+  takes:
+    s: text "JSON text to parse"
+  returns: :ok(a) | :error(text) "Parsed value or error"
+
+define json.to_text
+  "Serialize any Lumon value to compact JSON text"
+  takes:
+    value: a "Value to serialize"
+  returns: text "JSON string"
+
+define json.to_text_pretty
+  "Serialize any Lumon value to indented JSON text"
+  takes:
+    value: a "Value to serialize"
+  returns: text "Pretty-printed JSON string"
+
+define json.read
+  "Read a file and parse its contents as JSON"
+  takes:
+    path: text "The file to read"
+  returns: :ok(a) | :error(text) "Parsed value or error"
+
+define json.write
+  "Serialize a value and write it as compact JSON"
+  takes:
+    path: text "The file to write to"
+    value: a "Value to serialize"
+  returns: :ok | :error(text) "Success or error with message"
+
+define json.write_pretty
+  "Serialize a value and write it as indented JSON"
+  takes:
+    path: text "The file to write to"
+    value: a "Value to serialize"
+  returns: :ok | :error(text) "Success or error with message"

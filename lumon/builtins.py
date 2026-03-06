@@ -5,15 +5,15 @@ from __future__ import annotations
 import concurrent.futures
 import csv as _csv_mod
 import fnmatch
-import re as _re
 import io as _io_mod
 import json as _json_mod
-from base64 import b64decode, b64encode
-from urllib.parse import quote, unquote
 import math
 import random
+import re as _re
 import time as _time
+from base64 import b64decode, b64encode
 from datetime import datetime, timezone
+from urllib.parse import quote, unquote
 
 from lumon.environment import Environment
 from lumon.errors import AskSignal, LumonError, ReturnSignal
@@ -323,13 +323,29 @@ def _text_pad_end(s: str, length: float, fill: str) -> str:
     return s + full_pad
 
 
+def _map_from_entries(entries: list) -> dict:
+    result: dict[str, object] = {}
+    for e in entries:
+        if not isinstance(e, dict) or "key" not in e or "value" not in e:
+            raise LumonError("map.from_entries: each entry must have 'key' and 'value' fields")
+        result[e["key"]] = e["value"]
+    return result
+
+
+def _text_decode_base64(s: str) -> str:
+    try:
+        return b64decode(s).decode()
+    except Exception as e:
+        raise LumonError(f"text.decode_base64: invalid base64 input: {e}") from None
+
+
 def _is_truthy_for_filter(value: object) -> bool:
     return is_truthy(value)
 
 
 _NAMED_PATTERNS: dict[str, _re.Pattern[str]] = {
     "email": _re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}"),
-    "url": _re.compile(r"https?://[^\s<>\"']+"),
+    "url": _re.compile(r"https?://[^\s<>\"']+[^\s<>\"'.,;:!?)\\]"),
     "iso_date": _re.compile(r"\d{4}-\d{2}-\d{2}"),
     "phone": _re.compile(r"\+?\d[\d\s\-()]{6,}\d"),
     "number": _re.compile(r"-?\d+(?:\.\d+)?"),
@@ -448,7 +464,7 @@ def register_builtins(
     env.register_builtin("text.encode_url", lambda s: quote(s, safe=""))
     env.register_builtin("text.decode_url", lambda s: unquote(s))
     env.register_builtin("text.encode_base64", lambda s: b64encode(s.encode()).decode())
-    env.register_builtin("text.decode_base64", lambda s: b64decode(s).decode())
+    env.register_builtin("text.decode_base64", _text_decode_base64)
     env.register_builtin("text.match_pattern", _text_match_pattern)
     env.register_builtin("text.find_pattern", _text_find_pattern)
 
@@ -530,10 +546,7 @@ def register_builtins(
         "map.filter",
         lambda m, f: {k: v for k, v in m.items() if is_truthy(_call_fn(f, [k, v]))},
     )
-    env.register_builtin(
-        "map.from_entries",
-        lambda entries: {e["key"]: e["value"] for e in entries},
-    )
+    env.register_builtin("map.from_entries", _map_from_entries)
     env.register_builtin("map.size", lambda m: len(m))
 
     # --- number.* ---

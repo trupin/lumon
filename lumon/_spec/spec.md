@@ -1014,6 +1014,8 @@ let msg = "total: \(n * 2 + 1)"       -- "total: 7"
 | `number.sign` | `(n: number) -> number` | Sign: 1, -1, or 0 |
 | `number.truncate` | `(n: number) -> number` | Truncate toward zero |
 | `number.clamp` | `(n: number, low: number, high: number) -> number` | Clamp between low and high |
+| `number.mod` | `(a: number, b: number) -> number` | Modulo (remainder of a / b) |
+| `number.format` | `(n: number, decimals: number) -> text` | Format number with fixed decimal places |
 | `number.to_text` | `(n: number) -> text` | Number to text (no trailing .0) |
 | `number.range` | `(start: number, end: number) -> list<number>` | Integer range [start, end] inclusive (max 10000) |
 | `number.pi` | `() -> number` | The constant pi |

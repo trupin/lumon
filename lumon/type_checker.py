@@ -273,8 +273,6 @@ BUILTIN_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
     # type.*
     "type.of": ((TAny(),), TText()),
     "type.is": ((TAny(), TText()), TBool()),
-    # log
-    "log": ((TAny(),), TNone()),
     # time.*
     "time.now": ((), TNumber()),
     "time.wait": ((TNumber(),), TNone()),

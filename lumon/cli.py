@@ -168,15 +168,8 @@ def cmd_respond(args: argparse.Namespace) -> int:
         responses = prev_responses + new_responses
     elif batch_size > 1 and isinstance(response_raw, dict):
         # Dict keyed by spawn_0, spawn_1, ... — distribute to each spawn
-        new_responses: list[object] = []
-        for i in range(batch_size):
-            key = f"spawn_{i}"
-            if key in response_raw:
-                new_responses.append(deserialize(response_raw[key]))
-            else:
-                new_responses.append(deserialize(response_raw))
-                break
-        if len(new_responses) == batch_size:
+        if all(f"spawn_{i}" in response_raw for i in range(batch_size)):
+            new_responses = [deserialize(response_raw[f"spawn_{i}"]) for i in range(batch_size)]
             responses = prev_responses + new_responses
         else:
             response = deserialize(response_raw)

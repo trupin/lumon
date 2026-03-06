@@ -6,3 +6,5 @@ type   -- Type introspection
 time   -- Time operations and formatting
 io     -- File system I/O
 git    -- Git repository operations
+json   -- JSON parsing and serialization
+csv    -- CSV parsing and serialization

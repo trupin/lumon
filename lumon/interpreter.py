@@ -201,11 +201,20 @@ def interpret(
             _persist_blocks(code, working_dir)
         return output
     except AskSignal as ask:
-        return ask.envelope
+        envelope = ask.envelope
+        if env._logs:
+            envelope["logs"] = list(env._logs)
+        return envelope
     except LumonError as e:
-        return e.to_envelope()
+        envelope = e.to_envelope()
+        if env._logs:
+            envelope["logs"] = list(env._logs)
+        return envelope
     except RecursionError:
-        return LumonError("Call depth limit exceeded").to_envelope()
+        envelope = LumonError("Call depth limit exceeded").to_envelope()
+        if env._logs:
+            envelope["logs"] = list(env._logs)
+        return envelope
 
 
 def _make_spawn_batch(pending: list[tuple[str, dict]], logs: list[object] | None = None) -> dict:

@@ -1,0 +1,51 @@
+define csv.parse
+  "Parse CSV text into rows of fields"
+  takes:
+    s: text "CSV text to parse"
+  returns: list<list<text>> "List of rows, each a list of fields"
+
+define csv.parse_with_headers
+  "Parse CSV using first row as keys"
+  takes:
+    s: text "CSV text with header row"
+  returns: list<map<text>> "List of maps keyed by header names"
+
+define csv.to_text
+  "Serialize rows to CSV text"
+  takes:
+    rows: list<list<text>> "List of rows"
+  returns: text "CSV string"
+
+define csv.to_text_with_headers
+  "Serialize maps to CSV with a header row"
+  takes:
+    headers: list<text> "Column names"
+    rows: list<map<text>> "List of maps"
+  returns: text "CSV string with header"
+
+define csv.read
+  "Read and parse a CSV file"
+  takes:
+    path: text "The file to read"
+  returns: :ok(list<list<text>>) | :error(text) "Parsed rows or error"
+
+define csv.read_with_headers
+  "Read and parse a CSV file using first row as keys"
+  takes:
+    path: text "The file to read"
+  returns: :ok(list<map<text>>) | :error(text) "Parsed maps or error"
+
+define csv.write
+  "Serialize rows and write as CSV"
+  takes:
+    path: text "The file to write to"
+    rows: list<list<text>> "List of rows"
+  returns: :ok | :error(text) "Success or error with message"
+
+define csv.write_with_headers
+  "Serialize maps with headers and write as CSV"
+  takes:
+    path: text "The file to write to"
+    headers: list<text> "Column names"
+    rows: list<map<text>> "List of maps"
+  returns: :ok | :error(text) "Success or error with message"
