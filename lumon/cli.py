@@ -16,7 +16,7 @@ from lumon.builtins import register_builtins
 from lumon.environment import Environment
 from lumon.errors import LumonError, ReturnSignal
 from lumon.evaluator import eval_node
-from lumon.interpreter import interpret
+from lumon.interpreter import _setup_loader, _setup_plugins, interpret
 from lumon.parser import parse
 from lumon.plugins import disk_manifest_namespaces, load_config, split_contracts
 from lumon.serializer import deserialize
@@ -372,6 +372,8 @@ def cmd_test(args: argparse.Namespace) -> int:
             env = Environment()
             register_builtins(env, None, None)
             env._working_dir = "."
+            _setup_loader(env, ".")
+            _setup_plugins(env, ".")
 
             # Evaluate top-level to register defines, implements, and tests
             try:

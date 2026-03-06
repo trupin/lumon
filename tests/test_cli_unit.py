@@ -309,6 +309,37 @@ class TestCmdTest:
         assert "SKIP" in captured.out
 
 
+    def test_test_loads_user_functions(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """Test runner loads user-defined functions from manifests/ and impl/."""
+        assert isinstance(tmp_path, os.PathLike)
+        root = str(tmp_path)
+        # Create manifest
+        manifest_dir = os.path.join(root, "lumon", "manifests")
+        os.makedirs(manifest_dir)
+        with open(os.path.join(manifest_dir, "myns.lumon"), "w", encoding="utf-8") as f:
+            f.write('define myns.double\n  "Double a number"\n  takes:\n    n: number "The number"\n  returns: number "The result"\n')
+        # Create impl
+        impl_dir = os.path.join(root, "lumon", "impl")
+        os.makedirs(impl_dir)
+        with open(os.path.join(impl_dir, "myns.lumon"), "w", encoding="utf-8") as f:
+            f.write("implement myns.double\n  return n * 2\n")
+        # Create test that calls the user function
+        test_dir = os.path.join(root, "lumon", "tests")
+        os.makedirs(test_dir)
+        with open(os.path.join(test_dir, "myns.lumon"), "w", encoding="utf-8") as f:
+            f.write("test myns.double\n  assert myns.double(3) == 6\n")
+        old_cwd = os.getcwd()
+        os.chdir(root)
+        try:
+            args = argparse.Namespace(namespace="myns")
+            result = cmd_test(args)
+        finally:
+            os.chdir(old_cwd)
+        assert result == 0
+        captured = capsys.readouterr()
+        assert "PASS  myns.double" in captured.out
+
+
 class TestCmdDeploy:
     def test_deploy_to_target(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
