@@ -268,6 +268,19 @@ def _wrap_tag_result(backend_result: dict) -> LumonTag:
     return LumonTag(tag_name, payload)
 
 
+def _text_join(items: object, sep: object) -> str:
+    if not isinstance(items, list):
+        raise LumonError(f"text.join: expected list, got {type(items).__name__}")
+    if not isinstance(sep, str):
+        raise LumonError(f"text.join: expected text separator, got {type(sep).__name__}")
+    for i, item in enumerate(items):
+        if not isinstance(item, str):
+            raise LumonError(
+                f"text.join: item at index {i} is {type(item).__name__}, expected text"
+            )
+    return sep.join(items)
+
+
 def _text_match(s: str, pattern: str) -> bool:
     return fnmatch.fnmatch(s, pattern)
 
@@ -440,7 +453,7 @@ def register_builtins(
 
     # --- text.* ---
     env.register_builtin("text.split", lambda s, sep: s.split(sep))
-    env.register_builtin("text.join", lambda items, sep: sep.join(items))
+    env.register_builtin("text.join", _text_join)
     env.register_builtin("text.contains", lambda s, sub: sub in s)
     env.register_builtin("text.replace", lambda s, old, new: s.replace(old, new))
     env.register_builtin(

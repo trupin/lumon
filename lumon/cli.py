@@ -20,6 +20,7 @@ from lumon.interpreter import _setup_loader, _setup_plugins, interpret
 from lumon.parser import parse
 from lumon.plugins import disk_manifest_namespaces, load_config, split_contracts
 from lumon.serializer import deserialize
+from lumon.source_utils import extract_blocks
 from lumon.type_checker import type_check
 
 _STATE_FILE = Path(".lumon_state.json")
@@ -327,11 +328,23 @@ def cmd_browse(args: argparse.Namespace) -> int:
             # Replace source namespace with alias in manifest text
             if source_name != namespace:
                 text = text.replace(f"{source_name}.", f"{namespace}.")
+            # Filter by expose list if present
+            if isinstance(instance_config, dict) and "expose" in instance_config:
+                expose_list = instance_config["expose"]
+                if isinstance(expose_list, list):
+                    allowed = set(expose_list)
+                    blocks = extract_blocks(text)
+                    text = "\n\n".join(
+                        src for btype, ns_path, src in blocks
+                        if btype == "define" and ns_path in allowed
+                    )
+                    if text:
+                        text += "\n"
             # Strip reserved keys and annotate contracts
             if isinstance(instance_config, dict):
                 fn_contracts = {
                     k: v for k, v in instance_config.items()
-                    if k not in {"plugin", "env"}
+                    if k not in {"plugin", "env", "expose"}
                 }
                 if fn_contracts:
                     text = _annotate_manifest(text, fn_contracts)
