@@ -182,6 +182,16 @@ class TestTextFrom:
         r = run('return text.from([1, 2, 3])')
         assert isinstance(r.value, str)
 
+    def test_from_whole_float(self, run):
+        """text.from should not produce trailing .0 for whole-number floats."""
+        r = run('return text.from((4500 + 5050) / 2)')
+        assert r.value == "4775"
+
+    def test_from_real_float(self, run):
+        """text.from should preserve decimals for non-whole floats."""
+        r = run('return text.from(3.14)')
+        assert r.value == "3.14"
+
 
 class TestTextMatch:
     def test_wildcard(self, run):
@@ -878,6 +888,24 @@ class TestNumberToText:
     def test_to_text_infinity(self, run):
         r = run('return number.to_text(number.inf())')
         assert r.value == "inf"
+
+
+class TestNumberFormat:
+    def test_format_zero_decimals(self, run):
+        r = run('return number.format(7.0, 0)')
+        assert r.value == "7"
+
+    def test_format_one_decimal(self, run):
+        r = run('return number.format(7, 1)')
+        assert r.value == "7.0"
+
+    def test_format_two_decimals(self, run):
+        r = run('return number.format(3.14159, 2)')
+        assert r.value == "3.14"
+
+    def test_format_uniform_output(self, run):
+        r = run('let a = 3 + 4\nlet b = 3.0 + 4\nreturn [number.format(a, 1), number.format(b, 1)]')
+        assert r.value == ["7.0", "7.0"]
 
 
 class TestNumberPi:

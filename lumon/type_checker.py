@@ -247,6 +247,7 @@ BUILTIN_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
     "number.truncate": ((TNumber(),), TNumber()),
     "number.clamp": ((TNumber(), TNumber(), TNumber()), TNumber()),
     "number.to_text": ((TNumber(),), TText()),
+    "number.format": ((TNumber(), TNumber()), TText()),
     "number.pi": ((), TNumber()),
     "number.e": ((), TNumber()),
     "number.inf": ((), TNumber()),

@@ -105,6 +105,13 @@ define number.to_text
     n: number "The number"
   returns: text "Text representation"
 
+define number.format
+  "Format number with a fixed number of decimal places"
+  takes:
+    n: number "The number to format"
+    decimals: number "Number of decimal places"
+  returns: text "Formatted text"
+
 define number.pi
   "The constant pi"
   returns: number "3.14159..."
