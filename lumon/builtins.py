@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import concurrent.futures
+import fnmatch
 import math
 import random
 import time as _time
 from datetime import datetime, timezone
 
 from lumon.environment import Environment
-from lumon.errors import AskSignal, LumonError, ReturnSignal, SpawnSignal
+from lumon.errors import AskSignal, LumonError, ReturnSignal
 from lumon.plugins import exec_plugin_script
 from lumon.values import LumonFunction, LumonTag, is_truthy
 
@@ -187,7 +188,7 @@ def _time_timeout(ms: float, fn_val: object) -> LumonTag:
     def _run() -> object:
         try:
             return _call_fn(fn_val, [])
-        except (LumonError, AskSignal, SpawnSignal, ReturnSignal) as e:
+        except (LumonError, AskSignal, ReturnSignal) as e:
             exc_holder.append(e)
             raise
 
@@ -209,6 +210,61 @@ def _wrap_tag_result(backend_result: dict) -> LumonTag:
     tag_name = backend_result.get("tag", "error")
     payload = backend_result.get("value")
     return LumonTag(tag_name, payload)
+
+
+def _text_match(s: str, pattern: str) -> bool:
+    return fnmatch.fnmatch(s, pattern)
+
+
+def _text_index_of(s: str, sub: str) -> object:
+    idx = s.find(sub)
+    return None if idx == -1 else idx
+
+
+def _text_split_first(s: str, sep: str) -> dict:
+    idx = s.find(sep)
+    if idx == -1:
+        return {"before": s, "after": ""}
+    return {"before": s[:idx], "after": s[idx + len(sep):]}
+
+
+def _text_extract(s: str, start: str, end: str) -> list[str]:
+    if not start or not end:
+        raise LumonError("text.extract: delimiters must not be empty")
+    results: list[str] = []
+    i = 0
+    while i < len(s):
+        si = s.find(start, i)
+        if si == -1:
+            break
+        ei = s.find(end, si + len(start))
+        if ei == -1:
+            break
+        results.append(s[si + len(start):ei])
+        i = ei + len(end)
+    return results
+
+
+def _text_pad_start(s: str, length: float, fill: str) -> str:
+    if not fill:
+        raise LumonError("text.pad_start: fill must not be empty")
+    target = int(length)
+    if len(s) >= target:
+        return s
+    pad_needed = target - len(s)
+    full_pad = (fill * ((pad_needed // len(fill)) + 1))[:pad_needed]
+    return full_pad + s
+
+
+def _text_pad_end(s: str, length: float, fill: str) -> str:
+    if not fill:
+        raise LumonError("text.pad_end: fill must not be empty")
+    target = int(length)
+    if len(s) >= target:
+        return s
+    pad_needed = target - len(s)
+    full_pad = (fill * ((pad_needed // len(fill)) + 1))[:pad_needed]
+    return s + full_pad
 
 
 def _is_truthy_for_filter(value: object) -> bool:
@@ -238,6 +294,13 @@ def register_builtins(
     env.register_builtin("text.starts_with", lambda s, prefix: s.startswith(prefix))
     env.register_builtin("text.ends_with", lambda s, suffix: s.endswith(suffix))
     env.register_builtin("text.from", _text_from)
+    env.register_builtin("text.match", _text_match)
+    env.register_builtin("text.index_of", _text_index_of)
+    env.register_builtin("text.lines", lambda s: s.split("\n"))
+    env.register_builtin("text.split_first", _text_split_first)
+    env.register_builtin("text.extract", _text_extract)
+    env.register_builtin("text.pad_start", _text_pad_start)
+    env.register_builtin("text.pad_end", _text_pad_end)
 
     # --- list.* ---
     env.register_builtin(
@@ -294,6 +357,7 @@ def register_builtins(
     env.register_builtin("number.parse", _number_parse)
     env.register_builtin("number.random", lambda: random.random())
     env.register_builtin("number.random_int", lambda lo, hi: random.randint(int(lo), int(hi)))
+    env.register_builtin("number.mod", lambda a, b: a % b)
     env.register_builtin("number.pow", lambda base, exp: math.pow(base, exp))
     env.register_builtin("number.sqrt", _number_sqrt)
     env.register_builtin("number.log", _number_log)

@@ -53,6 +53,13 @@ define number.random_int
     max: number "Upper bound"
   returns: number "Random integer"
 
+define number.mod
+  "Modulo (remainder after division)"
+  takes:
+    a: number "Dividend"
+    b: number "Divisor"
+  returns: number "a mod b"
+
 define number.pow
   "Raise base to exponent"
   takes:

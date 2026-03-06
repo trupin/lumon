@@ -42,6 +42,19 @@ class TestOperatorTypeMismatch:
         # If truthy/falsy is allowed: r.value == 2
         assert r.type in ("result", "error")
 
+    def test_any_plus_text_should_not_error(self, run):
+        """TAny + text should pass type checking (e.g. match result + string)."""
+        code = '''\
+let x = :ok("hello")
+let a = match x
+  :ok(v) -> v
+  _ -> "default"
+let b = a + "y"
+return b + "z"'''
+        r = run(code)
+        assert r.type == "result"
+        assert r.value == "helloyz"
+
 
 # ===================================================================
 # Union type not handled
@@ -156,14 +169,14 @@ class TestTagExhaustiveness:
     def test_non_exhaustive_match_on_define_return(self, run):
         """Missing a tag from a define's return type should be flagged."""
         r = run(
-            'define test.fn\n'
-            '  "test"\n'
+            'define demo.fn\n'
+            '  "demo"\n'
             '  returns: :ok(text) | :error(text) "result"\n'
             '\n'
-            'implement test.fn\n'
+            'implement demo.fn\n'
             '  return :ok("data")\n'
             '\n'
-            'let r = test.fn()\n'
+            'let r = demo.fn()\n'
             'return match r\n'
             '  :ok(v) -> v'
             # Missing :error case
@@ -174,14 +187,14 @@ class TestTagExhaustiveness:
     def test_exhaustive_with_wildcard(self, run):
         """Wildcard _ should satisfy exhaustiveness."""
         r = run(
-            'define test.fn\n'
-            '  "test"\n'
+            'define demo.fn\n'
+            '  "demo"\n'
             '  returns: :ok(text) | :error(text) "result"\n'
             '\n'
-            'implement test.fn\n'
+            'implement demo.fn\n'
             '  return :ok("data")\n'
             '\n'
-            'let r = test.fn()\n'
+            'let r = demo.fn()\n'
             'return match r\n'
             '  :ok(v) -> v\n'
             '  _ -> "fallback"'
@@ -226,14 +239,14 @@ class TestReturnTypeMismatch:
 
     def test_implement_returns_wrong_tag(self, run):
         r = run(
-            'define test.fn\n'
-            '  "test"\n'
+            'define demo.fn\n'
+            '  "demo"\n'
             '  returns: :ok(text) | :error(text) "result"\n'
             '\n'
-            'implement test.fn\n'
+            'implement demo.fn\n'
             '  return :unknown("oops")\n'
             '\n'
-            'return test.fn()'
+            'return demo.fn()'
         )
         assert r.type == "error"
 
@@ -310,4 +323,34 @@ class TestTimeTypeErrors:
 
     def test_date_with_args(self, run):
         r = run('return time.date(42)')
+        assert r.type == "error"
+
+
+class TestTextTypeErrors:
+    def test_match_with_number(self, run):
+        r = run('return text.match(42, "*.py")')
+        assert r.type == "error"
+
+    def test_index_of_with_number(self, run):
+        r = run('return text.index_of("hello", 5)')
+        assert r.type == "error"
+
+    def test_pad_start_wrong_types(self, run):
+        r = run('return text.pad_start("x", "5", "0")')
+        assert r.type == "error"
+
+    def test_extract_wrong_arg_count(self, run):
+        r = run('return text.extract("hello", "[")')
+        assert r.type == "error"
+
+    def test_lines_with_number(self, run):
+        r = run('return text.lines(42)')
+        assert r.type == "error"
+
+    def test_split_first_with_number(self, run):
+        r = run('return text.split_first(42, "=")')
+        assert r.type == "error"
+
+    def test_pad_end_wrong_types(self, run):
+        r = run('return text.pad_end("x", "5", "0")')
         assert r.type == "error"

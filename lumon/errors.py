@@ -43,10 +43,3 @@ class AskSignal(Exception):
 
     def __init__(self, envelope: dict):
         self.envelope = envelope
-
-
-class SpawnSignal(Exception):
-    """Control flow signal when `spawn` is encountered."""
-
-    def __init__(self, envelope: dict):
-        self.envelope = envelope

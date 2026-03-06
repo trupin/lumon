@@ -52,32 +52,32 @@ class TestInterpreterErrors:
     def test_error_includes_trace(self, run):
         """Interpreter errors should include a trace field."""
         r = run(
-            'define test.fn\n'
-            '  "test"\n'
+            'define demo.fn\n'
+            '  "demo"\n'
             '  returns: number "n"\n'
             '\n'
-            'implement test.fn\n'
+            'implement demo.fn\n'
             '  return undefined_var\n'
             '\n'
-            'return test.fn()'
+            'return demo.fn()'
         )
         assert r.type == "error"
         assert "trace" in r.error
 
     def test_error_includes_function(self, run):
         r = run(
-            'define test.fn\n'
-            '  "test"\n'
+            'define demo.fn\n'
+            '  "demo"\n'
             '  returns: number "n"\n'
             '\n'
-            'implement test.fn\n'
+            'implement demo.fn\n'
             '  return undefined_var\n'
             '\n'
-            'return test.fn()'
+            'return demo.fn()'
         )
         assert r.type == "error"
         assert "function" in r.error
-        assert r.error["function"] == "test.fn"
+        assert r.error["function"] == "demo.fn"
 
 
 # ===================================================================

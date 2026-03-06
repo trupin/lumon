@@ -183,6 +183,164 @@ class TestTextFrom:
         assert isinstance(r.value, str)
 
 
+class TestTextMatch:
+    def test_wildcard(self, run):
+        r = run('return text.match("hello.py", "*.py")')
+        assert r.value is True
+
+    def test_question_mark(self, run):
+        r = run('return text.match("cat", "c?t")')
+        assert r.value is True
+
+    def test_brackets(self, run):
+        r = run('return text.match("cat", "[abc]at")')
+        assert r.value is True
+
+    def test_negated_brackets(self, run):
+        r = run('return text.match("cat", "[!d]at")')
+        assert r.value is True
+
+    def test_exact_match(self, run):
+        r = run('return text.match("hello", "hello")')
+        assert r.value is True
+
+    def test_no_match(self, run):
+        r = run('return text.match("hello.py", "*.js")')
+        assert r.value is False
+
+    def test_empty_string(self, run):
+        r = run('return text.match("", "*")')
+        assert r.value is True
+
+    def test_empty_pattern_no_match(self, run):
+        r = run('return text.match("hello", "")')
+        assert r.value is False
+
+
+class TestTextIndexOf:
+    def test_found(self, run):
+        r = run('return text.index_of("hello world", "world")')
+        assert r.value == 6
+
+    def test_not_found(self, run):
+        r = run('return text.index_of("hello", "xyz")')
+        assert r.value is None
+
+    def test_at_start(self, run):
+        r = run('return text.index_of("hello", "hel")')
+        assert r.value == 0
+
+    def test_empty_substring(self, run):
+        r = run('return text.index_of("hello", "")')
+        assert r.value == 0
+
+    def test_empty_string(self, run):
+        r = run('return text.index_of("", "a")')
+        assert r.value is None
+
+
+class TestTextLines:
+    def test_basic(self, run):
+        r = run('return text.lines("a\nb\nc")')
+        assert r.value == ["a", "b", "c"]
+
+    def test_single_line(self, run):
+        r = run('return text.lines("hello")')
+        assert r.value == ["hello"]
+
+    def test_empty(self, run):
+        r = run('return text.lines("")')
+        assert r.value == [""]
+
+    def test_trailing_newline(self, run):
+        r = run('return text.lines("a\nb\n")')
+        assert r.value == ["a", "b", ""]
+
+
+class TestTextSplitFirst:
+    def test_found(self, run):
+        r = run('return text.split_first("key=value", "=")')
+        assert r.value == {"before": "key", "after": "value"}
+
+    def test_not_found(self, run):
+        r = run('return text.split_first("hello", "=")')
+        assert r.value == {"before": "hello", "after": ""}
+
+    def test_multiple_seps(self, run):
+        r = run('return text.split_first("a=b=c", "=")')
+        assert r.value == {"before": "a", "after": "b=c"}
+
+    def test_at_start(self, run):
+        r = run('return text.split_first("=value", "=")')
+        assert r.value == {"before": "", "after": "value"}
+
+
+class TestTextExtract:
+    def test_code_blocks(self, run):
+        r = run('return text.extract("before ```code``` after", "```", "```")')
+        assert r.value == ["code"]
+
+    def test_multiple(self, run):
+        r = run('return text.extract("[a] and [b]", "[", "]")')
+        assert r.value == ["a", "b"]
+
+    def test_none_found(self, run):
+        r = run('return text.extract("no delimiters", "[", "]")')
+        assert r.value == []
+
+    def test_unclosed(self, run):
+        r = run('return text.extract("[open but no close", "[", "]")')
+        assert r.value == []
+
+    def test_empty_content(self, run):
+        r = run('return text.extract("[]", "[", "]")')
+        assert r.value == [""]
+
+    def test_empty_start_delimiter_error(self, run):
+        r = run('return text.extract("abc", "", "]")')
+        assert r.type == "error"
+
+    def test_empty_end_delimiter_error(self, run):
+        r = run('return text.extract("abc", "[", "")')
+        assert r.type == "error"
+
+
+class TestTextPadStart:
+    def test_basic(self, run):
+        r = run('return text.pad_start("5", 3, "0")')
+        assert r.value == "005"
+
+    def test_already_long(self, run):
+        r = run('return text.pad_start("hello", 3, "0")')
+        assert r.value == "hello"
+
+    def test_multi_char_fill(self, run):
+        r = run('return text.pad_start("x", 5, "ab")')
+        assert r.value == "ababx"
+
+    def test_empty_fill_error(self, run):
+        r = run('return text.pad_start("x", 5, "")')
+        assert r.type == "error"
+
+
+class TestTextPadEnd:
+    def test_basic(self, run):
+        r = run('return text.pad_end("5", 3, "0")')
+        assert r.value == "500"
+
+    def test_already_long(self, run):
+        r = run('return text.pad_end("hello", 3, "0")')
+        assert r.value == "hello"
+
+    def test_multi_char_fill(self, run):
+        r = run('return text.pad_end("x", 5, "ab")')
+        assert r.value == "xabab"
+
+    def test_empty_fill_error(self, run):
+        r = run('return text.pad_end("x", 5, "")')
+        assert r.type == "error"
+
+
 # ===================================================================
 # list.*
 # ===================================================================
@@ -589,6 +747,20 @@ class TestNumberRandomInt:
     def test_random_int_min_equals_max(self, run):
         r = run('return number.random_int(5, 5)')
         assert r.value == 5
+
+
+class TestNumberMod:
+    def test_mod_basic(self, run):
+        r = run('return number.mod(5, 2)')
+        assert r.value == 1
+
+    def test_mod_even(self, run):
+        r = run('return number.mod(4, 2)')
+        assert r.value == 0
+
+    def test_mod_float(self, run):
+        r = run('return number.mod(5.5, 2)')
+        assert r.value == pytest.approx(1.5)
 
 
 class TestNumberPow:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from lumon.ast_nodes import DefineBlock, ImplementBlock
+from lumon.ast_nodes import DefineBlock, ImplementBlock, TestBlock
 from lumon.errors import LumonError
 
 
@@ -19,6 +19,7 @@ class Environment:
         self._implements: dict[str, object] = {} if parent is None else parent._implements
         self._builtins: dict[str, object] = {} if parent is None else parent._builtins
         self._namespace_prefixes: set[str] = set() if parent is None else parent._namespace_prefixes
+        self._tests: list[object] = [] if parent is None else parent._tests
         self._call_depth = 0 if parent is None else parent._call_depth
         self._max_call_depth = 100
         self._call_stack: list[str] = [] if parent is None else parent._call_stack
@@ -39,6 +40,9 @@ class Environment:
         self._active_plugin: dict[str, object] = (
             {"dir": None, "instance": None, "env": None} if parent is None else parent._active_plugin
         )
+        # Pending spawns: list of (handle_id, envelope) — collected, yielded as batch
+        self._pending_spawns: list[tuple[str, dict]] = [] if parent is None else parent._pending_spawns
+        self._spawn_counter: list[int] = [0] if parent is None else parent._spawn_counter
         # Working directory (shared)
         self._working_dir: str | None = None if parent is None else parent._working_dir
 
@@ -64,6 +68,9 @@ class Environment:
         snap._implements = self._implements
         snap._builtins = self._builtins
         snap._namespace_prefixes = self._namespace_prefixes
+        snap._tests = self._tests
+        snap._pending_spawns = self._pending_spawns
+        snap._spawn_counter = self._spawn_counter
         snap._call_depth = self._call_depth
         snap._max_call_depth = self._max_call_depth
         snap._call_stack = list(self._call_stack)
@@ -104,6 +111,23 @@ class Environment:
     def register_implement(self, node: object) -> None:
         assert isinstance(node, ImplementBlock)
         self._implements[node.namespace_path] = node
+
+    def register_test(self, node: object) -> None:
+        assert isinstance(node, TestBlock)
+        self._tests.append(node)
+
+    def get_tests(self) -> list[object]:
+        return list(self._tests)
+
+    def register_spawn(self, envelope: dict) -> str:
+        """Register a pending spawn and return its handle ID."""
+        handle_id = f"__spawn_{self._spawn_counter[0]}"
+        self._spawn_counter[0] += 1
+        self._pending_spawns.append((handle_id, envelope))
+        return handle_id
+
+    def get_pending_spawns(self) -> list[tuple[str, dict]]:
+        return list(self._pending_spawns)
 
     def set_loader(self, loader: Callable[[str], None]) -> None:
         """Set the lazy loader callback for auto-loading namespaces from disk."""

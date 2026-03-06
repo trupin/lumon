@@ -10,10 +10,17 @@ import sys
 from pathlib import Path
 
 from lumon import __version__
+from lumon.ast_nodes import TestBlock
 from lumon.backends import RealFS, RealGit
+from lumon.builtins import register_builtins
+from lumon.environment import Environment
+from lumon.errors import LumonError, ReturnSignal
+from lumon.evaluator import eval_node
 from lumon.interpreter import interpret
+from lumon.parser import parse
 from lumon.plugins import disk_manifest_namespaces, load_config, split_contracts
 from lumon.serializer import deserialize
+from lumon.type_checker import type_check
 
 _STATE_FILE = Path(".lumon_state.json")
 
@@ -62,6 +69,17 @@ def _deploy_skills() -> dict[str, str]:
     pkg = importlib.resources.files("lumon._deploy.skills")
     result: dict[str, str] = {}
     # Iterate over skill directories
+    for item in pkg.iterdir():
+        skill_file = item / "SKILL.md"
+        if skill_file.is_file():
+            result[item.name] = skill_file.read_text(encoding="utf-8")
+    return result
+
+
+def _deploy_plugin_skills() -> dict[str, str]:
+    """Return {skill_name: SKILL.md content} for all bundled plugin skills."""
+    pkg = importlib.resources.files("lumon._deploy.plugin_skills")
+    result: dict[str, str] = {}
     for item in pkg.iterdir():
         skill_file = item / "SKILL.md"
         if skill_file.is_file():
@@ -136,7 +154,15 @@ def cmd_respond(args: argparse.Namespace) -> int:
     prev_responses: list[object] = [deserialize(r) for r in state.get("responses", [])]
     responses = prev_responses + [response]
 
-    result = interpret(state["code"], responses=responses, working_dir=".")
+    io_backend = RealFS(".")
+    git_backend = RealGit(".")
+    result = interpret(
+        state["code"],
+        io_backend=io_backend,
+        git_backend=git_backend,
+        responses=responses,
+        working_dir=".",
+    )
     print(json.dumps(result, ensure_ascii=False))
 
     if result.get("type") in ("ask", "spawn_batch"):
@@ -339,13 +365,43 @@ def cmd_test(args: argparse.Namespace) -> int:
             print(f"  SKIP  {f.stem} (file not found)")
             continue
         code = f.read_text(encoding="utf-8")
-        result = interpret(code, working_dir=".")
-        if result.get("type") == "error":
-            print(f"  FAIL  {f.stem}: {result.get('message', 'unknown error')}")
+
+        try:
+            ast = parse(code)
+            type_check(ast)
+            env = Environment()
+            register_builtins(env, None, None)
+            env._working_dir = "."
+
+            # Evaluate top-level to register defines, implements, and tests
+            try:
+                eval_node(ast, env)
+            except ReturnSignal:
+                pass
+
+            tests = env.get_tests()
+            if tests:
+                # Run each test block individually
+                for test in tests:
+                    assert isinstance(test, TestBlock)
+                    try:
+                        test_env = env.child_scope()
+                        for stmt in test.body:
+                            eval_node(stmt, test_env)
+                        print(f"  PASS  {test.name}")
+                        passed += 1
+                    except (LumonError, ReturnSignal) as e:
+                        msg = str(e) if isinstance(e, LumonError) else "unexpected return"
+                        print(f"  FAIL  {test.name}: {msg}")
+                        failed += 1
+            else:
+                # No test blocks — treat the whole file as a single test (legacy)
+                print(f"  PASS  {f.stem}")
+                passed += 1
+
+        except LumonError as e:
+            print(f"  FAIL  {f.stem}: {e}")
             failed += 1
-        else:
-            print(f"  PASS  {f.stem}")
-            passed += 1
 
     total = passed + failed
     print(f"\n{passed}/{total} passed")
@@ -427,6 +483,18 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
     for skill_name, content in sorted(skills.items()):
         skill_dir = skills_dir / skill_name
+        skill_dir.mkdir(exist_ok=True)
+        dest = skill_dir / "SKILL.md"
+        rel = str(dest.relative_to(target))
+        _deploy_file(dest, content, rel, args.force, deployed, skipped)
+
+    # Deploy plugin skills
+    plugin_skills = _deploy_plugin_skills()
+    plugin_skills_dir = plugins_dir / ".claude" / "skills"
+    plugin_skills_dir.mkdir(parents=True, exist_ok=True)
+
+    for skill_name, content in sorted(plugin_skills.items()):
+        skill_dir = plugin_skills_dir / skill_name
         skill_dir.mkdir(exist_ok=True)
         dest = skill_dir / "SKILL.md"
         rel = str(dest.relative_to(target))

@@ -420,6 +420,14 @@ assert_eq "deploy: plugins-issues skill deployed" \
     "yes" \
     "$([ -f "$DEPLOY_ROOT/.claude/skills/plugins-issues/SKILL.md" ] && echo yes || echo no)"
 
+assert_eq "deploy: review skill deployed" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/.claude/skills/review/SKILL.md" ] && echo yes || echo no)"
+
+assert_eq "deploy: plugin fix-issues skill deployed" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/plugins/.claude/skills/fix-issues/SKILL.md" ] && echo yes || echo no)"
+
 # ---------------------------------------------------------------------------
 # IO sandbox (--working-dir constrains io.read / io.write)
 # ---------------------------------------------------------------------------

@@ -927,6 +927,13 @@ let msg = "total: \(n * 2 + 1)"       -- "total: 7"
 | `text.starts_with` | `(s: text, prefix: text) -> bool` | Check prefix |
 | `text.ends_with` | `(s: text, suffix: text) -> bool` | Check suffix |
 | `text.from` | `(value: a) -> text` | Convert any value to text |
+| `text.match` | `(s: text, pattern: text) -> bool` | Glob match (`*`, `?`, `[abc]`, `[!abc]`) |
+| `text.index_of` | `(s: text, sub: text) -> number \| none` | First position of substring, or none |
+| `text.lines` | `(s: text) -> list<text>` | Split by newline |
+| `text.split_first` | `(s: text, sep: text) -> map` | Split at first occurrence → `{before, after}` |
+| `text.extract` | `(s: text, start: text, end: text) -> list<text>` | All segments between delimiters |
+| `text.pad_start` | `(s: text, len: number, fill: text) -> text` | Left-pad to length |
+| `text.pad_end` | `(s: text, len: number, fill: text) -> text` | Right-pad to length |
 
 ### list
 

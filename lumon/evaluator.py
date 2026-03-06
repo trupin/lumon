@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from lumon.ast_nodes import (
     AskExpr,
+    AssertStatement,
     AsyncExpr,
     AwaitAllExpr,
     AwaitExpr,
@@ -40,6 +41,7 @@ from lumon.ast_nodes import (
     SpreadEntry,
     TagLiteral,
     TagPattern,
+    TestBlock,
     TextLiteral,
     UnaryOp,
     VarRef,
@@ -47,7 +49,7 @@ from lumon.ast_nodes import (
     WithExpr,
 )
 from lumon.environment import Environment
-from lumon.errors import AskSignal, LumonError, ReturnSignal, SpawnSignal
+from lumon.errors import AskSignal, LumonError, ReturnSignal
 from lumon.plugins import validate_contracts
 from lumon.serializer import serialize
 from lumon.values import LumonFunction, LumonTag, is_truthy
@@ -128,12 +130,20 @@ def eval_node(node: object, env: Environment) -> object:
         case WithExpr():
             return _eval_with(node, env)
 
-        # --- Define / Implement ---
+        # --- Define / Implement / Test ---
         case DefineBlock():
             env.register_define(node)
             return None
         case ImplementBlock():
             env.register_implement(node)
+            return None
+        case TestBlock():
+            env.register_test(node)
+            return None
+        case AssertStatement(expr=expr):
+            val = eval_node(expr, env)
+            if not is_truthy(val):
+                raise LumonError("Assertion failed")
             return None
 
         # --- Coroutines ---
@@ -722,7 +732,6 @@ def _eval_spawn(node: SpawnExpr, env: Environment) -> object:
     expects = node.expects
 
     envelope: dict[str, object] = {
-        "type": "spawn_batch",
         "prompt": prompt,
     }
     if context is not None:
@@ -732,4 +741,5 @@ def _eval_spawn(node: SpawnExpr, env: Environment) -> object:
     if expects is not None:
         envelope["expects"] = expects
 
-    raise SpawnSignal(envelope)
+    # Register spawn and return handle — don't halt execution
+    return env.register_spawn(envelope)

@@ -93,6 +93,7 @@ This is **extending**, not replacing. The existing functions stay. The script gr
 
 ## Rules
 
+- **Always write code to `.lumon` files before running — never pass inline code to the CLI.** Use `lumon --working-dir sandbox scripts/<file>.lumon` or `lumon --working-dir sandbox test <namespace>`. Inline commands (`lumon --working-dir sandbox '<code>'`) are only acceptable for one-off debugging that won't be reused.
 - **Never hardcode task-specific values in library functions.** Pass them as parameters. The function `reports.summarize(items, format)` is reusable; `reports.summarize_monday_standup()` is not.
 - **Never skip the library layer.** Even if a task seems simple, write a function for it. Next time the same operation is needed, the function is already there.
 - **Never delete working code.** If a function's behavior needs to change, add a parameter or write a new function. Other scripts may depend on the existing behavior.

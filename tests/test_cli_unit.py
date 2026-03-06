@@ -15,6 +15,7 @@ from lumon.cli import (
     _annotate_manifest,
     _bundled_manifest,
     _clear_state,
+    _deploy_plugin_skills,
     _deploy_skills,
     _format_contract,
     _load_state,
@@ -164,6 +165,27 @@ class TestCmdRespond:
         assert output["value"] == "the answer"
 
 
+    def test_respond_with_builtins(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """respond should have io/text/list builtins available during replay."""
+        assert isinstance(tmp_path, os.PathLike)
+        state_file = Path(str(tmp_path)) / ".lumon_state.json"
+        with patch("lumon.cli._STATE_FILE", state_file):
+            old_cwd = os.getcwd()
+            os.chdir(str(tmp_path))
+            try:
+                code = 'let n = text.length("hello")\nlet x = ask\n  "how?"\n  context: {n: n}\nreturn x'
+                _save_state(code, [])
+                args = argparse.Namespace(response='"ok"')
+                result = cmd_respond(args)
+            finally:
+                os.chdir(old_cwd)
+        assert result == 0
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["type"] == "result"
+        assert output["value"] == "ok"
+
+
 class TestCmdBrowse:
     def test_browse_builtin_namespace(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
@@ -303,8 +325,13 @@ class TestCmdDeploy:
         # Skills deployed
         skills_dir = os.path.join(target, ".claude", "skills")
         assert os.path.isdir(skills_dir)
-        for skill in ("ask-spawn", "code-organization", "issues", "lumon", "plugins-issues", "workflow"):
+        for skill in ("ask-spawn", "code-organization", "issues", "lumon", "plugins-issues", "review", "workflow"):
             assert os.path.isfile(os.path.join(skills_dir, skill, "SKILL.md"))
+        # Plugin skills deployed
+        plugin_skills_dir = os.path.join(target, "plugins", ".claude", "skills")
+        assert os.path.isdir(plugin_skills_dir)
+        for skill in ("fix-issues",):
+            assert os.path.isfile(os.path.join(plugin_skills_dir, skill, "SKILL.md"))
 
     def test_deploy_identical_is_noop(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
@@ -481,10 +508,18 @@ class TestDeploySkills:
     def test_deploy_skills_returns_expected_skills(self) -> None:
         skills = _deploy_skills()
         assert isinstance(skills, dict)
-        assert sorted(skills.keys()) == ["ask-spawn", "code-organization", "issues", "lumon", "plugins-issues", "workflow"]
+        assert sorted(skills.keys()) == ["ask-spawn", "code-organization", "issues", "lumon", "plugins-issues", "review", "workflow"]
         for name, content in skills.items():
             assert len(content) > 0, f"Skill '{name}' has empty content"
             assert "---" in content, f"Skill '{name}' missing frontmatter"
+
+    def test_deploy_plugin_skills_returns_expected_skills(self) -> None:
+        skills = _deploy_plugin_skills()
+        assert isinstance(skills, dict)
+        assert sorted(skills.keys()) == ["fix-issues"]
+        for name, content in skills.items():
+            assert len(content) > 0, f"Plugin skill '{name}' has empty content"
+            assert "---" in content, f"Plugin skill '{name}' missing frontmatter"
 
     def test_prompt_overwrite_eof_returns_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def raise_eof(_: str) -> str:

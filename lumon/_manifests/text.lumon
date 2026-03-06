@@ -78,3 +78,54 @@ define text.from
   takes:
     value: any "The value to convert"
   returns: text "Text representation"
+
+define text.match
+  "Glob pattern match (*, ?, [abc], [!abc])"
+  takes:
+    s: text "The text to match against"
+    pattern: text "The glob pattern"
+  returns: bool "Whether the text matches the pattern"
+
+define text.index_of
+  "Find first position of substring"
+  takes:
+    s: text "The text to search in"
+    sub: text "The substring to find"
+  returns: number | none "Position (0-based) or none if not found"
+
+define text.lines
+  "Split text into lines"
+  takes:
+    s: text "The text to split"
+  returns: list<text> "List of lines"
+
+define text.split_first
+  "Split at first occurrence of separator"
+  takes:
+    s: text "The text to split"
+    sep: text "The separator"
+  returns: map "Map with 'before' and 'after' keys"
+
+define text.extract
+  "Extract all segments between start and end delimiters"
+  takes:
+    s: text "The text to search"
+    start: text "The opening delimiter"
+    end: text "The closing delimiter"
+  returns: list<text> "List of extracted segments"
+
+define text.pad_start
+  "Left-pad text to target length"
+  takes:
+    s: text "The text to pad"
+    len: number "The target length"
+    fill: text "The fill character(s)"
+  returns: text "Padded text"
+
+define text.pad_end
+  "Right-pad text to target length"
+  takes:
+    s: text "The text to pad"
+    len: number "The target length"
+    fill: text "The fill character(s)"
+  returns: text "Padded text"

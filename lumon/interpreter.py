@@ -8,7 +8,7 @@ from collections.abc import Callable
 
 from lumon.builtins import register_builtins
 from lumon.environment import Environment
-from lumon.errors import AskSignal, LumonError, ReturnSignal, SpawnSignal
+from lumon.errors import AskSignal, LumonError, ReturnSignal
 from lumon.evaluator import eval_node
 from lumon.parser import parse
 from lumon.plugins import (
@@ -167,10 +167,10 @@ def interpret(
       {"type": "ask", "prompt": ..., "context": ..., "expects": ...}
       {"type": "spawn_batch", ...}
     """
+    env = Environment()
     try:
         ast = parse(code)
         type_check(ast, io_backend=io_backend, git_backend=git_backend)
-        env = Environment()
         if responses:
             env._response_queue.extend(responses)
         register_builtins(env, io_backend, git_backend)
@@ -181,23 +181,35 @@ def interpret(
         elif plugin_executor is not None:
             env._plugin_executor = plugin_executor
         result = eval_node(ast, env)
+        pending = env.get_pending_spawns()
+        if pending:
+            return _make_spawn_batch(pending)
         output = {"type": "result", "value": serialize(result)}
         if persist and working_dir is not None:
             _persist_blocks(code, working_dir)
         return output
     except ReturnSignal as rs:
+        pending = env.get_pending_spawns()
+        if pending:
+            return _make_spawn_batch(pending)
         output = {"type": "result", "value": serialize(rs.value)}
         if persist and working_dir is not None:
             _persist_blocks(code, working_dir)
         return output
     except AskSignal as ask:
         return ask.envelope
-    except SpawnSignal as spawn:
-        return spawn.envelope
     except LumonError as e:
         return e.to_envelope()
     except RecursionError:
         return LumonError("Call depth limit exceeded").to_envelope()
+
+
+def _make_spawn_batch(pending: list[tuple[str, dict]]) -> dict:
+    """Build a spawn_batch envelope from pending spawn requests."""
+    spawns = [envelope for _handle, envelope in pending]
+    if len(spawns) == 1:
+        return {"type": "spawn_batch", **spawns[0]}
+    return {"type": "spawn_batch", "spawns": spawns}
 
 
 def _persist_blocks(code: str, working_dir: str) -> None:
