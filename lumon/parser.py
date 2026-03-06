@@ -209,13 +209,35 @@ class LumonIndenter(Indenter):
 def _preprocess(source: str) -> str:
     """Pre-process source code before lexing.
 
+    - Strip comment-only lines (replace with empty lines to preserve line numbers).
+    - Strip trailing comments from code lines.
     - Join pipe continuation lines (lines starting with |>) to previous line.
     """
     lines = source.split("\n")
     result: list[str] = []
     for line in lines:
         stripped = line.lstrip()
-        if stripped.startswith("|>") and result:
+        if stripped.startswith("--"):
+            result.append("")
+        elif "--" in line:
+            # Strip trailing comment, but not inside strings
+            in_string = False
+            comment_pos = -1
+            i = 0
+            while i < len(line):
+                if line[i] == '"':
+                    in_string = not in_string
+                elif not in_string and line[i:i+2] == "--":
+                    comment_pos = i
+                    break
+                elif not in_string and line[i] == "\\" and i + 1 < len(line):
+                    i += 1  # skip escaped char
+                i += 1
+            if comment_pos >= 0:
+                result.append(line[:comment_pos].rstrip())
+            else:
+                result.append(line)
+        elif stripped.startswith("|>") and result:
             result[-1] = result[-1] + " " + stripped
         else:
             result.append(line)

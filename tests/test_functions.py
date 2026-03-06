@@ -81,6 +81,32 @@ class TestDefineImplement:
         )
         assert r.value == "Hello, Lumon"
 
+    def test_comment_in_implement_block(self, run):
+        r = run(
+            'define math.inc\n'
+            '  "Increment a number"\n'
+            '  takes:\n'
+            '    n: number "The number"\n'
+            '  returns: number "Result"\n'
+            '\n'
+            'implement math.inc\n'
+            '  -- increment by one\n'
+            '  let result = n + 1\n'
+            '  -- return the result\n'
+            '  return result\n'
+            '\n'
+            'return math.inc(5)'
+        )
+        assert r.value == 6
+
+    def test_trailing_comment(self, run):
+        r = run('let x = 42 -- the answer\nreturn x')
+        assert r.value == 42
+
+    def test_comment_preserves_strings(self, run):
+        r = run('return "hello -- world"')
+        assert r.value == "hello -- world"
+
     def test_multiple_parameters(self, run):
         r = run(
             'define math.add\n'
