@@ -183,16 +183,20 @@ def interpret(
         result = eval_node(ast, env)
         pending = env.get_pending_spawns()
         if pending:
-            return _make_spawn_batch(pending)
-        output = {"type": "result", "value": serialize(result)}
+            return _make_spawn_batch(pending, env._logs)
+        output: dict[str, object] = {"type": "result", "value": serialize(result)}
+        if env._logs:
+            output["logs"] = list(env._logs)
         if persist and working_dir is not None:
             _persist_blocks(code, working_dir)
         return output
     except ReturnSignal as rs:
         pending = env.get_pending_spawns()
         if pending:
-            return _make_spawn_batch(pending)
+            return _make_spawn_batch(pending, env._logs)
         output = {"type": "result", "value": serialize(rs.value)}
+        if env._logs:
+            output["logs"] = list(env._logs)
         if persist and working_dir is not None:
             _persist_blocks(code, working_dir)
         return output
@@ -204,12 +208,16 @@ def interpret(
         return LumonError("Call depth limit exceeded").to_envelope()
 
 
-def _make_spawn_batch(pending: list[tuple[str, dict]]) -> dict:
+def _make_spawn_batch(pending: list[tuple[str, dict]], logs: list[object] | None = None) -> dict:
     """Build a spawn_batch envelope from pending spawn requests."""
     spawns = [envelope for _handle, envelope in pending]
     if len(spawns) == 1:
-        return {"type": "spawn_batch", **spawns[0]}
-    return {"type": "spawn_batch", "spawns": spawns}
+        result = {"type": "spawn_batch", **spawns[0]}
+    else:
+        result = {"type": "spawn_batch", "spawns": spawns}
+    if logs:
+        result["logs"] = list(logs)
+    return result
 
 
 def _persist_blocks(code: str, working_dir: str) -> None:

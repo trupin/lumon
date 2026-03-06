@@ -51,3 +51,29 @@ define map.entries
   takes:
     m: map<a> "The map"
   returns: list<{key: text, value: a}> "List of entries"
+
+define map.map
+  "Transform all values with function"
+  takes:
+    m: map<a> "The map"
+    f: fn(text, a) -> b "Function taking key and value"
+  returns: map<b> "Map with transformed values"
+
+define map.filter
+  "Keep entries where function returns true"
+  takes:
+    m: map<a> "The map"
+    f: fn(text, a) -> bool "Predicate taking key and value"
+  returns: map<a> "Filtered map"
+
+define map.from_entries
+  "Build map from list of {key, value} maps"
+  takes:
+    entries: list<{key: text, value: a}> "List of entries"
+  returns: map<a> "The map"
+
+define map.size
+  "Get number of entries"
+  takes:
+    m: map<a> "The map"
+  returns: number "Entry count"

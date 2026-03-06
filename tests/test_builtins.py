@@ -974,3 +974,358 @@ class TestTypeIs:
     def test_is_wrong_type(self, run):
         r = run('return type.is(42, "text")')
         assert r.value is False
+
+
+# ===================================================================
+# list.find / list.any / list.all / list.zip / list.enumerate /
+# list.group_by / list.index_of / list.unique_by
+# ===================================================================
+
+class TestListFind:
+    def test_find_match(self, run):
+        r = run('return list.find([1, 2, 3, 4], fn(x) -> x > 2)')
+        assert r.value == 3
+
+    def test_find_no_match(self, run):
+        r = run('return list.find([1, 2, 3], fn(x) -> x > 10)')
+        assert r.value is None
+
+    def test_find_empty(self, run):
+        r = run('return list.find([], fn(x) -> x > 0)')
+        assert r.value is None
+
+    def test_find_first_only(self, run):
+        r = run('return list.find([10, 20, 30], fn(x) -> x >= 10)')
+        assert r.value == 10
+
+
+class TestListAny:
+    def test_any_true(self, run):
+        r = run('return list.any([1, 2, 3], fn(x) -> x == 2)')
+        assert r.value is True
+
+    def test_any_false(self, run):
+        r = run('return list.any([1, 2, 3], fn(x) -> x > 10)')
+        assert r.value is False
+
+    def test_any_empty(self, run):
+        r = run('return list.any([], fn(x) -> true)')
+        assert r.value is False
+
+
+class TestListAll:
+    def test_all_true(self, run):
+        r = run('return list.all([2, 4, 6], fn(x) -> x % 2 == 0)')
+        assert r.value is True
+
+    def test_all_false(self, run):
+        r = run('return list.all([2, 3, 6], fn(x) -> x % 2 == 0)')
+        assert r.value is False
+
+    def test_all_empty(self, run):
+        r = run('return list.all([], fn(x) -> false)')
+        assert r.value is True
+
+
+class TestListZip:
+    def test_zip_equal(self, run):
+        r = run('return list.zip([1, 2, 3], ["a", "b", "c"])')
+        assert r.value == [
+            {"first": 1, "second": "a"},
+            {"first": 2, "second": "b"},
+            {"first": 3, "second": "c"},
+        ]
+
+    def test_zip_unequal(self, run):
+        r = run('return list.zip([1, 2], ["a", "b", "c"])')
+        assert r.value == [
+            {"first": 1, "second": "a"},
+            {"first": 2, "second": "b"},
+        ]
+
+    def test_zip_empty(self, run):
+        r = run('return list.zip([], ["a"])')
+        assert r.value == []
+
+
+class TestListEnumerate:
+    def test_enumerate(self, run):
+        r = run('return list.enumerate(["a", "b", "c"])')
+        assert r.value == [
+            {"index": 0, "value": "a"},
+            {"index": 1, "value": "b"},
+            {"index": 2, "value": "c"},
+        ]
+
+    def test_enumerate_empty(self, run):
+        r = run('return list.enumerate([])')
+        assert r.value == []
+
+
+class TestListGroupBy:
+    def test_group_by(self, run):
+        r = run(
+            'let items = [{name: "a", tag: "x"}, {name: "b", tag: "y"}, {name: "c", tag: "x"}]\n'
+            'return list.group_by(items, fn(i) -> i.tag)'
+        )
+        assert r.value == {
+            "x": [{"name": "a", "tag": "x"}, {"name": "c", "tag": "x"}],
+            "y": [{"name": "b", "tag": "y"}],
+        }
+
+    def test_group_by_empty(self, run):
+        r = run('return list.group_by([], fn(x) -> "a")')
+        assert r.value == {}
+
+
+class TestListIndexOf:
+    def test_index_of_found(self, run):
+        r = run('return list.index_of([10, 20, 30], 20)')
+        assert r.value == 1
+
+    def test_index_of_not_found(self, run):
+        r = run('return list.index_of([10, 20, 30], 99)')
+        assert r.value is None
+
+    def test_index_of_first(self, run):
+        r = run('return list.index_of([1, 2, 1], 1)')
+        assert r.value == 0
+
+    def test_index_of_empty(self, run):
+        r = run('return list.index_of([], 1)')
+        assert r.value is None
+
+
+class TestListUniqueBy:
+    def test_unique_by(self, run):
+        r = run(
+            'let items = [{id: 1, name: "a"}, {id: 2, name: "b"}, {id: 1, name: "c"}]\n'
+            'return list.unique_by(items, fn(x) -> x.id)'
+        )
+        assert r.value == [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}]
+
+    def test_unique_by_empty(self, run):
+        r = run('return list.unique_by([], fn(x) -> x)')
+        assert r.value == []
+
+    def test_unique_by_all_same(self, run):
+        r = run('return list.unique_by([1, 1, 1], fn(x) -> x)')
+        assert r.value == [1]
+
+
+# ===================================================================
+# map.map / map.filter / map.from_entries / map.size
+# ===================================================================
+
+class TestMapMap:
+    def test_map_values(self, run):
+        r = run(
+            'let m = {a: 1, b: 2, c: 3}\n'
+            'return map.map(m, fn(k, v) -> v * 2)'
+        )
+        assert r.value == {"a": 2, "b": 4, "c": 6}
+
+    def test_map_empty(self, run):
+        r = run('return map.map({}, fn(k, v) -> v)')
+        assert r.value == {}
+
+
+class TestMapFilter:
+    def test_filter_values(self, run):
+        r = run(
+            'let m = {a: 1, b: 2, c: 3}\n'
+            'return map.filter(m, fn(k, v) -> v > 1)'
+        )
+        assert r.value == {"b": 2, "c": 3}
+
+    def test_filter_by_key(self, run):
+        r = run(
+            'let m = {keep: 1, drop: 2}\n'
+            'return map.filter(m, fn(k, v) -> k == "keep")'
+        )
+        assert r.value == {"keep": 1}
+
+    def test_filter_empty(self, run):
+        r = run('return map.filter({}, fn(k, v) -> true)')
+        assert r.value == {}
+
+
+class TestMapFromEntries:
+    def test_from_entries(self, run):
+        r = run(
+            'let entries = [{key: "a", value: 1}, {key: "b", value: 2}]\n'
+            'return map.from_entries(entries)'
+        )
+        assert r.value == {"a": 1, "b": 2}
+
+    def test_from_entries_empty(self, run):
+        r = run('return map.from_entries([])')
+        assert r.value == {}
+
+    def test_roundtrip(self, run):
+        r = run(
+            'let m = {x: 10, y: 20}\n'
+            'return map.from_entries(map.entries(m))'
+        )
+        assert r.value == {"x": 10, "y": 20}
+
+
+class TestMapSize:
+    def test_size(self, run):
+        r = run('return map.size({a: 1, b: 2, c: 3})')
+        assert r.value == 3
+
+    def test_size_empty(self, run):
+        r = run('return map.size({})')
+        assert r.value == 0
+
+
+# ===================================================================
+# text encoding utilities
+# ===================================================================
+
+class TestTextEncodeUrl:
+    def test_encode_spaces(self, run):
+        r = run('return text.encode_url("hello world")')
+        assert r.value == "hello%20world"
+
+    def test_encode_special(self, run):
+        r = run('return text.encode_url("a&b=c")')
+        assert r.value == "a%26b%3Dc"
+
+    def test_encode_empty(self, run):
+        r = run('return text.encode_url("")')
+        assert r.value == ""
+
+
+class TestTextDecodeUrl:
+    def test_decode(self, run):
+        r = run('return text.decode_url("hello%20world")')
+        assert r.value == "hello world"
+
+    def test_roundtrip(self, run):
+        r = run('return text.decode_url(text.encode_url("a&b=c"))')
+        assert r.value == "a&b=c"
+
+
+class TestTextEncodeBase64:
+    def test_encode(self, run):
+        r = run('return text.encode_base64("hello")')
+        assert r.value == "aGVsbG8="
+
+    def test_encode_empty(self, run):
+        r = run('return text.encode_base64("")')
+        assert r.value == ""
+
+
+class TestTextDecodeBase64:
+    def test_decode(self, run):
+        r = run('return text.decode_base64("aGVsbG8=")')
+        assert r.value == "hello"
+
+    def test_roundtrip(self, run):
+        r = run('return text.decode_base64(text.encode_base64("test data"))')
+        assert r.value == "test data"
+
+
+# ===================================================================
+# text pattern matching
+# ===================================================================
+
+class TestTextMatchPattern:
+    def test_email_valid(self, run):
+        r = run('return text.match_pattern("user@example.com", :email)')
+        assert r.value is True
+
+    def test_email_invalid(self, run):
+        r = run('return text.match_pattern("not-an-email", :email)')
+        assert r.value is False
+
+    def test_url_valid(self, run):
+        r = run('return text.match_pattern("https://example.com/path", :url)')
+        assert r.value is True
+
+    def test_iso_date_valid(self, run):
+        r = run('return text.match_pattern("2024-01-15", :iso_date)')
+        assert r.value is True
+
+    def test_iso_date_invalid(self, run):
+        r = run('return text.match_pattern("15/01/2024", :iso_date)')
+        assert r.value is False
+
+    def test_number_valid(self, run):
+        r = run('return text.match_pattern("-3.14", :number)')
+        assert r.value is True
+
+    def test_unknown_pattern_errors(self, run):
+        r = run('return text.match_pattern("test", :unknown_xyz)')
+        assert r.type == "error"
+        assert "unknown pattern" in r.error["message"]
+
+
+class TestTextFindPattern:
+    def test_find_emails(self, run):
+        r = run('return text.find_pattern("Contact alice@test.com and bob@test.com", :email)')
+        assert r.value == ["alice@test.com", "bob@test.com"]
+
+    def test_find_urls(self, run):
+        r = run('return text.find_pattern("Visit https://a.com and http://b.com/path", :url)')
+        assert r.value == ["https://a.com", "http://b.com/path"]
+
+    def test_find_dates(self, run):
+        r = run('return text.find_pattern("Date: 2024-01-15 and 2024-02-20", :iso_date)')
+        assert r.value == ["2024-01-15", "2024-02-20"]
+
+    def test_find_none(self, run):
+        r = run('return text.find_pattern("no emails here", :email)')
+        assert r.value == []
+
+
+# ===================================================================
+# log
+# ===================================================================
+
+class TestLog:
+    def test_log_returns_none(self, run):
+        r = run('let x = log(42)\nreturn x')
+        assert r.value is None
+
+    def test_log_in_output(self, run):
+        r = run('log("hello")\nlog(42)\nreturn 1')
+        assert r.value == 1
+        assert r.raw.get("logs") == ["hello", 42]
+
+    def test_no_logs_when_empty(self, run):
+        r = run('return 1')
+        assert "logs" not in r.raw
+
+
+# ===================================================================
+# number.range
+# ===================================================================
+
+class TestNumberRange:
+    def test_range_basic(self, run):
+        r = run('return number.range(1, 5)')
+        assert r.value == [1, 2, 3, 4, 5]
+
+    def test_range_single(self, run):
+        r = run('return number.range(3, 3)')
+        assert r.value == [3]
+
+    def test_range_negative(self, run):
+        r = run('return number.range(-2, 2)')
+        assert r.value == [-2, -1, 0, 1, 2]
+
+    def test_range_empty(self, run):
+        r = run('return number.range(5, 3)')
+        assert r.value == []
+
+    def test_range_too_large(self, run):
+        r = run('return number.range(1, 20000)')
+        assert r.type == "error"
+        assert "too large" in r.error["message"]
+
+    def test_range_with_map(self, run):
+        r = run('return number.range(1, 3) |> list.map(fn(n) -> n * 10)')
+        assert r.value == [10, 20, 30]

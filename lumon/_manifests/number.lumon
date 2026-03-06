@@ -120,6 +120,13 @@ define number.e
   "Euler's number"
   returns: number "2.71828..."
 
+define number.range
+  "Generate list of integers from start to end (inclusive, max 10000)"
+  takes:
+    start: number "Start value"
+    end: number "End value (inclusive)"
+  returns: list<number> "List of integers"
+
 define number.inf
   "Positive infinity"
   returns: number "Infinity"

@@ -5,8 +5,11 @@ from __future__ import annotations
 import concurrent.futures
 import csv as _csv_mod
 import fnmatch
+import re as _re
 import io as _io_mod
 import json as _json_mod
+from base64 import b64decode, b64encode
+from urllib.parse import quote, unquote
 import math
 import random
 import time as _time
@@ -110,6 +113,16 @@ def _number_format(n: object, decimals: object) -> str:
     return f"{n:.{d}f}"
 
 
+_RANGE_CAP = 10000
+
+
+def _number_range(start: float, end: float) -> list[int]:
+    s, e = int(start), int(end)
+    if e - s + 1 > _RANGE_CAP:
+        raise LumonError(f"number.range: range too large (max {_RANGE_CAP} elements)")
+    return list(range(s, e + 1))
+
+
 def _number_parse(s: str) -> object:
     try:
         if "." in s:
@@ -149,6 +162,34 @@ def _list_deduplicate(items: list) -> list:
                 break
         if not found:
             seen.append(item)
+            result.append(item)
+    return result
+
+
+def _list_group_by(items: list, f: object) -> dict:
+    result: dict[str, list] = {}
+    for item in items:
+        key = _call_fn(f, [item])
+        if not isinstance(key, str):
+            raise LumonError("list.group_by: key function must return text")
+        if key not in result:
+            result[key] = []
+        result[key].append(item)
+    return result
+
+
+def _list_unique_by(items: list, f: object) -> list:
+    seen: list = []
+    result: list = []
+    for item in items:
+        key = _call_fn(f, [item])
+        found = False
+        for s in seen:
+            if key == s:
+                found = True
+                break
+        if not found:
+            seen.append(key)
             result.append(item)
     return result
 
@@ -286,6 +327,39 @@ def _is_truthy_for_filter(value: object) -> bool:
     return is_truthy(value)
 
 
+_NAMED_PATTERNS: dict[str, _re.Pattern[str]] = {
+    "email": _re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}"),
+    "url": _re.compile(r"https?://[^\s<>\"']+"),
+    "iso_date": _re.compile(r"\d{4}-\d{2}-\d{2}"),
+    "phone": _re.compile(r"\+?\d[\d\s\-()]{6,}\d"),
+    "number": _re.compile(r"-?\d+(?:\.\d+)?"),
+}
+
+
+def _text_match_pattern(s: str, pattern_tag: object) -> bool:
+    if not isinstance(pattern_tag, LumonTag):
+        raise LumonError("text.match_pattern: second argument must be a tag (e.g. :email)")
+    pat = _NAMED_PATTERNS.get(pattern_tag.name)
+    if pat is None:
+        raise LumonError(
+            f"text.match_pattern: unknown pattern :{pattern_tag.name}. "
+            f"Available: {', '.join(':' + k for k in _NAMED_PATTERNS)}"
+        )
+    return pat.fullmatch(s) is not None
+
+
+def _text_find_pattern(s: str, pattern_tag: object) -> list[str]:
+    if not isinstance(pattern_tag, LumonTag):
+        raise LumonError("text.find_pattern: second argument must be a tag (e.g. :email)")
+    pat = _NAMED_PATTERNS.get(pattern_tag.name)
+    if pat is None:
+        raise LumonError(
+            f"text.find_pattern: unknown pattern :{pattern_tag.name}. "
+            f"Available: {', '.join(':' + k for k in _NAMED_PATTERNS)}"
+        )
+    return pat.findall(s)
+
+
 # --- json helpers ---
 
 def _json_parse(s: str) -> LumonTag:
@@ -371,6 +445,12 @@ def register_builtins(
     env.register_builtin("text.extract", _text_extract)
     env.register_builtin("text.pad_start", _text_pad_start)
     env.register_builtin("text.pad_end", _text_pad_end)
+    env.register_builtin("text.encode_url", lambda s: quote(s, safe=""))
+    env.register_builtin("text.decode_url", lambda s: unquote(s))
+    env.register_builtin("text.encode_base64", lambda s: b64encode(s.encode()).decode())
+    env.register_builtin("text.decode_base64", lambda s: b64decode(s).decode())
+    env.register_builtin("text.match_pattern", _text_match_pattern)
+    env.register_builtin("text.find_pattern", _text_find_pattern)
 
     # --- list.* ---
     env.register_builtin(
@@ -401,6 +481,32 @@ def register_builtins(
     env.register_builtin("list.head", lambda items: items[0] if items else None)
     env.register_builtin("list.tail", lambda items: items[1:] if items else [])
     env.register_builtin("list.concat", lambda a, b: a + b)
+    env.register_builtin(
+        "list.find",
+        lambda items, f: next((x for x in items if is_truthy(_call_fn(f, [x]))), None),
+    )
+    env.register_builtin(
+        "list.any",
+        lambda items, f: any(is_truthy(_call_fn(f, [x])) for x in items),
+    )
+    env.register_builtin(
+        "list.all",
+        lambda items, f: all(is_truthy(_call_fn(f, [x])) for x in items),
+    )
+    env.register_builtin(
+        "list.zip",
+        lambda a, b: [{"first": x, "second": y} for x, y in zip(a, b)],
+    )
+    env.register_builtin(
+        "list.enumerate",
+        lambda items: [{"index": i, "value": v} for i, v in enumerate(items)],
+    )
+    env.register_builtin("list.group_by", _list_group_by)
+    env.register_builtin(
+        "list.index_of",
+        lambda items, item: next((i for i, x in enumerate(items) if x == item), None),
+    )
+    env.register_builtin("list.unique_by", _list_unique_by)
 
     # --- map.* ---
     env.register_builtin("map.get", lambda m, key: m.get(key))
@@ -416,6 +522,19 @@ def register_builtins(
         "map.entries",
         lambda m: [{"key": k, "value": v} for k, v in m.items()],
     )
+    env.register_builtin(
+        "map.map",
+        lambda m, f: {k: _call_fn(f, [k, v]) for k, v in m.items()},
+    )
+    env.register_builtin(
+        "map.filter",
+        lambda m, f: {k: v for k, v in m.items() if is_truthy(_call_fn(f, [k, v]))},
+    )
+    env.register_builtin(
+        "map.from_entries",
+        lambda entries: {e["key"]: e["value"] for e in entries},
+    )
+    env.register_builtin("map.size", lambda m: len(m))
 
     # --- number.* ---
     env.register_builtin("number.round", lambda n: round(n))
@@ -436,6 +555,7 @@ def register_builtins(
     env.register_builtin("number.clamp", lambda n, lo, hi: max(lo, min(hi, n)))
     env.register_builtin("number.to_text", _number_to_text)
     env.register_builtin("number.format", _number_format)
+    env.register_builtin("number.range", _number_range)
     env.register_builtin("number.pi", lambda: math.pi)
     env.register_builtin("number.e", lambda: math.e)
     env.register_builtin("number.inf", lambda: math.inf)
@@ -572,3 +692,9 @@ def register_builtins(
         )
 
     env.register_builtin("plugin.exec", _plugin_exec)
+
+    # --- log ---
+    def _log(value: object) -> None:
+        env._logs.append(serialize(value))
+
+    env.register_builtin("log", _log)

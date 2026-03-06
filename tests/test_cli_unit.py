@@ -13,6 +13,7 @@ import pytest
 
 from lumon.cli import (
     _annotate_manifest,
+    _batch_size_from_result,
     _bundled_manifest,
     _clear_state,
     _deploy_plugin_skills,
@@ -43,6 +44,16 @@ class TestStateHelpers:
             assert state is not None
             assert state["code"] == "return 42"
             assert state["responses"] == []
+            assert state["batch_size"] == 0
+
+    def test_save_and_load_state_with_batch_size(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        state_file = Path(str(tmp_path)) / ".lumon_state.json"
+        with patch("lumon.cli._STATE_FILE", state_file):
+            _save_state("return 42", [], batch_size=3)
+            state = _load_state()
+            assert state is not None
+            assert state["batch_size"] == 3
 
     def test_load_state_missing(self, tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
@@ -184,6 +195,119 @@ class TestCmdRespond:
         output = json.loads(captured.out)
         assert output["type"] == "result"
         assert output["value"] == "ok"
+
+
+class TestBatchSizeFromResult:
+    def test_non_spawn_returns_zero(self) -> None:
+        assert _batch_size_from_result({"type": "result", "value": 42}) == 0
+        assert _batch_size_from_result({"type": "ask", "prompt": "?"}) == 0
+
+    def test_single_spawn(self) -> None:
+        assert _batch_size_from_result({"type": "spawn_batch", "prompt": "do X"}) == 1
+
+    def test_multiple_spawns(self) -> None:
+        result = {"type": "spawn_batch", "spawns": [{"prompt": "A"}, {"prompt": "B"}, {"prompt": "C"}]}
+        assert _batch_size_from_result(result) == 3
+
+
+class TestRespondBatch:
+    def test_respond_batch_array(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """Responding with a JSON array matching batch_size feeds all responses at once."""
+        assert isinstance(tmp_path, os.PathLike)
+        state_file = Path(str(tmp_path)) / ".lumon_state.json"
+        code = 'let a = spawn\n  "Task A"\nlet b = spawn\n  "Task B"\nreturn [a, b]'
+        with patch("lumon.cli._STATE_FILE", state_file):
+            old_cwd = os.getcwd()
+            os.chdir(str(tmp_path))
+            try:
+                # Save state as if we just ran the code and got a spawn_batch with 2 spawns
+                _save_state(code, [], batch_size=2)
+                args = argparse.Namespace(response='["resp A", "resp B"]')
+                result = cmd_respond(args)
+            finally:
+                os.chdir(old_cwd)
+        assert result == 0
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["type"] == "result"
+        assert output["value"] == ["resp A", "resp B"]
+
+    def test_respond_single_still_works(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """Responding with a single JSON value (not array) works even when batch_size > 1."""
+        assert isinstance(tmp_path, os.PathLike)
+        state_file = Path(str(tmp_path)) / ".lumon_state.json"
+        code = 'let x = ask\n  "what?"\nreturn x'
+        with patch("lumon.cli._STATE_FILE", state_file):
+            old_cwd = os.getcwd()
+            os.chdir(str(tmp_path))
+            try:
+                _save_state(code, [], batch_size=0)
+                args = argparse.Namespace(response='"hello"')
+                result = cmd_respond(args)
+            finally:
+                os.chdir(old_cwd)
+        assert result == 0
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["type"] == "result"
+        assert output["value"] == "hello"
+
+    def test_respond_array_wrong_size_treated_as_single(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """Array with length != batch_size is treated as a single response."""
+        assert isinstance(tmp_path, os.PathLike)
+        state_file = Path(str(tmp_path)) / ".lumon_state.json"
+        code = 'let x = ask\n  "what?"\nreturn x'
+        with patch("lumon.cli._STATE_FILE", state_file):
+            old_cwd = os.getcwd()
+            os.chdir(str(tmp_path))
+            try:
+                _save_state(code, [], batch_size=3)
+                args = argparse.Namespace(response='["a", "b"]')
+                result = cmd_respond(args)
+            finally:
+                os.chdir(old_cwd)
+        assert result == 0
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["type"] == "result"
+        # The list is treated as a single value
+        assert output["value"] == ["a", "b"]
+
+    def test_respond_batch_dict(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """Responding with a dict keyed by spawn_N distributes responses."""
+        assert isinstance(tmp_path, os.PathLike)
+        state_file = Path(str(tmp_path)) / ".lumon_state.json"
+        code = 'let a = spawn\n  "Task A"\nlet b = spawn\n  "Task B"\nreturn [a, b]'
+        with patch("lumon.cli._STATE_FILE", state_file):
+            old_cwd = os.getcwd()
+            os.chdir(str(tmp_path))
+            try:
+                _save_state(code, [], batch_size=2)
+                args = argparse.Namespace(response='{"spawn_0": "hello", "spawn_1": "world"}')
+                result = cmd_respond(args)
+            finally:
+                os.chdir(old_cwd)
+        assert result == 0
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["type"] == "result"
+        assert output["value"] == ["hello", "world"]
+
+    def test_run_code_saves_batch_size(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """cmd_run_code saves batch_size in state when spawn_batch is returned."""
+        assert isinstance(tmp_path, os.PathLike)
+        state_file = Path(str(tmp_path)) / ".lumon_state.json"
+        code = 'let a = spawn\n  "Task A"\nlet b = spawn\n  "Task B"\nreturn [a, b]'
+        with patch("lumon.cli._STATE_FILE", state_file):
+            old_cwd = os.getcwd()
+            os.chdir(str(tmp_path))
+            try:
+                cmd_run_code(code)
+            finally:
+                os.chdir(old_cwd)
+            state = _load_state()
+        assert state is not None
+        assert state["batch_size"] == 2
 
 
 class TestCmdBrowse:

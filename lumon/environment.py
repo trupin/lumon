@@ -45,6 +45,8 @@ class Environment:
         self._spawn_counter: list[int] = [0] if parent is None else parent._spawn_counter
         # Working directory (shared)
         self._working_dir: str | None = None if parent is None else parent._working_dir
+        # Log entries (shared)
+        self._logs: list[object] = [] if parent is None else parent._logs
 
     def get(self, name: str) -> object:
         if name in self._bindings:
@@ -85,6 +87,7 @@ class Environment:
         snap._plugin_executor = self._plugin_executor
         snap._active_plugin = self._active_plugin
         snap._working_dir = self._working_dir
+        snap._logs = self._logs
         return snap
 
     def consume_response(self) -> tuple[object] | None:
@@ -99,8 +102,12 @@ class Environment:
 
     def register_builtin(self, name: str, fn: object) -> None:
         self._builtins[name] = fn
-        prefix = name.split(".")[0]
-        self._namespace_prefixes.add(prefix)
+        if "." in name:
+            prefix = name.split(".")[0]
+            self._namespace_prefixes.add(prefix)
+        else:
+            # Non-namespaced builtins (e.g. log) go directly into bindings
+            self._bindings[name] = fn
 
     def register_define(self, node: object) -> None:
         assert isinstance(node, DefineBlock)

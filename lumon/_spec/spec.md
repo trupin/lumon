@@ -310,7 +310,7 @@ match item
 
 ### with / then / else
 
-Chain fallible operations. Each step feeds the next. If any step produces `none`, execution jumps to `else`. Expression-oriented — returns the `then` value on success, the `else` value on failure.
+Chain fallible operations. Each step feeds the next. If any step produces `none` or `:error(payload)`, execution jumps to `else`. If a step produces `:ok(payload)`, the payload is automatically unwrapped before binding. Any other value is bound as-is. Expression-oriented — returns the `then` value on success, the `else` value on failure.
 
 ```
 let content = with
@@ -323,9 +323,15 @@ else
   "Could not load content"
 ```
 
-Each binding in the `with` block is checked for `none` before proceeding. No nesting required for chained failure handling.
+Each binding in the `with` block is checked before proceeding:
+- `none` → bail to `else`
+- `:error(payload)` → bail to `else`
+- `:ok(payload)` → unwrap and bind the payload
+- Any other value → bind as-is
 
-**Note:** `with` bails on `none` specifically, not on `:error` tags. If a step returns a legitimate `none` (e.g., `list.head` on an empty list), the chain will bail. Use `??` to provide a default before the value enters the chain:
+No nesting required for chained failure handling.
+
+**Note:** If a step returns a legitimate `none` (e.g., `list.head` on an empty list), the chain will bail. Use `??` to provide a default before the value enters the chain:
 
 ```
 let context = with
@@ -667,7 +673,7 @@ lumon/
 
 - **index.lumon** — one line per namespace (name + description). Always in context. Stays small regardless of how many functions exist.
 - **manifests/** — complete function signatures (`define` blocks) per namespace. Loaded on demand when the agent needs to understand what a namespace offers.
-- **impl/** — implementation code. Loaded on demand when calling a function. Built-in namespaces (`io`, `text`, `list`, `map`, `number`, `type`, `http`) are implemented in the host language and have no files here.
+- **impl/** — implementation code. Loaded on demand when calling a function. Built-in namespaces (`io`, `text`, `list`, `map`, `number`, `type`, `time`, `json`, `csv`) are implemented in the host language and have no files here.
 - **tests/** — test blocks. Loaded when running tests, not during normal execution.
 
 ### Browsing
@@ -934,6 +940,12 @@ let msg = "total: \(n * 2 + 1)"       -- "total: 7"
 | `text.extract` | `(s: text, start: text, end: text) -> list<text>` | All segments between delimiters |
 | `text.pad_start` | `(s: text, len: number, fill: text) -> text` | Left-pad to length |
 | `text.pad_end` | `(s: text, len: number, fill: text) -> text` | Right-pad to length |
+| `text.encode_url` | `(s: text) -> text` | URL-encode (percent-encoding) |
+| `text.decode_url` | `(s: text) -> text` | Decode URL-encoded text |
+| `text.encode_base64` | `(s: text) -> text` | Encode to base64 |
+| `text.decode_base64` | `(s: text) -> text` | Decode base64 |
+| `text.match_pattern` | `(s: text, pattern: tag) -> bool` | Match named pattern (`:email`, `:url`, `:iso_date`, `:phone`, `:number`) |
+| `text.find_pattern` | `(s: text, pattern: tag) -> list<text>` | Find all occurrences of named pattern |
 
 ### list
 
@@ -955,6 +967,14 @@ let msg = "total: \(n * 2 + 1)"       -- "total: 7"
 | `list.head` | `(items: list<a>) -> a \| none` | First item (or none) |
 | `list.tail` | `(items: list<a>) -> list<a>` | All items except first |
 | `list.concat` | `(first: list<a>, second: list<a>) -> list<a>` | Concatenate two lists |
+| `list.find` | `(items: list<a>, f: fn(a) -> bool) -> a \| none` | First item matching predicate |
+| `list.any` | `(items: list<a>, f: fn(a) -> bool) -> bool` | Any item matches predicate |
+| `list.all` | `(items: list<a>, f: fn(a) -> bool) -> bool` | All items match predicate |
+| `list.zip` | `(a: list<a>, b: list<b>) -> list<{first, second}>` | Combine into pairs |
+| `list.enumerate` | `(items: list<a>) -> list<{index, value}>` | Add index to each item |
+| `list.group_by` | `(items: list<a>, f: fn(a) -> text) -> map<list<a>>` | Group by key function |
+| `list.index_of` | `(items: list<a>, item: a) -> number \| none` | Position of item (or none) |
+| `list.unique_by` | `(items: list<a>, f: fn(a) -> b) -> list<a>` | Remove duplicates by key |
 
 ### map
 
@@ -968,6 +988,10 @@ let msg = "total: \(n * 2 + 1)"       -- "total: 7"
 | `map.has` | `(m: map<a>, key: text) -> bool` | Check if key exists |
 | `map.remove` | `(m: map<a>, key: text) -> map<a>` | Return new map without key |
 | `map.entries` | `(m: map<a>) -> list<{key: text, value: a}>` | List of {key, value} maps |
+| `map.map` | `(m: map<a>, f: fn(text, a) -> b) -> map<b>` | Transform values |
+| `map.filter` | `(m: map<a>, f: fn(text, a) -> bool) -> map<a>` | Filter entries |
+| `map.from_entries` | `(entries: list<{key, value}>) -> map<a>` | Build map from entries list |
+| `map.size` | `(m: map<a>) -> number` | Entry count |
 
 `map.*` functions operate on uniform maps (`map<a>`). For structural maps, use `.field` access, pattern matching, and spread syntax.
 
@@ -991,6 +1015,7 @@ let msg = "total: \(n * 2 + 1)"       -- "total: 7"
 | `number.truncate` | `(n: number) -> number` | Truncate toward zero |
 | `number.clamp` | `(n: number, low: number, high: number) -> number` | Clamp between low and high |
 | `number.to_text` | `(n: number) -> text` | Number to text (no trailing .0) |
+| `number.range` | `(start: number, end: number) -> list<number>` | Integer range [start, end] inclusive (max 10000) |
 | `number.pi` | `() -> number` | The constant pi |
 | `number.e` | `() -> number` | Euler's number |
 | `number.inf` | `() -> number` | Positive infinity |
@@ -1001,6 +1026,12 @@ let msg = "total: \(n * 2 + 1)"       -- "total: 7"
 | :---- | :---- | :---- |
 | `type.of` | `(value: a) -> text` | Returns type name: "text", "number", etc. |
 | `type.is` | `(value: a, t: text) -> bool` | Check if value is of type |
+
+### log
+
+| Function | Signature | Description |
+| :---- | :---- | :---- |
+| `log` | `(value: a) -> none` | Emit value to `"logs"` array in JSON output (execution continues) |
 
 ### time
 
@@ -1017,6 +1048,65 @@ All timestamps are Unix epoch milliseconds (UTC).
 | `time.add` | `(timestamp: number, ms: number) -> number` | Add ms to timestamp |
 | `time.diff` | `(a: number, b: number) -> number` | Difference a - b in milliseconds |
 | `time.timeout` | `(ms: number, fn() -> a) -> :ok(a) \| :timeout` | Run fn with timeout; error if ms < 0 or > 60000 |
+
+### json
+
+Parse and serialize JSON. Two layers: pure text functions for in-memory data, and file functions that go through `io` (inheriting its path sandboxing).
+
+**Pure (text ↔ value):**
+
+| Function | Signature | Description |
+| :---- | :---- | :---- |
+| `json.parse` | `(s: text) -> :ok(a) \| :error(text)` | Parse JSON text into a Lumon value |
+| `json.to_text` | `(value: a) -> text` | Serialize any Lumon value to JSON text |
+| `json.to_text_pretty` | `(value: a) -> text` | Serialize with indentation |
+
+**File (sandboxed via `io`):**
+
+| Function | Signature | Description |
+| :---- | :---- | :---- |
+| `json.read` | `(path: text) -> :ok(a) \| :error(text)` | Read a file and parse its contents as JSON |
+| `json.write` | `(path: text, value: a) -> :ok \| :error(text)` | Serialize a value and write it as JSON |
+| `json.write_pretty` | `(path: text, value: a) -> :ok \| :error(text)` | Serialize with indentation and write |
+
+File functions are equivalent to `io.read` + `json.parse` and `json.to_text` + `io.write`. They exist for convenience and to ensure the agent always goes through `io` for file access — there is no separate file path.
+
+**Type mapping:**
+
+| JSON | Lumon |
+| :---- | :---- |
+| `string` | `text` |
+| `number` | `number` |
+| `boolean` | `bool` |
+| `null` | `none` |
+| `array` | `list` |
+| `object` | `map` |
+
+Round-trip: `json.parse(json.to_text(value)) == value` for all Lumon values except tags. Tags serialize as `{"tag": "name", "value": payload}` (same as the output protocol).
+
+### csv
+
+Parse and serialize CSV. Same two-layer pattern as `json` — pure text functions and sandboxed file functions through `io`.
+
+**Pure (text ↔ value):**
+
+| Function | Signature | Description |
+| :---- | :---- | :---- |
+| `csv.parse` | `(s: text) -> list<list<text>>` | Parse CSV text into rows of fields |
+| `csv.parse_with_headers` | `(s: text) -> list<map<text>>` | Parse CSV using first row as keys — each row becomes a map |
+| `csv.to_text` | `(rows: list<list<text>>) -> text` | Serialize rows to CSV text |
+| `csv.to_text_with_headers` | `(headers: list<text>, rows: list<map<text>>) -> text` | Serialize maps to CSV with a header row |
+
+**File (sandboxed via `io`):**
+
+| Function | Signature | Description |
+| :---- | :---- | :---- |
+| `csv.read` | `(path: text) -> :ok(list<list<text>>) \| :error(text)` | Read and parse a CSV file |
+| `csv.read_with_headers` | `(path: text) -> :ok(list<map<text>>) \| :error(text)` | Read and parse a CSV file using first row as keys |
+| `csv.write` | `(path: text, rows: list<list<text>>) -> :ok \| :error(text)` | Serialize rows and write as CSV |
+| `csv.write_with_headers` | `(path: text, headers: list<text>, rows: list<map<text>>) -> :ok \| :error(text)` | Serialize maps with headers and write as CSV |
+
+All fields are text. The agent converts to/from numbers via `number.parse` / `number.to_text` as needed. CSV parsing handles quoting (RFC 4180): fields containing commas, newlines, or double quotes are enclosed in double quotes, and double quotes within fields are escaped as `""`.
 
 ---
 

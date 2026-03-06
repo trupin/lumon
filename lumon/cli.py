@@ -32,9 +32,9 @@ _SUBCOMMANDS = {"deploy", "browse", "test", "respond", "spec", "version"}
 # ---------------------------------------------------------------------------
 
 
-def _save_state(code: str, responses: list[object]) -> None:
+def _save_state(code: str, responses: list[object], batch_size: int = 0) -> None:
     _STATE_FILE.write_text(
-        json.dumps({"code": code, "responses": responses}, ensure_ascii=False),
+        json.dumps({"code": code, "responses": responses, "batch_size": batch_size}, ensure_ascii=False),
         encoding="utf-8",
     )
 
@@ -43,6 +43,16 @@ def _load_state() -> dict | None:
     if not _STATE_FILE.exists():
         return None
     return json.loads(_STATE_FILE.read_text(encoding="utf-8"))
+
+
+def _batch_size_from_result(result: dict) -> int:
+    """Extract spawn batch size from an interpreter result."""
+    if result.get("type") != "spawn_batch":
+        return 0
+    spawns = result.get("spawns")
+    if isinstance(spawns, list):
+        return len(spawns)
+    return 1
 
 
 def _clear_state() -> None:
@@ -127,7 +137,7 @@ def cmd_run_code(code: str) -> int:
     print(json.dumps(result, ensure_ascii=False))
 
     if result.get("type") in ("ask", "spawn_batch"):
-        _save_state(code, [])
+        _save_state(code, [], batch_size=_batch_size_from_result(result))
     else:
         _clear_state()
 
@@ -150,9 +160,30 @@ def cmd_respond(args: argparse.Namespace) -> int:
         print(f"error: invalid JSON: {exc}", file=sys.stderr)
         return 1
 
-    response = deserialize(response_raw)
+    batch_size = state.get("batch_size", 0)
     prev_responses: list[object] = [deserialize(r) for r in state.get("responses", [])]
-    responses = prev_responses + [response]
+
+    if batch_size > 1 and isinstance(response_raw, list) and len(response_raw) == batch_size:
+        new_responses = [deserialize(r) for r in response_raw]
+        responses = prev_responses + new_responses
+    elif batch_size > 1 and isinstance(response_raw, dict):
+        # Dict keyed by spawn_0, spawn_1, ... — distribute to each spawn
+        new_responses: list[object] = []
+        for i in range(batch_size):
+            key = f"spawn_{i}"
+            if key in response_raw:
+                new_responses.append(deserialize(response_raw[key]))
+            else:
+                new_responses.append(deserialize(response_raw))
+                break
+        if len(new_responses) == batch_size:
+            responses = prev_responses + new_responses
+        else:
+            response = deserialize(response_raw)
+            responses = prev_responses + [response]
+    else:
+        response = deserialize(response_raw)
+        responses = prev_responses + [response]
 
     io_backend = RealFS(".")
     git_backend = RealGit(".")
@@ -166,7 +197,11 @@ def cmd_respond(args: argparse.Namespace) -> int:
     print(json.dumps(result, ensure_ascii=False))
 
     if result.get("type") in ("ask", "spawn_batch"):
-        _save_state(state["code"], [json.loads(json.dumps(r)) for r in responses])
+        _save_state(
+            state["code"],
+            [json.loads(json.dumps(r)) for r in responses],
+            batch_size=_batch_size_from_result(result),
+        )
     else:
         _clear_state()
 
