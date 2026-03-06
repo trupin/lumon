@@ -692,6 +692,11 @@ def _eval_with(node: WithExpr, env: Environment) -> object:
         val = eval_node(expr, child_env)
         if val is None:
             return eval_node(node.else_body, env)
+        if isinstance(val, LumonTag):
+            if val.name == "error":
+                return eval_node(node.else_body, env)
+            if val.name == "ok":
+                val = val.payload
         child_env.set(name, val)
     return eval_node(node.then_body, child_env)
 

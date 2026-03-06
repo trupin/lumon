@@ -103,3 +103,58 @@ define list.concat
     first: list<a> "First list"
     second: list<a> "Second list"
   returns: list<a> "Combined list"
+
+define list.find
+  "Find first item matching predicate (or none)"
+  takes:
+    items: list<a> "The list to search"
+    f: fn(a) -> bool "The predicate function"
+  returns: a | none "First matching item or none"
+
+define list.any
+  "Check if any item matches predicate"
+  takes:
+    items: list<a> "The list to check"
+    f: fn(a) -> bool "The predicate function"
+  returns: bool "Whether any item matches"
+
+define list.all
+  "Check if all items match predicate"
+  takes:
+    items: list<a> "The list to check"
+    f: fn(a) -> bool "The predicate function"
+  returns: bool "Whether all items match"
+
+define list.zip
+  "Combine two lists into list of {first, second} pairs"
+  takes:
+    a: list<a> "First list"
+    b: list<b> "Second list"
+  returns: list<{first: a, second: b}> "List of pairs"
+
+define list.enumerate
+  "Add index to each item"
+  takes:
+    items: list<a> "The list"
+  returns: list<{index: number, value: a}> "List of {index, value} maps"
+
+define list.group_by
+  "Group items by key function"
+  takes:
+    items: list<a> "The list to group"
+    f: fn(a) -> text "The key function"
+  returns: map<list<a>> "Map from keys to groups"
+
+define list.index_of
+  "Find position of item (or none)"
+  takes:
+    items: list<a> "The list to search"
+    item: a "The item to find"
+  returns: number | none "Position (0-based) or none"
+
+define list.unique_by
+  "Remove duplicates by key function (preserves order)"
+  takes:
+    items: list<a> "The list"
+    f: fn(a) -> b "The key function"
+  returns: list<a> "Deduplicated list"

@@ -6,6 +6,17 @@ user-invocable: true
 
 After completing a task, run this review to extract learnings and surface improvements. The goal is to leave the codebase better than you found it — and to escalate what you can't fix yourself.
 
+## Phase 0: Check for fixed issues
+
+Before reviewing, read `sandbox/LUMON_ISSUES.md` and `sandbox/PLUGIN_ISSUES.md` (if it exists). Look for issues with `**Status**: fixed` — these have been resolved by the elevated agent since you last checked. For each fixed issue:
+
+1. Read the `**Resolution**` field to understand what changed
+2. Test the fix by running the `**Example**` code from the issue
+3. If it works, change the status to `**Status**: closed` and add a `**Verified**` field confirming it works
+4. If it doesn't work, change the status back to `**Status**: open` and add an `**Update**` field explaining what still fails
+
+Do this before any other review work — fixed issues may affect what you find in the review.
+
 ## Phase 1: Gather what changed
 
 Scan the files you touched during this task:

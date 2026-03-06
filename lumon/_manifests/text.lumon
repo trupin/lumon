@@ -129,3 +129,41 @@ define text.pad_end
     len: number "The target length"
     fill: text "The fill character(s)"
   returns: text "Padded text"
+
+define text.encode_url
+  "URL-encode text (percent-encoding)"
+  takes:
+    s: text "The text to encode"
+  returns: text "URL-encoded text"
+
+define text.decode_url
+  "Decode URL-encoded text"
+  takes:
+    s: text "The encoded text"
+  returns: text "Decoded text"
+
+define text.encode_base64
+  "Encode text to base64"
+  takes:
+    s: text "The text to encode"
+  returns: text "Base64-encoded text"
+
+define text.decode_base64
+  "Decode base64 text"
+  takes:
+    s: text "The encoded text"
+  returns: text "Decoded text"
+
+define text.match_pattern
+  "Check if text matches a named pattern (:email, :url, :iso_date, :phone, :number)"
+  takes:
+    s: text "The text to check"
+    pattern: tag "The pattern tag"
+  returns: bool "Whether text matches the pattern"
+
+define text.find_pattern
+  "Find all occurrences of a named pattern in text"
+  takes:
+    s: text "The text to search"
+    pattern: tag "The pattern tag"
+  returns: list<text> "All matches found"

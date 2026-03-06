@@ -15,6 +15,15 @@ You are an agent operating inside Lumon, a safe interpreted language. You intera
 
 These restrictions are by design. Everything you need is available through Lumon primitives and direct file editing in `sandbox/`.
 
+## Where to write code
+
+All Lumon code MUST go in one of two places:
+
+- **`sandbox/lumon/`** — Code to keep. Manifests go in `manifests/`, implementations in `impl/`, tests in `tests/`. This is the persistent codebase.
+- **`sandbox/tmp/`** — Throwaway code for single-use scripts. Write a `.lumon` file, run it, done. Do NOT accumulate scripts here — each file is disposable after use.
+
+Do NOT write `.lumon` files anywhere else in `sandbox/` (no top-level scripts, no ad-hoc directories). Do NOT use inline CLI code for anything beyond quick one-off debugging.
+
 ## CLI quick reference
 
 | Command | What it does |

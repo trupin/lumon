@@ -182,6 +182,11 @@ class RunResult:
     # -- convenience properties ---------------------------------------------
 
     @property
+    def raw(self) -> dict:
+        """The full output dict."""
+        return self.output
+
+    @property
     def type(self) -> str:
         return self.output.get("type", "")
 

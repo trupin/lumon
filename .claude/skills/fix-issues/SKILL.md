@@ -47,6 +47,10 @@ After a fix is committed, update the issues file at `/Users/theophanerupin/code/
 - Add a `**Resolution**` field explaining what was fixed
 - Do NOT modify any other content in the section
 
-## 6. Continue to next issue
+## 6. Install
 
-Repeat steps 3–5 for each remaining open issue. After all issues are fixed, report a summary of what was done.
+After all issues are fixed and committed, run `/install` to rebuild and install the `lumon` CLI globally so the fixes are available immediately.
+
+## 7. Continue to next issue
+
+Repeat steps 3–6 for each remaining open issue. After all issues are fixed, report a summary of what was done.

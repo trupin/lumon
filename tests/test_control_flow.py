@@ -587,6 +587,73 @@ class TestWithElse:
         r = run(code)
         assert r.value == "fallback"
 
+    def test_with_unwraps_ok_tag(self, run):
+        code = (
+            'let result = with\n'
+            '  x = :ok(42)\n'
+            'then\n'
+            '  x\n'
+            'else\n'
+            '  0\n'
+            'return result'
+        )
+        r = run(code)
+        assert r.value == 42
+
+    def test_with_bails_on_error_tag(self, run):
+        code = (
+            'let result = with\n'
+            '  x = :error("bad input")\n'
+            'then\n'
+            '  x\n'
+            'else\n'
+            '  "failed"\n'
+            'return result'
+        )
+        r = run(code)
+        assert r.value == "failed"
+
+    def test_with_ok_chain(self, run):
+        code = (
+            'let result = with\n'
+            '  a = :ok(10)\n'
+            '  b = :ok(20)\n'
+            'then\n'
+            '  a + b\n'
+            'else\n'
+            '  0\n'
+            'return result'
+        )
+        r = run(code)
+        assert r.value == 30
+
+    def test_with_ok_chain_bails_on_error(self, run):
+        code = (
+            'let result = with\n'
+            '  a = :ok(10)\n'
+            '  b = :error("oops")\n'
+            'then\n'
+            '  a + b\n'
+            'else\n'
+            '  "bail"\n'
+            'return result'
+        )
+        r = run(code)
+        assert r.value == "bail"
+
+    def test_with_non_ok_error_tag_binds_as_is(self, run):
+        code = (
+            'let result = with\n'
+            '  x = :pending\n'
+            'then\n'
+            '  x\n'
+            'else\n'
+            '  "nope"\n'
+            'return result'
+        )
+        r = run(code)
+        assert r.value == {"tag": "pending"}
+
 
 # ===================================================================
 # ask / spawn signals
