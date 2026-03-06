@@ -205,8 +205,6 @@ ARROW: "->"
 FN_KW: "fn"
 
 // === Terminals ===
-COMMENT: /--[^\n]*/
-%ignore COMMENT
 %ignore /[ \t]+/
 
 // These are declared for the Indenter

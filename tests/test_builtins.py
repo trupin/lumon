@@ -75,6 +75,22 @@ class TestTextJoin:
         with pytest.raises(LumonError, match="expected text"):
             _text_join([{"a": 1}], ",")
 
+    def test_join_non_list_runtime(self):
+        """text.join rejects non-list first argument."""
+        from lumon.builtins import _text_join
+        from lumon.errors import LumonError
+
+        with pytest.raises(LumonError, match="expected list"):
+            _text_join("not a list", ",")
+
+    def test_join_non_string_separator_runtime(self):
+        """text.join rejects non-string separator."""
+        from lumon.builtins import _text_join
+        from lumon.errors import LumonError
+
+        with pytest.raises(LumonError, match="expected text separator"):
+            _text_join(["a"], 42)
+
 
 class TestTextContains:
     def test_contains_true(self, run):

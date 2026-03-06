@@ -331,6 +331,12 @@ def cmd_browse(args: argparse.Namespace) -> int:
             # Filter by expose list if present
             if isinstance(instance_config, dict) and "expose" in instance_config:
                 expose_list = instance_config["expose"]
+                if not isinstance(expose_list, list):
+                    print(
+                        f"error: 'expose' for plugin '{namespace}' must be a list",
+                        file=sys.stderr,
+                    )
+                    return 1
                 if isinstance(expose_list, list):
                     allowed = {namespace + "." + name for name in expose_list}
                     blocks = extract_blocks(text)

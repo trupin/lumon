@@ -695,22 +695,21 @@ class TestPluginExpose:
         assert "must be a list" in r["message"]
 
     def test_browse_respects_expose(self, tmp_path: Path) -> None:
-        """Browse output only shows exposed functions."""
+        """Expose filtering at interpreter level hides non-exposed functions."""
         wd = make_plugin_project(tmp_path, {
             "multi": {
                 "manifest.lumon": MULTI_MANIFEST,
                 "impl.lumon": MULTI_IMPL,
             },
         }, config={"plugins": {"multi": {"expose": ["alpha", "gamma"]}}})
-        # The manifest file should exist
-        manifest_path = os.path.join(tmp_path, "plugins", "multi", "manifest.lumon")
-        assert os.path.isfile(manifest_path)
-        # Verify the expose config is set correctly
-        config = load_config(wd)
-        expose = config["plugins"]["multi"]["expose"]
-        assert "alpha" in expose
-        assert "gamma" in expose
-        assert "beta" not in expose
+        # alpha and gamma are exposed — should work
+        r = interpret('return multi.alpha("a")', working_dir=wd, plugin_executor=mock_executor)
+        assert r["type"] == "result"
+        r = interpret('return multi.gamma("g")', working_dir=wd, plugin_executor=mock_executor)
+        assert r["type"] == "result"
+        # beta is NOT exposed — should error
+        r = interpret('return multi.beta("b")', working_dir=wd, plugin_executor=mock_executor)
+        assert r["type"] == "error"
 
 
 # ---------------------------------------------------------------------------

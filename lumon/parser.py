@@ -225,13 +225,14 @@ def _preprocess(source: str) -> str:
             comment_pos = -1
             i = 0
             while i < len(line):
+                if in_string and line[i] == "\\" and i + 1 < len(line):
+                    i += 2  # skip escaped char inside string
+                    continue
                 if line[i] == '"':
                     in_string = not in_string
                 elif not in_string and line[i:i+2] == "--":
                     comment_pos = i
                     break
-                elif not in_string and line[i] == "\\" and i + 1 < len(line):
-                    i += 1  # skip escaped char
                 i += 1
             if comment_pos >= 0:
                 result.append(line[:comment_pos].rstrip())
