@@ -650,7 +650,7 @@ class TestPluginExpose:
                 "manifest.lumon": MULTI_MANIFEST,
                 "impl.lumon": MULTI_IMPL,
             },
-        }, config={"plugins": {"multi": {"expose": ["multi.alpha"]}}})
+        }, config={"plugins": {"multi": {"expose": ["alpha"]}}})
         # alpha is exposed — should work
         r = interpret('return multi.alpha("test")', working_dir=wd, plugin_executor=mock_executor)
         assert r["type"] == "result"
@@ -701,16 +701,16 @@ class TestPluginExpose:
                 "manifest.lumon": MULTI_MANIFEST,
                 "impl.lumon": MULTI_IMPL,
             },
-        }, config={"plugins": {"multi": {"expose": ["multi.alpha", "multi.gamma"]}}})
+        }, config={"plugins": {"multi": {"expose": ["alpha", "gamma"]}}})
         # The manifest file should exist
         manifest_path = os.path.join(tmp_path, "plugins", "multi", "manifest.lumon")
         assert os.path.isfile(manifest_path)
         # Verify the expose config is set correctly
         config = load_config(wd)
         expose = config["plugins"]["multi"]["expose"]
-        assert "multi.alpha" in expose
-        assert "multi.gamma" in expose
-        assert "multi.beta" not in expose
+        assert "alpha" in expose
+        assert "gamma" in expose
+        assert "beta" not in expose
 
 
 # ---------------------------------------------------------------------------

@@ -120,7 +120,7 @@ def _setup_plugins(
             expose_list = instance_config["expose"]
             if not isinstance(expose_list, list):
                 raise LumonError(f"'expose' for plugin '{plugin.alias}' must be a list")
-            allowed_fns = set(expose_list)
+            allowed_fns = {plugin.alias + "." + name for name in expose_list}
             for fn_name in list(env._defines.keys()):
                 if fn_name.startswith(plugin.alias + ".") and fn_name not in allowed_fns:
                     env._defines.pop(fn_name)

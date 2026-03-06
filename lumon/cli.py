@@ -332,7 +332,7 @@ def cmd_browse(args: argparse.Namespace) -> int:
             if isinstance(instance_config, dict) and "expose" in instance_config:
                 expose_list = instance_config["expose"]
                 if isinstance(expose_list, list):
-                    allowed = set(expose_list)
+                    allowed = {namespace + "." + name for name in expose_list}
                     blocks = extract_blocks(text)
                     text = "\n\n".join(
                         src for btype, ns_path, src in blocks
