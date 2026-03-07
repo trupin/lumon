@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
+import shutil
 import subprocess
 
 
@@ -45,11 +46,18 @@ class RealFS:
         except OSError:
             return {"tag": "error", "value": "permission denied"}
 
-    def list_dir(self, path: str) -> dict:
+    def list_dir(self, path: str, recursive: bool = False) -> dict:
         resolved = self._resolve(path)
         if resolved is None:
             return {"tag": "error", "value": "directory not found"}
         try:
+            if recursive:
+                entries: list[str] = []
+                for dirpath, _dirnames, filenames in os.walk(resolved):
+                    for name in filenames:
+                        full = os.path.join(dirpath, name)
+                        entries.append(os.path.relpath(full, resolved))
+                return {"tag": "ok", "value": sorted(entries)}
             entries = sorted(os.listdir(resolved))
             return {"tag": "ok", "value": entries}
         except OSError:
@@ -64,6 +72,19 @@ class RealFS:
             return {"tag": "ok"}
         except OSError:
             return {"tag": "error", "value": "file not found"}
+
+    def delete_dir(self, path: str) -> dict:
+        """Delete a directory and all its contents."""
+        resolved = self._resolve(path)
+        if resolved is None:
+            return {"tag": "error", "value": "directory not found"}
+        if resolved == self.root:
+            return {"tag": "error", "value": "cannot delete root directory"}
+        try:
+            shutil.rmtree(resolved)
+            return {"tag": "ok"}
+        except OSError:
+            return {"tag": "error", "value": "directory not found"}
 
     def find(self, path: str, pattern: str) -> dict:
         resolved = self._resolve(path)

@@ -910,8 +910,9 @@ Built-in signatures use type variables (`a`, `b`) for generic operations. The ty
 | :---- | :---- | :---- |
 | `io.read` | `(path: text) -> :ok(text) \| :error(text)` | Read a file's contents |
 | `io.write` | `(path: text, content: text) -> :ok \| :error(text)` | Write content to a file |
-| `io.list_dir` | `(path: text) -> :ok(list<text>) \| :error(text)` | List files in a directory |
+| `io.list_dir` | `(path: text, recursive: bool = false) -> :ok(list<text>) \| :error(text)` | List files in a directory (recursive returns relative paths) |
 | `io.delete` | `(path: text) -> :ok \| :error(text)` | Delete a file |
+| `io.delete_dir` | `(path: text) -> :ok \| :error(text)` | Delete a directory and all its contents |
 | `io.find` | `(path: text, pattern: text) -> :ok(list<text>) \| :error(text)` | Find files matching a glob pattern (recursive) |
 | `io.grep` | `(path: text, pattern: text) -> :ok(list<text>) \| :error(text)` | Search files for substring, returns `filepath:line:content` |
 | `io.head` | `(path: text, n: number) -> :ok(text) \| :error(text)` | First n lines of a file |

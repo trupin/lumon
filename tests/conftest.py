@@ -55,25 +55,32 @@ class MockFS:
         self._files[norm] = content
         return {"tag": "ok"}
 
-    def list_dir(self, path: str) -> dict:
+    def list_dir(self, path: str, recursive: bool = False) -> dict:
         norm = self._normalise(path)
         if not self._is_within_root(norm):
             return {"tag": "error", "value": "directory not found"}
         prefix = norm + os.sep if norm != os.sep else os.sep
-        entries: set[str] = set()
+        if recursive:
+            entries: list[str] = []
+            for fpath in self._files:
+                if fpath.startswith(prefix):
+                    entries.append(fpath[len(prefix):])
+            if not entries:
+                has_children = any(fp.startswith(prefix) for fp in self._files)
+                if not has_children:
+                    return {"tag": "error", "value": "directory not found"}
+            return {"tag": "ok", "value": sorted(entries)}
+        top_entries: set[str] = set()
         for fpath in self._files:
             if fpath.startswith(prefix):
-                # First component after the prefix
                 rest = fpath[len(prefix):]
                 entry = rest.split(os.sep)[0]
-                entries.add(entry)
-        if not entries and norm not in self._files:
-            # Check if path itself is a known directory
-            # (has any files under it)
+                top_entries.add(entry)
+        if not top_entries and norm not in self._files:
             has_children = any(fp.startswith(prefix) for fp in self._files)
             if not has_children:
                 return {"tag": "error", "value": "directory not found"}
-        return {"tag": "ok", "value": sorted(entries)}
+        return {"tag": "ok", "value": sorted(top_entries)}
 
     def delete(self, path: str) -> dict:
         norm = self._normalise(path)
@@ -82,6 +89,20 @@ class MockFS:
         if norm not in self._files:
             return {"tag": "error", "value": "file not found"}
         del self._files[norm]
+        return {"tag": "ok"}
+
+    def delete_dir(self, path: str) -> dict:
+        norm = self._normalise(path)
+        if not self._is_within_root(norm):
+            return {"tag": "error", "value": "directory not found"}
+        if norm == self.root:
+            return {"tag": "error", "value": "cannot delete root directory"}
+        prefix = norm + os.sep
+        to_delete = [fp for fp in self._files if fp.startswith(prefix) or fp == norm]
+        if not to_delete:
+            return {"tag": "error", "value": "directory not found"}
+        for fp in to_delete:
+            del self._files[fp]
         return {"tag": "ok"}
 
     def find(self, path: str, pattern: str) -> dict:

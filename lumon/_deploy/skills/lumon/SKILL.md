@@ -10,11 +10,8 @@ When given a task, your goal is to **build lasting automation** — not just pro
 Before starting any task, clean up stale files from previous work:
 
 ```bash
-# List and delete leftover temp files
-lumon --working-dir sandbox 'let files = io.list_dir("tmp/")
-match files
-  :ok(list) -> list |> list.map(fn(f) -> io.delete("tmp/" + f))
-  :error(_) -> :ok'
+# Delete the entire tmp directory and its contents, then recreate it
+lumon --working-dir sandbox 'io.delete_dir("tmp")'
 ```
 
 If `sandbox/.lumon_state.json` exists and the suspended script is no longer relevant, delete it with `io.delete`.

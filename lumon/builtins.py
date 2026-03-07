@@ -623,10 +623,16 @@ def register_builtins(
             lambda path, content: _wrap_tag_result(_io.write(path, content)),  # type: ignore[union-attr]
         )
         env.register_builtin(
-            "io.list_dir", lambda path: _wrap_tag_result(_io.list_dir(path))  # type: ignore[union-attr]
+            "io.list_dir",
+            lambda path, recursive=False: _wrap_tag_result(  # type: ignore[union-attr]
+                _io.list_dir(path, recursive=bool(recursive))  # type: ignore[union-attr]
+            ),
         )
         env.register_builtin(
             "io.delete", lambda path: _wrap_tag_result(_io.delete(path))  # type: ignore[union-attr]
+        )
+        env.register_builtin(
+            "io.delete_dir", lambda path: _wrap_tag_result(_io.delete_dir(path))  # type: ignore[union-attr]
         )
         env.register_builtin(
             "io.find", lambda path, pattern: _wrap_tag_result(_io.find(path, pattern))  # type: ignore[union-attr]
