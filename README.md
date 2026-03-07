@@ -58,6 +58,7 @@ lumon spec
 | `lumon browse [namespace]` | Show namespace index or a specific manifest |
 | `lumon test [namespace]` | Run Lumon test files |
 | `lumon respond '<json>'` | Resume suspended execution (after ask/spawn) |
+| `lumon respond --file path` | Resume with JSON payload from a file |
 | `lumon deploy <target>` | Deploy Claude Code agent config to a directory |
 | `lumon spec` | Print the language specification |
 
