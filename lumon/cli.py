@@ -155,8 +155,23 @@ def cmd_respond(args: argparse.Namespace) -> int:
         )
         return 1
 
+    # Read JSON from --file, stdin ("-"), or inline argument
+    if getattr(args, "file", None):
+        try:
+            response_text = Path(args.file).read_text(encoding="utf-8")
+        except FileNotFoundError:
+            print(f"error: file not found: {args.file}", file=sys.stderr)
+            return 1
+    elif args.response == "-":
+        response_text = sys.stdin.read()
+    elif args.response is not None:
+        response_text = args.response
+    else:
+        print("error: provide a JSON response, --file, or '-' for stdin", file=sys.stderr)
+        return 1
+
     try:
-        response_raw = json.loads(args.response)
+        response_raw = json.loads(response_text)
     except json.JSONDecodeError as exc:
         print(f"error: invalid JSON: {exc}", file=sys.stderr)
         return 1
@@ -648,7 +663,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "From stdin:  echo 'return 42' | lumon\n"
             "Browse:      lumon browse [<namespace>]\n"
             "Test:        lumon test [<namespace>]\n"
-            "Respond:     lumon respond '<json>'\n"
+            "Respond:     lumon respond '<json>' | --file path | -\n"
             "Deploy:      lumon deploy <target>\n"
             "Spec:        lumon spec"
         ),
@@ -696,7 +711,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_respond.add_argument(
         "response",
-        help="JSON value to feed back (e.g. '{\"action\": \"process\"}').",
+        nargs="?",
+        default=None,
+        help="JSON value to feed back (e.g. '{\"action\": \"process\"}'). Use '-' for stdin.",
+    )
+    p_respond.add_argument(
+        "--file",
+        help="Read JSON response from a file instead of inline argument.",
     )
 
     # deploy

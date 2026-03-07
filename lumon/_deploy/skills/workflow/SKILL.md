@@ -111,11 +111,24 @@ When execution suspends for agent judgment, the output will be:
 {"type": "ask", "prompt": "Which item first?", "context": [...], "expects": {"action": "text"}}
 ```
 
-Respond with:
+**Short responses** (under ~2KB) — respond inline:
 
 ```bash
 lumon --working-dir sandbox respond '{"action": "process", "item": "Pay bill"}'
 ```
+
+**Long responses** (over ~2KB, or containing quotes/special characters) — write to a file, then respond with `--file`:
+
+```bash
+# 1. Write the JSON response to a temp file
+#    (use the Write tool to create sandbox/tmp/response.json)
+# 2. Respond using --file
+lumon --working-dir sandbox respond --file tmp/response.json
+# 3. Delete the temp file — do NOT leave it behind
+lumon --working-dir sandbox 'io.delete("tmp/response.json")'
+```
+
+**Always use `--file` when the response is longer than ~2KB.** Inline shell arguments break on long text due to shell escaping and argument length limits. This is especially common with `spawn expects: text` where the response is multi-paragraph analysis.
 
 ## Error handling
 

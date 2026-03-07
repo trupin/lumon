@@ -265,6 +265,14 @@ assert_contains "respond: no state → error" \
     "error:" \
     "$(cd "$RESPOND_ROOT" && run respond '42' 2>&1 || true)"
 
+# Respond from file
+FIRST_OUT="$(cd "$RESPOND_ROOT" && run "$ASK_CODE")"
+echo '"from file"' > "$RESPOND_ROOT/resp.json"
+FILE_OUT="$(cd "$RESPOND_ROOT" && run respond --file resp.json)"
+assert_eq "respond: --file reads from file" \
+    '{"type": "result", "value": "from file"}' \
+    "$FILE_OUT"
+
 # ---------------------------------------------------------------------------
 # Spec
 # ---------------------------------------------------------------------------

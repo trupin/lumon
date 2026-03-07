@@ -293,6 +293,74 @@ class TestRespondBatch:
         assert output["type"] == "result"
         assert output["value"] == ["hello", "world"]
 
+    def test_respond_from_file(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """respond --file reads JSON from a file."""
+        assert isinstance(tmp_path, os.PathLike)
+        state_file = Path(str(tmp_path)) / ".lumon_state.json"
+        response_file = Path(str(tmp_path)) / "response.json"
+        response_file.write_text('"hello from file"', encoding="utf-8")
+        code = 'let x = ask\n  "what?"\nreturn x'
+        with patch("lumon.cli._STATE_FILE", state_file):
+            old_cwd = os.getcwd()
+            os.chdir(str(tmp_path))
+            try:
+                _save_state(code, [])
+                args = argparse.Namespace(response=None, file=str(response_file))
+                result = cmd_respond(args)
+            finally:
+                os.chdir(old_cwd)
+        assert result == 0
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["type"] == "result"
+        assert output["value"] == "hello from file"
+
+    def test_respond_file_not_found(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """respond --file with missing file returns error."""
+        assert isinstance(tmp_path, os.PathLike)
+        state_file = Path(str(tmp_path)) / ".lumon_state.json"
+        with patch("lumon.cli._STATE_FILE", state_file):
+            _save_state("return 42", [])
+            args = argparse.Namespace(response=None, file="/nonexistent/file.json")
+            result = cmd_respond(args)
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "file not found" in captured.err
+
+    def test_respond_from_stdin(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """respond with '-' reads JSON from stdin."""
+        assert isinstance(tmp_path, os.PathLike)
+        state_file = Path(str(tmp_path)) / ".lumon_state.json"
+        code = 'let x = ask\n  "what?"\nreturn x'
+        with patch("lumon.cli._STATE_FILE", state_file):
+            old_cwd = os.getcwd()
+            os.chdir(str(tmp_path))
+            try:
+                _save_state(code, [])
+                args = argparse.Namespace(response="-", file=None)
+                with patch("sys.stdin") as mock_stdin:
+                    mock_stdin.read.return_value = '"from stdin"'
+                    result = cmd_respond(args)
+            finally:
+                os.chdir(old_cwd)
+        assert result == 0
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["type"] == "result"
+        assert output["value"] == "from stdin"
+
+    def test_respond_no_args_error(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """respond with no response and no --file returns error."""
+        assert isinstance(tmp_path, os.PathLike)
+        state_file = Path(str(tmp_path)) / ".lumon_state.json"
+        with patch("lumon.cli._STATE_FILE", state_file):
+            _save_state("return 42", [])
+            args = argparse.Namespace(response=None, file=None)
+            result = cmd_respond(args)
+        assert result == 1
+        captured = capsys.readouterr()
+        assert "provide a JSON response" in captured.err
+
     def test_run_code_saves_batch_size(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
         """cmd_run_code saves batch_size in state when spawn_batch is returned."""
         assert isinstance(tmp_path, os.PathLike)

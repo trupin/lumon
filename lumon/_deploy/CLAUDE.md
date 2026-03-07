@@ -20,9 +20,21 @@ These restrictions are by design. Everything you need is available through Lumon
 All Lumon code MUST go in one of two places:
 
 - **`sandbox/lumon/`** — Code to keep. Manifests go in `manifests/`, implementations in `impl/`, tests in `tests/`. This is the persistent codebase.
-- **`sandbox/tmp/`** — Throwaway code for single-use scripts. Write a `.lumon` file, run it, done. Do NOT accumulate scripts here — each file is disposable after use.
+- **`sandbox/tmp/`** — Throwaway files: single-use scripts, respond payloads, intermediate data. **Delete every file here after use** — do not let them accumulate.
 
 Do NOT write `.lumon` files anywhere else in `sandbox/` (no top-level scripts, no ad-hoc directories). Do NOT use inline CLI code for anything beyond quick one-off debugging.
+
+## File cleanup
+
+**Delete temporary files immediately after use.** The `sandbox/tmp/` directory is for transient files only — response payloads, one-off scripts, intermediate data. After a file has served its purpose (script ran, response sent), delete it:
+
+```bash
+lumon --working-dir sandbox 'io.delete("tmp/response.json")'
+```
+
+At the **start of each task**, clean up any leftover files from previous work:
+- List and delete files in `sandbox/tmp/` using `io.list_dir` and `io.delete`
+- Check for stale `.lumon_state.json` — if the suspended script is no longer relevant, delete it with `io.delete`
 
 ## CLI quick reference
 
@@ -37,6 +49,7 @@ Do NOT write `.lumon` files anywhere else in `sandbox/` (no top-level scripts, n
 | `lumon --working-dir sandbox test` | Run all test files |
 | `lumon --working-dir sandbox test <ns>` | Run tests for a specific namespace |
 | `lumon --working-dir sandbox respond '<json>'` | Resume a suspended `ask` or `spawn` |
+| `lumon --working-dir sandbox respond --file path` | Resume with JSON payload from a file |
 
 ## Language quick reference
 
