@@ -19,7 +19,7 @@ return_stmt: "return" expression
 
 // === Define / Implement ===
 define_block: "define" namespace_path _NL _INDENT description _NL takes_clause? _NL? returns_clause _NL _DEDENT
-description: ESCAPED_STRING
+description: ESCAPED_STRING | TRIPLE_STRING
 takes_clause: "takes:" _NL _INDENT param_def+ _DEDENT
             | "takes:" _NL
 param_def: IDENT ":" type_expr ESCAPED_STRING ("=" expression)? _NL
@@ -85,6 +85,7 @@ assert_stmt: "assert" expression
         | list_literal
         | map_literal
         | NUMBER -> number_lit
+        | TRIPLE_STRING -> multiline_string
         | ESCAPED_STRING -> simple_string
         | "true" -> true_lit
         | "false" -> false_lit
@@ -138,6 +139,7 @@ guard: "if" expression
         | map_pattern
         | list_pattern
         | NUMBER -> lit_pattern_num
+        | TRIPLE_STRING -> lit_pattern_multiline_str
         | ESCAPED_STRING -> lit_pattern_str
         | "true" -> lit_pattern_true
         | "false" -> lit_pattern_false
@@ -165,13 +167,13 @@ with_binding: IDENT "=" expression _NL
 
 // === Ask / Spawn ===
 ask_expr: "ask" _NL _INDENT ask_body _DEDENT
-ask_body: ESCAPED_STRING _NL ask_fields
+ask_body: (ESCAPED_STRING | TRIPLE_STRING) _NL ask_fields
 ask_fields: (ask_context _NL)? (ask_expects _NL)?
 ask_context: "context:" expression
 ask_expects: "expects:" type_expr
 
 spawn_expr: "spawn" _NL _INDENT spawn_body _DEDENT
-spawn_body: ESCAPED_STRING _NL spawn_fields
+spawn_body: (ESCAPED_STRING | TRIPLE_STRING) _NL spawn_fields
 spawn_fields: (spawn_context _NL)? (spawn_fork _NL)? (spawn_expects _NL)?
 spawn_context: "context:" expression
 spawn_fork: "fork:" expression
@@ -205,8 +207,6 @@ ARROW: "->"
 FN_KW: "fn"
 
 // === Terminals ===
-COMMENT: /--[^\n]*/
-%ignore COMMENT
 %ignore /[ \t]+/
 
 // These are declared for the Indenter
@@ -215,5 +215,6 @@ _NL: /(\r?\n[\t ]*)+/
 
 IDENT: /(?!(?:let|define|implement|test|takes|returns|return|match|if|else|with|then|ask|spawn|fork|context|expects|async|await|await_all|assert|true|false|none|and|or|not)\b)[a-zA-Z_][a-zA-Z0-9_]*/
 NUMBER: /\d+(\.\d+)?/
+TRIPLE_STRING.2: /\"{3}[\s\S]*?\"{3}/
 ESCAPED_STRING: "\"" /([^\"\\]|\\[\\\"nrt]|\\\([^)]*\))*/ "\""
 """

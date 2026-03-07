@@ -209,17 +209,99 @@ class LumonIndenter(Indenter):
 def _preprocess(source: str) -> str:
     """Pre-process source code before lexing.
 
+    - Strip comment-only lines (replace with empty lines to preserve line numbers).
+    - Strip trailing comments from code lines.
     - Join pipe continuation lines (lines starting with |>) to previous line.
+    - Skip all comment processing inside triple-quoted strings.
     """
     lines = source.split("\n")
     result: list[str] = []
+    in_triple = False
     for line in lines:
+        if in_triple:
+            result.append(line)
+            if '"""' in line:
+                # Count occurrences of """ to determine if we exit
+                count = line.count('"""')
+                if count % 2 == 1:
+                    in_triple = False
+            continue
+
+        # Check if this line opens a triple-quoted string
+        if '"""' in line:
+            count = line.count('"""')
+            if count % 2 == 1:
+                in_triple = True
+            result.append(line)
+            continue
+
         stripped = line.lstrip()
-        if stripped.startswith("|>") and result:
+        if stripped.startswith("--"):
+            result.append("")
+        elif "--" in line:
+            # Strip trailing comment, but not inside strings
+            in_string = False
+            comment_pos = -1
+            i = 0
+            while i < len(line):
+                if in_string and line[i] == "\\" and i + 1 < len(line):
+                    i += 2  # skip escaped char inside string
+                    continue
+                if line[i] == '"':
+                    in_string = not in_string
+                elif not in_string and line[i:i+2] == "--":
+                    comment_pos = i
+                    break
+                i += 1
+            if comment_pos >= 0:
+                result.append(line[:comment_pos].rstrip())
+            else:
+                result.append(line)
+        elif stripped.startswith("|>") and result:
             result[-1] = result[-1] + " " + stripped
         else:
             result.append(line)
     return "\n".join(result)
+
+
+def _dedent_multiline(raw: str) -> str:
+    """Dedent a triple-quoted string.
+
+    - If first line (after opening \"\"\") is blank, strip it.
+    - If last line is whitespace-only, strip it and use its indent as reference.
+    - Otherwise compute minimum indent of non-empty lines.
+    - Strip that common indent from all lines.
+    """
+    lines = raw.split("\n")
+
+    # Strip first line if blank (opening """ on its own line)
+    if lines and lines[0].strip() == "":
+        lines = lines[1:]
+
+    # Strip last line if whitespace-only (closing """ on its own line)
+    if lines and lines[-1].strip() == "":
+        # Use last line's whitespace as reference indent
+        ref_indent = len(lines[-1])
+        lines = lines[:-1]
+    else:
+        # Compute minimum indent of non-empty lines
+        ref_indent = None
+        for line in lines:
+            if line.strip():
+                indent = len(line) - len(line.lstrip())
+                if ref_indent is None or indent < ref_indent:
+                    ref_indent = indent
+
+    if not lines:
+        return ""
+
+    if ref_indent is None or ref_indent == 0:
+        return "\n".join(lines)
+
+    return "\n".join(
+        line[ref_indent:] if len(line) >= ref_indent else line.lstrip()
+        for line in lines
+    )
 
 
 def _unescape_string(s: str) -> str:
@@ -338,6 +420,11 @@ class LumonTransformer(Transformer):
     def simple_string(self, token: Token) -> TextLiteral | InterpolatedText:
         raw = str(token)[1:-1]  # strip quotes
         return _parse_interpolated_string(raw)
+
+    def multiline_string(self, token: Token) -> TextLiteral | InterpolatedText:
+        content = str(token)[3:-3]  # strip triple quotes
+        content = _dedent_multiline(content)
+        return _parse_interpolated_string(content)
 
     def interp_string(self, token: Token) -> TextLiteral | InterpolatedText:
         raw = str(token)[1:-1]
@@ -582,6 +669,11 @@ class LumonTransformer(Transformer):
     def lit_pattern_str(self, token: Token) -> LiteralPattern:
         return LiteralPattern(_unescape_string(str(token)[1:-1]))
 
+    def lit_pattern_multiline_str(self, token: Token) -> LiteralPattern:
+        content = str(token)[3:-3]
+        content = _dedent_multiline(content)
+        return LiteralPattern(_unescape_string(content))
+
     def lit_pattern_true(self) -> LiteralPattern:
         return LiteralPattern(True)
 
@@ -636,10 +728,10 @@ class LumonTransformer(Transformer):
         return body  # type: ignore[return-value]
 
     def ask_body(self, prompt: Token, fields: object) -> AskExpr:
-        prompt_str = _unescape_string(str(prompt)[1:-1])
+        prompt_node = self._parse_prompt_token(prompt)
         if isinstance(fields, AskExpr):
-            return AskExpr(TextLiteral(prompt_str), fields.context, fields.expects)
-        return AskExpr(TextLiteral(prompt_str))
+            return AskExpr(prompt_node, fields.context, fields.expects)
+        return AskExpr(prompt_node)
 
     def ask_fields(self, *children: object) -> AskExpr:
         context = None
@@ -662,10 +754,20 @@ class LumonTransformer(Transformer):
         return body  # type: ignore[return-value]
 
     def spawn_body(self, prompt: Token, fields: object) -> SpawnExpr:
-        prompt_str = _unescape_string(str(prompt)[1:-1])
+        prompt_node = self._parse_prompt_token(prompt)
         if isinstance(fields, SpawnExpr):
-            return SpawnExpr(TextLiteral(prompt_str), fields.context, fields.fork, fields.expects)
-        return SpawnExpr(TextLiteral(prompt_str))
+            return SpawnExpr(prompt_node, fields.context, fields.fork, fields.expects)
+        return SpawnExpr(prompt_node)
+
+    def _parse_prompt_token(self, token: Token) -> TextLiteral | InterpolatedText:
+        """Parse a prompt token (ESCAPED_STRING or TRIPLE_STRING) into an AST node."""
+        raw = str(token)
+        if raw.startswith('"""'):
+            content = raw[3:-3]
+            content = _dedent_multiline(content)
+            return _parse_interpolated_string(content)
+        prompt_str = _unescape_string(raw[1:-1])
+        return TextLiteral(prompt_str)
 
     def spawn_fields(self, *children: object) -> SpawnExpr:
         context = None
@@ -737,7 +839,10 @@ class LumonTransformer(Transformer):
     # --- Define / Implement ---
 
     def description(self, token: Token) -> str:
-        return _unescape_string(str(token)[1:-1])
+        raw = str(token)
+        if raw.startswith('"""'):
+            return _dedent_multiline(raw[3:-3])
+        return _unescape_string(raw[1:-1])
 
     def define_block(self, ns_path: str, desc: str, *rest: object) -> DefineBlock:
         params: tuple[object, ...] = ()

@@ -88,6 +88,17 @@ class TestRealFSListDir:
         result = fs.list_dir("../../..")
         assert result["tag"] == "error"
 
+    def test_list_dir_recursive(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        root = str(tmp_path)
+        os.makedirs(os.path.join(root, "sub"))
+        Path(os.path.join(root, "a.txt")).touch()
+        Path(os.path.join(root, "sub", "b.txt")).touch()
+        fs = RealFS(root)
+        result = fs.list_dir(".", recursive=True)
+        assert result["tag"] == "ok"
+        assert sorted(result["value"]) == ["a.txt", "sub/b.txt"]
+
 
 class TestRealFSDelete:
     def test_delete_existing(self, tmp_path: object) -> None:
@@ -111,6 +122,38 @@ class TestRealFSDelete:
         fs = RealFS(str(tmp_path))
         result = fs.delete("../../evil.txt")
         assert result["tag"] == "error"
+
+
+class TestRealFSDeleteDir:
+    def test_delete_dir_existing(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        root = str(tmp_path)
+        sub = os.path.join(root, "mydir")
+        os.makedirs(sub)
+        Path(os.path.join(sub, "file.txt")).touch()
+        fs = RealFS(root)
+        result = fs.delete_dir("mydir")
+        assert result == {"tag": "ok"}
+        assert not os.path.exists(sub)
+
+    def test_delete_dir_missing(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        fs = RealFS(str(tmp_path))
+        result = fs.delete_dir("nope")
+        assert result["tag"] == "error"
+
+    def test_delete_dir_outside_root(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        fs = RealFS(str(tmp_path))
+        result = fs.delete_dir("../../evil")
+        assert result["tag"] == "error"
+
+    def test_delete_dir_root_blocked(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        fs = RealFS(str(tmp_path))
+        result = fs.delete_dir(".")
+        assert result["tag"] == "error"
+        assert "root" in result["value"]
 
 
 class TestRealFSFind:

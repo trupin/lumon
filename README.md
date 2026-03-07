@@ -75,6 +75,23 @@ uv tool install .
 uv pip install .
 ```
 
+## Quick Look
+
+```lua
+let names = ["Alice", "Bob", "Carol"]
+let greeting = names
+  |> list.map(fn(name) -> "Hello, \(name)!")
+  |> text.join("\n")
+
+return """
+  Welcome to Lumon.
+
+  \(greeting)
+  """
+```
+
+Key features: immutable bindings (`let`), no loops (use `list.map`/`filter`/`fold`), pattern matching (`match`), pipes (`|>`), tags (`:ok`, `:error("msg")`), triple-quoted strings (`"""..."""`), and agent coroutines (`ask`/`spawn`).
+
 ## Usage
 
 ```bash
@@ -100,6 +117,7 @@ lumon spec
 | `lumon browse [namespace]` | Show namespace index or a specific manifest |
 | `lumon test [namespace]` | Run Lumon test files |
 | `lumon respond '<json>'` | Resume suspended execution (after ask/spawn) |
+| `lumon respond --file path` | Resume with JSON payload from a file |
 | `lumon deploy <target>` | Deploy Claude Code agent config to a directory |
 | `lumon spec` | Print the language specification |
 

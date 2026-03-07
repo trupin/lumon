@@ -103,6 +103,18 @@ class TestIoListDir:
         assert r.tag_name == "ok"
         assert "sub" in r.tag_value
 
+    def test_list_dir_recursive(self, run):
+        fs = MockFS({"dir/a.md": "a", "dir/sub/b.md": "b", "dir/sub/deep/c.md": "c"})
+        r = run('return io.list_dir("dir", true)', io=fs)
+        assert r.tag_name == "ok"
+        assert sorted(r.tag_value) == ["a.md", "sub/b.md", "sub/deep/c.md"]
+
+    def test_list_dir_recursive_default_false(self, run):
+        fs = MockFS({"dir/a.md": "a", "dir/sub/b.md": "b"})
+        r = run('return io.list_dir("dir")', io=fs)
+        assert r.tag_name == "ok"
+        assert sorted(r.tag_value) == ["a.md", "sub"]
+
 
 # ===================================================================
 # Path security
@@ -239,6 +251,34 @@ class TestIoDelete:
             'return io.read("file.md")',
             io=fs,
         )
+        assert r.tag_name == "error"
+
+
+class TestIoDeleteDir:
+    def test_delete_dir_existing(self, run):
+        fs = MockFS({"tmp/a.txt": "a", "tmp/b.txt": "b"})
+        r = run('return io.delete_dir("tmp")', io=fs)
+        assert r.tag_name == "ok"
+
+    def test_delete_dir_then_list(self, run):
+        fs = MockFS({"tmp/a.txt": "a", "tmp/sub/b.txt": "b", "keep.txt": "keep"})
+        r = run(
+            'let d = io.delete_dir("tmp")\n'
+            'return io.list_dir(".")',
+            io=fs,
+        )
+        assert r.tag_name == "ok"
+        assert "tmp" not in r.tag_value
+        assert "keep.txt" in r.tag_value
+
+    def test_delete_dir_missing(self, run):
+        fs = MockFS()
+        r = run('return io.delete_dir("nonexistent")', io=fs)
+        assert r.tag_name == "error"
+
+    def test_delete_dir_root_blocked(self, run):
+        fs = MockFS({"a.txt": "a"})
+        r = run('return io.delete_dir(".")', io=fs)
         assert r.tag_name == "error"
 
 

@@ -5,6 +5,17 @@ description: Perform a task by building reusable Lumon code that automates it en
 
 When given a task, your goal is to **build lasting automation** — not just produce a one-off result. Every task you complete should leave behind code that can repeat the task without regenerating anything.
 
+## Phase 0: Clean up
+
+Before starting any task, clean up stale files from previous work:
+
+```bash
+# Delete the entire tmp directory and its contents, then recreate it
+lumon --working-dir sandbox 'io.delete_dir("tmp")'
+```
+
+If `sandbox/.lumon_state.json` exists and the suspended script is no longer relevant, delete it with `io.delete`.
+
 ## Phase 1: Discover existing code
 
 Before writing anything, check if the task (or parts of it) is already automated.

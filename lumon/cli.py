@@ -155,8 +155,23 @@ def cmd_respond(args: argparse.Namespace) -> int:
         )
         return 1
 
+    # Read JSON from --file, stdin ("-"), or inline argument
+    if getattr(args, "file", None):
+        try:
+            response_text = Path(args.file).read_text(encoding="utf-8")
+        except FileNotFoundError:
+            print(f"error: file not found: {args.file}", file=sys.stderr)
+            return 1
+    elif args.response == "-":
+        response_text = sys.stdin.read()
+    elif args.response is not None:
+        response_text = args.response
+    else:
+        print("error: provide a JSON response, --file, or '-' for stdin", file=sys.stderr)
+        return 1
+
     try:
-        response_raw = json.loads(args.response)
+        response_raw = json.loads(response_text)
     except json.JSONDecodeError as exc:
         print(f"error: invalid JSON: {exc}", file=sys.stderr)
         return 1
@@ -331,6 +346,12 @@ def cmd_browse(args: argparse.Namespace) -> int:
             # Filter by expose list if present
             if isinstance(instance_config, dict) and "expose" in instance_config:
                 expose_list = instance_config["expose"]
+                if not isinstance(expose_list, list):
+                    print(
+                        f"error: 'expose' for plugin '{namespace}' must be a list",
+                        file=sys.stderr,
+                    )
+                    return 1
                 if isinstance(expose_list, list):
                     allowed = {namespace + "." + name for name in expose_list}
                     blocks = extract_blocks(text)
@@ -468,18 +489,26 @@ def _deploy_file(
     force: bool,
     deployed: list[str],
     skipped: list[str],
+    *,
+    dry_run: bool = False,
 ) -> None:
     """Deploy a single file with conflict detection."""
     if dest.exists():
         existing = dest.read_text(encoding="utf-8")
         if existing == content:
             return  # identical — skip silently
+        if dry_run:
+            skipped.append(rel)
+            return
         if force or _prompt_overwrite(rel):
             dest.write_text(content, encoding="utf-8")
             deployed.append(rel)
         else:
             skipped.append(rel)
     else:
+        if dry_run:
+            deployed.append(rel)
+            return
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content, encoding="utf-8")
         deployed.append(rel)
@@ -489,23 +518,24 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     """Copy the bundled Claude Code agent config to a target directory."""
     target = Path(args.target).expanduser().resolve()
     claude_dir = target / ".claude"
+    dry_run: bool = getattr(args, "dry_run", False)
 
     if not target.exists():
         print(f"error: target path does not exist: {target}", file=sys.stderr)
         return 1
 
-    claude_dir.mkdir(exist_ok=True)
-    sandbox_dir = target / "sandbox"
-    sandbox_dir.mkdir(exist_ok=True)
-    plugins_dir = target / "plugins"
-    plugins_dir.mkdir(exist_ok=True)
+    if not dry_run:
+        claude_dir.mkdir(exist_ok=True)
+        (target / "sandbox").mkdir(exist_ok=True)
+        (target / "plugins").mkdir(exist_ok=True)
 
+    plugins_dir = target / "plugins"
     files = _deploy_files()
     deployed: list[str] = []
     skipped: list[str] = []
 
-    hooks_dir = claude_dir / "hooks"
-    hooks_dir.mkdir(exist_ok=True)
+    if not dry_run:
+        (claude_dir / "hooks").mkdir(exist_ok=True)
 
     for filename, content in files.items():
         if filename == "CLAUDE.md":
@@ -513,53 +543,60 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         elif filename == "plugin-CLAUDE.md":
             dest = plugins_dir / "CLAUDE.md"
         elif filename.endswith(".py"):
-            dest = hooks_dir / filename
+            dest = (claude_dir / "hooks") / filename
         else:
             dest = claude_dir / filename
         rel = str(dest.relative_to(target))
-        _deploy_file(dest, content, rel, args.force, deployed, skipped)
+        _deploy_file(dest, content, rel, args.force, deployed, skipped, dry_run=dry_run)
 
     # Deploy skills
     skills = _deploy_skills()
     skills_dir = claude_dir / "skills"
-    skills_dir.mkdir(exist_ok=True)
+    if not dry_run:
+        skills_dir.mkdir(exist_ok=True)
 
     for skill_name, content in sorted(skills.items()):
         skill_dir = skills_dir / skill_name
-        skill_dir.mkdir(exist_ok=True)
+        if not dry_run:
+            skill_dir.mkdir(exist_ok=True)
         dest = skill_dir / "SKILL.md"
         rel = str(dest.relative_to(target))
-        _deploy_file(dest, content, rel, args.force, deployed, skipped)
+        _deploy_file(dest, content, rel, args.force, deployed, skipped, dry_run=dry_run)
 
     # Deploy plugin skills
     plugin_skills = _deploy_plugin_skills()
     plugin_skills_dir = plugins_dir / ".claude" / "skills"
-    plugin_skills_dir.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        plugin_skills_dir.mkdir(parents=True, exist_ok=True)
 
     for skill_name, content in sorted(plugin_skills.items()):
         skill_dir = plugin_skills_dir / skill_name
-        skill_dir.mkdir(exist_ok=True)
+        if not dry_run:
+            skill_dir.mkdir(exist_ok=True)
         dest = skill_dir / "SKILL.md"
         rel = str(dest.relative_to(target))
-        _deploy_file(dest, content, rel, args.force, deployed, skipped)
+        _deploy_file(dest, content, rel, args.force, deployed, skipped, dry_run=dry_run)
 
-    # Create starter .lumon.json at target root
+    # Create starter .lumon.json at target root (only if it doesn't exist —
+    # this file contains user config and must never be overwritten).
     lumon_json = target / ".lumon.json"
-    starter = json.dumps({"plugins": {}}, indent=2) + "\n"
-    _deploy_file(lumon_json, starter, ".lumon.json", args.force, deployed, skipped)
+    if not lumon_json.exists():
+        starter = json.dumps({"plugins": {}}, indent=2) + "\n"
+        _deploy_file(lumon_json, starter, ".lumon.json", args.force, deployed, skipped, dry_run=dry_run)
 
+    label = "Dry run for" if dry_run else "Deployed to"
     if deployed:
-        print(f"Deployed to {target}:")
+        print(f"{label} {target}:")
         for f in deployed:
-            print(f"  + {f}")
+            print(f"  + {f}" if not dry_run else f"  + {f} (new)")
 
     if skipped:
-        print(f"\nSkipped (differ — use --force to overwrite):")
+        print(f"\nWould update (differ from bundled version):" if dry_run else "\nSkipped (differ — use --force to overwrite):")
         for f in skipped:
             print(f"  ~ {f}")
 
     if not deployed and not skipped:
-        print("Nothing to deploy.")
+        print("Nothing to deploy — already up to date.")
 
     return 0
 
@@ -642,7 +679,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "From stdin:  echo 'return 42' | lumon\n"
             "Browse:      lumon browse [<namespace>]\n"
             "Test:        lumon test [<namespace>]\n"
-            "Respond:     lumon respond '<json>'\n"
+            "Respond:     lumon respond '<json>' | --file path | -\n"
             "Deploy:      lumon deploy <target>\n"
             "Spec:        lumon spec"
         ),
@@ -690,7 +727,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p_respond.add_argument(
         "response",
-        help="JSON value to feed back (e.g. '{\"action\": \"process\"}').",
+        nargs="?",
+        default=None,
+        help="JSON value to feed back (e.g. '{\"action\": \"process\"}'). Use '-' for stdin.",
+    )
+    p_respond.add_argument(
+        "--file",
+        help="Read JSON response from a file instead of inline argument.",
     )
 
     # deploy
@@ -710,6 +753,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help="Overwrite existing files.",
+    )
+    p_deploy.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be deployed without making changes.",
     )
 
     # spec

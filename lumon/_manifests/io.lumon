@@ -15,12 +15,19 @@ define io.list_dir
   "List files in a directory"
   takes:
     path: text "The directory path"
+    recursive: bool "If true, list all files recursively with relative paths" = false
   returns: :ok(list<text>) | :error(text) "List of file names or error"
 
 define io.delete
   "Delete a file"
   takes:
     path: text "The file to delete"
+  returns: :ok | :error(text) "Success or error with message"
+
+define io.delete_dir
+  "Delete a directory and all its contents"
+  takes:
+    path: text "The directory to delete"
   returns: :ok | :error(text) "Success or error with message"
 
 define io.find

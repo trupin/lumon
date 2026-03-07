@@ -73,6 +73,23 @@ The canonical structure for any non-trivial script:
 
 Never collapse steps 2-3 into hardcoded logic. If a human would need to think about it, the script should `ask` or `spawn`.
 
+### Responding to long spawn/ask results
+
+When a `spawn expects: text` produces a long response (over ~2KB — common for analysis, reports, summaries):
+
+1. Write the JSON response to `sandbox/tmp/response.json` using the Write tool
+2. Respond with `lumon --working-dir sandbox respond --file tmp/response.json`
+3. Delete the temp file: `lumon --working-dir sandbox 'io.delete("tmp/response.json")'`
+
+**Never paste long text as an inline `respond` argument.** Shell escaping breaks on quotes, dollar signs, and special characters in multi-paragraph text.
+
+For spawn batches with multiple long responses, write a single JSON file with all responses:
+```bash
+# Write {"spawn_0": "...", "spawn_1": "..."} to tmp/response.json
+lumon --working-dir sandbox respond --file tmp/response.json
+lumon --working-dir sandbox 'io.delete("tmp/response.json")'
+```
+
 ### Anti-patterns to avoid
 
 - **Hardcoding a choice** when the data is ambiguous — use `ask`
@@ -80,3 +97,4 @@ Never collapse steps 2-3 into hardcoded logic. If a human would need to think ab
 - **Sequential reasoning** on independent items — use `spawn` + `await_all` for parallelism
 - **Guessing a format or structure** from partial information — use `ask` to confirm
 - **Swallowing ambiguity with a default** (e.g., `?? "unknown"`) when the agent should decide — use `ask` instead
+- **Inlining long responses** — use `respond --file` for anything over ~2KB

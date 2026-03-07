@@ -79,6 +79,12 @@ def _is_lumon_command(command: str) -> bool:
     if len(parts) >= 2 and parts[1] in ("spec", "version"):
         return True
 
+    # Allow lumon deploy . (with optional flags like --force, --dry-run)
+    if len(parts) >= 3 and parts[1] == "deploy":
+        target = parts[2].rstrip("/")
+        if target in (".", ""):
+            return True
+
     # Must contain --working-dir sandbox
     for i, part in enumerate(parts):
         if part == "--working-dir" and i + 1 < len(parts):

@@ -292,10 +292,14 @@ IO_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
         TUnion((TTag("ok"), TTag("error", TText()))),
     ),
     "io.list_dir": (
-        (TText(),),
+        (TText(), None),
         TUnion((TTag("ok", TList(TText())), TTag("error", TText()))),
     ),
     "io.delete": (
+        (TText(),),
+        TUnion((TTag("ok"), TTag("error", TText()))),
+    ),
+    "io.delete_dir": (
         (TText(),),
         TUnion((TTag("ok"), TTag("error", TText()))),
     ),
@@ -659,19 +663,30 @@ def _check_call(
     # Check builtin signatures
     if name in sigs:
         param_types, return_type = sigs[name]
-        # Arity check
-        if len(arg_types) != len(param_types):
+        # Arity check — None in param_types marks optional params
+        required = sum(1 for p in param_types if p is not None)
+        max_params = len(param_types)
+        if len(arg_types) < required or len(arg_types) > max_params:
+            if required == max_params:
+                raise LumonError(
+                    f"Type error: {name} expects {required} argument(s), "
+                    f"got {len(arg_types)}"
+                )
             raise LumonError(
-                f"Type error: {name} expects {len(param_types)} argument(s), "
+                f"Type error: {name} expects {required}-{max_params} argument(s), "
                 f"got {len(arg_types)}"
             )
+        # Filter to only provided params for type checking
+        effective_params = tuple(
+            p for i, p in enumerate(param_types) if i < len(arg_types) and p is not None
+        )
         # Resolve generics
         substitutions: dict[str, object] = {}
-        for actual, expected in zip(arg_types, param_types):
+        for actual, expected in zip(arg_types, effective_params):
             _bind_type_var(actual, expected, substitutions)
 
         # Check each arg
-        for i, (actual, expected) in enumerate(zip(arg_types, param_types)):
+        for i, (actual, expected) in enumerate(zip(arg_types, effective_params)):
             resolved_expected = _resolve(expected, substitutions)
             # If expected is a function type, check lambda arg
             if isinstance(resolved_expected, TFn) and isinstance(

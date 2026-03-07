@@ -420,3 +420,94 @@ class TestFieldAccessErrors:
     def test_field_access_missing_key(self, run):
         r = run("return {a: 1}.b")
         assert r.type == "error"
+
+
+# ===================================================================
+# Multiline string literals (triple-quoted)
+# ===================================================================
+
+
+class TestMultilineStrings:
+    def test_basic_multiline(self, run):
+        code = 'return """\nhello\nworld\n"""'
+        r = run(code)
+        assert r.value == "hello\nworld"
+
+    def test_multiline_with_interpolation(self, run):
+        code = 'let name = "Lumon"\nreturn """\nhello \\(name)\n"""'
+        r = run(code)
+        assert r.value == "hello Lumon"
+
+    def test_multiline_dedent(self, run):
+        code = 'return """\n    line1\n    line2\n    """'
+        r = run(code)
+        assert r.value == "line1\nline2"
+
+    def test_multiline_empty(self, run):
+        r = run('return """"""')
+        assert r.value == ""
+
+    def test_multiline_internal_quotes(self, run):
+        code = 'return """\nsay "hi" and ""ok""\n"""'
+        r = run(code)
+        assert r.value == 'say "hi" and ""ok""'
+
+    def test_multiline_preserves_comments(self, run):
+        code = 'return """\n-- this is not a comment\n"""'
+        r = run(code)
+        assert r.value == "-- this is not a comment"
+
+    def test_multiline_escape_sequences(self, run):
+        code = 'return """\ncol1\\tcol2\n"""'
+        r = run(code)
+        assert r.value == "col1\tcol2"
+
+    def test_multiline_in_pattern(self, run):
+        code = (
+            'let x = "hello\\nworld"\n'
+            'return match x\n'
+            '  """\n'
+            '  hello\n'
+            '  world\n'
+            '  """ -> "matched"\n'
+            '  _ -> "nope"'
+        )
+        r = run(code)
+        assert r.value == "matched"
+
+    def test_multiline_inline(self, run):
+        """Triple-quoted string on one line."""
+        r = run('return """hello"""')
+        assert r.value == "hello"
+
+    def test_multiline_dedent_mixed_indent(self, run):
+        code = 'return """\n    line1\n      line2\n    """'
+        r = run(code)
+        assert r.value == "line1\n  line2"
+
+    def test_multiline_in_ask(self, run):
+        code = (
+            'let decision = ask\n'
+            '  """\n'
+            '  Which item\n'
+            '  should go first?\n'
+            '  """\n'
+            '  context: [1, 2, 3]\n'
+        )
+        r = run(code)
+        assert r.type == "ask"
+        assert r.output["prompt"] == "Which item\nshould go first?"
+
+    def test_multiline_preserves_pipe_lines(self, run):
+        code = 'return """\n|> not a pipe\n"""'
+        r = run(code)
+        assert r.value == "|> not a pipe"
+
+    def test_multiline_interpolation_with_call(self, run):
+        code = 'let xs = [1, 2]\nreturn """\ncount: \\(list.length(xs))\n"""'
+        r = run(code)
+        assert r.value == "count: 2"
+
+    def test_multiline_unclosed_is_error(self, run):
+        r = run('return """hello')
+        assert r.type == "error"
