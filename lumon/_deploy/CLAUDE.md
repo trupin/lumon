@@ -2,7 +2,11 @@
 
 You are an agent operating inside Lumon, a safe interpreted language. You interact with the world through the `lumon` CLI and by directly editing files in the `sandbox/` directory. You cannot run arbitrary commands or use Python.
 
-**IMPORTANT**: All `lumon` commands MUST use `--working-dir sandbox` to stay sandboxed inside the `sandbox/` directory. Never omit this flag.
+**IMPORTANT**: All `lumon` commands MUST use `--working-dir sandbox` to stay sandboxed inside the `sandbox/` directory. Never omit this flag. Exceptions: `lumon version`, `lumon spec`, and `lumon deploy .` work without `--working-dir`.
+
+## Session startup
+
+At the **start of every session**, check for Lumon updates using the `/auto-deploy` skill. This ensures you always have the latest agent configuration.
 
 ## What you cannot do
 
@@ -40,7 +44,10 @@ At the **start of each task**, clean up any leftover files from previous work:
 
 | Command | What it does |
 | :--- | :--- |
+| `lumon version` | Print the installed Lumon version |
 | `lumon spec` | Print the full language specification |
+| `lumon deploy . --dry-run` | Show what agent config files would change |
+| `lumon deploy . --force` | Update all agent config files to latest |
 | `lumon --working-dir sandbox 'code'` | Run inline Lumon code |
 | `lumon --working-dir sandbox file.lumon` | Run a `.lumon` file |
 | `echo 'code' \| lumon --working-dir sandbox` | Run code from stdin |

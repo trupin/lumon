@@ -731,7 +731,7 @@ class TestDeploySkills:
     def test_deploy_skills_returns_expected_skills(self) -> None:
         skills = _deploy_skills()
         assert isinstance(skills, dict)
-        assert sorted(skills.keys()) == ["ask-spawn", "code-organization", "issues", "lumon", "plugins-issues", "review", "workflow"]
+        assert sorted(skills.keys()) == ["ask-spawn", "auto-deploy", "code-organization", "issues", "lumon", "plugins-issues", "review", "workflow"]
         for name, content in skills.items():
             assert len(content) > 0, f"Skill '{name}' has empty content"
             assert "---" in content, f"Skill '{name}' missing frontmatter"

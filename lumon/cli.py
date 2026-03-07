@@ -489,18 +489,26 @@ def _deploy_file(
     force: bool,
     deployed: list[str],
     skipped: list[str],
+    *,
+    dry_run: bool = False,
 ) -> None:
     """Deploy a single file with conflict detection."""
     if dest.exists():
         existing = dest.read_text(encoding="utf-8")
         if existing == content:
             return  # identical — skip silently
+        if dry_run:
+            skipped.append(rel)
+            return
         if force or _prompt_overwrite(rel):
             dest.write_text(content, encoding="utf-8")
             deployed.append(rel)
         else:
             skipped.append(rel)
     else:
+        if dry_run:
+            deployed.append(rel)
+            return
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content, encoding="utf-8")
         deployed.append(rel)
@@ -510,23 +518,24 @@ def cmd_deploy(args: argparse.Namespace) -> int:
     """Copy the bundled Claude Code agent config to a target directory."""
     target = Path(args.target).expanduser().resolve()
     claude_dir = target / ".claude"
+    dry_run: bool = getattr(args, "dry_run", False)
 
     if not target.exists():
         print(f"error: target path does not exist: {target}", file=sys.stderr)
         return 1
 
-    claude_dir.mkdir(exist_ok=True)
-    sandbox_dir = target / "sandbox"
-    sandbox_dir.mkdir(exist_ok=True)
-    plugins_dir = target / "plugins"
-    plugins_dir.mkdir(exist_ok=True)
+    if not dry_run:
+        claude_dir.mkdir(exist_ok=True)
+        (target / "sandbox").mkdir(exist_ok=True)
+        (target / "plugins").mkdir(exist_ok=True)
 
+    plugins_dir = target / "plugins"
     files = _deploy_files()
     deployed: list[str] = []
     skipped: list[str] = []
 
-    hooks_dir = claude_dir / "hooks"
-    hooks_dir.mkdir(exist_ok=True)
+    if not dry_run:
+        (claude_dir / "hooks").mkdir(exist_ok=True)
 
     for filename, content in files.items():
         if filename == "CLAUDE.md":
@@ -534,53 +543,60 @@ def cmd_deploy(args: argparse.Namespace) -> int:
         elif filename == "plugin-CLAUDE.md":
             dest = plugins_dir / "CLAUDE.md"
         elif filename.endswith(".py"):
-            dest = hooks_dir / filename
+            dest = (claude_dir / "hooks") / filename
         else:
             dest = claude_dir / filename
         rel = str(dest.relative_to(target))
-        _deploy_file(dest, content, rel, args.force, deployed, skipped)
+        _deploy_file(dest, content, rel, args.force, deployed, skipped, dry_run=dry_run)
 
     # Deploy skills
     skills = _deploy_skills()
     skills_dir = claude_dir / "skills"
-    skills_dir.mkdir(exist_ok=True)
+    if not dry_run:
+        skills_dir.mkdir(exist_ok=True)
 
     for skill_name, content in sorted(skills.items()):
         skill_dir = skills_dir / skill_name
-        skill_dir.mkdir(exist_ok=True)
+        if not dry_run:
+            skill_dir.mkdir(exist_ok=True)
         dest = skill_dir / "SKILL.md"
         rel = str(dest.relative_to(target))
-        _deploy_file(dest, content, rel, args.force, deployed, skipped)
+        _deploy_file(dest, content, rel, args.force, deployed, skipped, dry_run=dry_run)
 
     # Deploy plugin skills
     plugin_skills = _deploy_plugin_skills()
     plugin_skills_dir = plugins_dir / ".claude" / "skills"
-    plugin_skills_dir.mkdir(parents=True, exist_ok=True)
+    if not dry_run:
+        plugin_skills_dir.mkdir(parents=True, exist_ok=True)
 
     for skill_name, content in sorted(plugin_skills.items()):
         skill_dir = plugin_skills_dir / skill_name
-        skill_dir.mkdir(exist_ok=True)
+        if not dry_run:
+            skill_dir.mkdir(exist_ok=True)
         dest = skill_dir / "SKILL.md"
         rel = str(dest.relative_to(target))
-        _deploy_file(dest, content, rel, args.force, deployed, skipped)
+        _deploy_file(dest, content, rel, args.force, deployed, skipped, dry_run=dry_run)
 
-    # Create starter .lumon.json at target root
+    # Create starter .lumon.json at target root (only if it doesn't exist —
+    # this file contains user config and must never be overwritten).
     lumon_json = target / ".lumon.json"
-    starter = json.dumps({"plugins": {}}, indent=2) + "\n"
-    _deploy_file(lumon_json, starter, ".lumon.json", args.force, deployed, skipped)
+    if not lumon_json.exists():
+        starter = json.dumps({"plugins": {}}, indent=2) + "\n"
+        _deploy_file(lumon_json, starter, ".lumon.json", args.force, deployed, skipped, dry_run=dry_run)
 
+    label = "Dry run for" if dry_run else "Deployed to"
     if deployed:
-        print(f"Deployed to {target}:")
+        print(f"{label} {target}:")
         for f in deployed:
-            print(f"  + {f}")
+            print(f"  + {f}" if not dry_run else f"  + {f} (new)")
 
     if skipped:
-        print(f"\nSkipped (differ — use --force to overwrite):")
+        print(f"\nWould update (differ from bundled version):" if dry_run else "\nSkipped (differ — use --force to overwrite):")
         for f in skipped:
             print(f"  ~ {f}")
 
     if not deployed and not skipped:
-        print("Nothing to deploy.")
+        print("Nothing to deploy — already up to date.")
 
     return 0
 
@@ -737,6 +753,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help="Overwrite existing files.",
+    )
+    p_deploy.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be deployed without making changes.",
     )
 
     # spec
