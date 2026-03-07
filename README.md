@@ -16,6 +16,23 @@ uv tool install .
 uv pip install .
 ```
 
+## Quick Look
+
+```lua
+let names = ["Alice", "Bob", "Carol"]
+let greeting = names
+  |> list.map(fn(name) -> "Hello, \(name)!")
+  |> text.join("\n")
+
+return """
+  Welcome to Lumon.
+
+  \(greeting)
+  """
+```
+
+Key features: immutable bindings (`let`), no loops (use `list.map`/`filter`/`fold`), pattern matching (`match`), pipes (`|>`), tags (`:ok`, `:error("msg")`), triple-quoted strings (`"""..."""`), and agent coroutines (`ask`/`spawn`).
+
 ## Usage
 
 ```bash

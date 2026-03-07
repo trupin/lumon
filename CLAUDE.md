@@ -6,16 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Lumon is a minimal, safe, pseudocode-like interpreted language designed to define the cognitive boundary of an AI agent. Safety is achieved by construction — agents can only operate within the primitives the language provides. No sandboxing, no permission prompts.
 
-**Current stage**: Language specification (v0.1 draft) + proof-of-concept validation scripts. The interpreter has not been built yet.
+**Current stage**: Working interpreter with full language support, CLI, plugin system, and 1000+ tests.
 
 ## Repository Structure
 
+- `lumon/` — Interpreter package (parser, evaluator, type checker, builtins, CLI, plugin system)
+- `tests/` — Pytest test suite (1000+ tests) and CLI bash integration tests
 - `docs/spec.md` — Full language specification (types, operators, control flow, functions, namespaces, tests, built-ins, execution model, examples)
 - `docs/context.md` — Architecture vision, design principles, use cases, technical decisions, comparison to alternatives
-- `scripts/ask_poc.py` — POC validating the `ask` coroutine mechanism using Python generators
-- `scripts/spawn_poc.py` — POC validating `spawn` + `ask` + `await_all` orchestration
-
-No dependencies beyond Python stdlib (uses generators, not asyncio).
 
 ## Architecture
 
@@ -126,12 +124,13 @@ See `/python` for the full guidelines.
 - **Run pytest**: `.venv/bin/python -m pytest`
 - **Run pyright**: `.venv/bin/python -m pyright`
 
-## Planned Implementation
+## Implementation
 
-- **Interpreter**: Python first (fast iteration), Rust later (Wasm target)
-- **Parser**: `lark`, `pyparsing`, or hand-rolled recursive descent
-- **Type system**: Full type checker — catches 100% of type errors before execution (parameterized lists, structural maps, tag exhaustiveness, type inference on locals)
-- **Testing**: Built-in `test` blocks with `assert` — tests auto-run on implementation changes
+- **Interpreter**: Python (`lumon/evaluator.py`) — generator-based coroutines for `ask`/`spawn`
+- **Parser**: `lark` (Earley parser) with custom indenter for significant whitespace
+- **Type system**: Static type checker (`lumon/type_checker.py`) — parameterized lists, structural maps, tag exhaustiveness
+- **Testing**: Built-in `test` blocks with `assert` — run via `lumon test`
+- **Future**: Rust rewrite targeting Wasm
 
 ## Design Principles
 

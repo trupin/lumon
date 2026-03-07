@@ -10,7 +10,7 @@ Seven primitive types. No custom types.
 
 | Type | Description | Literal examples |
 | :---- | :---- | :---- |
-| `text` | String of characters | `"hello"`, `"value is \(x)"` |
+| `text` | String of characters | `"hello"`, `"value is \(x)"`, `"""multiline"""` |
 | `number` | Integer or float (undifferentiated) | `42`, `3.14`, `-1` |
 | `bool` | Boolean | `true`, `false` |
 | `list<T>` | Ordered collection (homogeneous) | `[1, 2, 3]`, `["a", "b"]` |
@@ -19,6 +19,28 @@ Seven primitive types. No custom types.
 | `none` | Absence of value | `none` |
 
 Escape sequences in text: `\\` (backslash), `\"` (quote), `\n` (newline), `\t` (tab), `\(expr)` (interpolation).
+
+### Multiline Strings
+
+Triple-quoted strings (`"""..."""`) preserve literal newlines and support the same escape sequences and `\(expr)` interpolation as single-line strings. Internal `"` and `""` are allowed; only `"""` closes the string.
+
+**Dedent rules:**
+1. If the first line (after opening `"""`) is blank, strip it.
+2. If the last line (before closing `"""`) is whitespace-only, strip it and use its indent as the common indent reference.
+3. Otherwise, compute minimum indent of non-empty lines.
+4. Strip that common indent from all lines.
+
+```
+let msg = """
+    Hello,
+    World!
+    """
+-- msg == "Hello,\nWorld!"
+```
+
+Empty triple-quoted strings (`""""""`) produce an empty string. Comments (`--`) inside triple-quoted strings are preserved as literal text.
+
+Triple-quoted strings can be used anywhere a regular string is valid: expressions, match patterns, ask/spawn prompts, and define descriptions.
 
 ### Tags
 
