@@ -314,6 +314,7 @@ class TestRespondBatch:
         output = json.loads(captured.out)
         assert output["type"] == "result"
         assert output["value"] == "hello from file"
+        assert output["cleanup"] == [str(response_file)]
 
     def test_respond_file_not_found(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
         """respond --file with missing file returns error."""

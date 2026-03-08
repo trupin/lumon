@@ -25,7 +25,7 @@ from lumon.type_checker import type_check
 
 _STATE_FILE = Path(".lumon_state.json")
 
-_SUBCOMMANDS = {"deploy", "browse", "test", "respond", "spec", "version"}
+_SUBCOMMANDS = {"deploy", "browse", "test", "respond", "spec", "version", "schedule"}
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +203,11 @@ def cmd_respond(args: argparse.Namespace) -> int:
         responses=responses,
         working_dir=".",
     )
+
+    # Add cleanup hint when --file was used
+    if getattr(args, "file", None):
+        result["cleanup"] = [args.file]
+
     print(json.dumps(result, ensure_ascii=False))
 
     if result.get("type") in ("ask", "spawn_batch"):
@@ -472,6 +477,101 @@ def cmd_test(args: argparse.Namespace) -> int:
     return 0 if failed == 0 else 1
 
 
+def cmd_schedule(args: argparse.Namespace) -> int:
+    """Manage scheduled execution of Lumon scripts."""
+    from lumon.scheduler import (  # pylint: disable=import-outside-toplevel
+        add_schedule,
+        edit_schedule,
+        get_logs,
+        list_schedules,
+        remove_schedule,
+        run_job,
+    )
+
+    sub = getattr(args, "schedule_command", None)
+    if sub is None:
+        print("error: provide a schedule subcommand (add, list, edit, remove, logs)", file=sys.stderr)
+        return 1
+
+    working_dir = "."
+
+    if sub == "add":
+        schedule_type, schedule_value = _schedule_type_from_args(args)
+        if schedule_type is None:
+            print("error: exactly one of --at, --every, or --cron is required", file=sys.stderr)
+            return 1
+        try:
+            sched = add_schedule(working_dir, args.file, schedule_type, schedule_value)
+        except (ValueError, FileNotFoundError, RuntimeError) as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
+        print(f"Created {sched.id}: {sched.file} ({sched.schedule_type} {sched.schedule_value})")
+        return 0
+
+    if sub == "list":
+        schedules = list_schedules(working_dir)
+        if not schedules:
+            print("No scheduled jobs.")
+            return 0
+        print(f"{'ID':<12} {'Type':<6} {'Schedule':<20} {'File'}")
+        print("-" * 70)
+        for s in schedules:
+            print(f"{s.id:<12} {s.schedule_type:<6} {s.schedule_value:<20} {s.file}")
+        return 0
+
+    if sub == "edit":
+        schedule_type, schedule_value = _schedule_type_from_args(args)
+        if schedule_type is None:
+            print("error: exactly one of --at, --every, or --cron is required", file=sys.stderr)
+            return 1
+        try:
+            sched = edit_schedule(working_dir, args.id, schedule_type, schedule_value)
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
+        print(f"Updated {sched.id}: {sched.schedule_type} {sched.schedule_value}")
+        return 0
+
+    if sub == "remove":
+        try:
+            remove_schedule(working_dir, args.id)
+        except ValueError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
+        print(f"Removed {args.id}")
+        return 0
+
+    if sub == "logs":
+        limit = getattr(args, "limit", 10) or 10
+        logs = get_logs(working_dir, args.id, limit=limit)
+        if not logs:
+            print(f"No logs for {args.id}.")
+            return 0
+        for entry in logs:
+            ts = entry.get("timestamp", "?")
+            result = entry.get("result", {})
+            rtype = result.get("type", "?")
+            print(f"[{ts}] {rtype}: {json.dumps(result, ensure_ascii=False)}")
+        return 0
+
+    if sub == "_run":
+        return run_job(working_dir, args.id)
+
+    print("error: unknown schedule subcommand", file=sys.stderr)
+    return 1
+
+
+def _schedule_type_from_args(args: argparse.Namespace) -> tuple[str | None, str]:
+    """Extract the schedule type and value from mutually exclusive args."""
+    if getattr(args, "at", None):
+        return "once", args.at
+    if getattr(args, "every", None):
+        return "every", args.every
+    if getattr(args, "cron", None):
+        return "cron", args.cron
+    return None, ""
+
+
 def _prompt_overwrite(rel_path: str) -> bool:
     """Ask the user whether to overwrite a file that differs from the bundled version."""
     try:
@@ -664,6 +764,8 @@ def main() -> None:
         sys.exit(cmd_spec(args))
     elif args.command == "version":
         sys.exit(cmd_version())
+    elif args.command == "schedule":
+        sys.exit(cmd_schedule(args))
     else:
         parser.print_help()
         sys.exit(0)
@@ -772,6 +874,46 @@ def _build_parser() -> argparse.ArgumentParser:
         "version",
         help="Print the Lumon version.",
     )
+
+    # schedule
+    p_schedule = sub.add_parser(
+        "schedule",
+        help="Manage scheduled execution of Lumon scripts.",
+        description="Schedule Lumon scripts to run at specific times or on recurring intervals via launchd.",
+    )
+    sched_sub = p_schedule.add_subparsers(dest="schedule_command", metavar="<subcommand>")
+
+    # schedule add
+    p_sched_add = sched_sub.add_parser("add", help="Create a new scheduled job.")
+    p_sched_add.add_argument("file", help="Path to the Lumon script to schedule.")
+    sched_add_group = p_sched_add.add_mutually_exclusive_group(required=True)
+    sched_add_group.add_argument("--at", help="One-time execution (ISO 8601 datetime, e.g. 2026-03-08T09:00).")
+    sched_add_group.add_argument("--every", help="Recurring interval (e.g. 30s, 5m, 1h, 2d).")
+    sched_add_group.add_argument("--cron", help="Cron expression (5 fields, e.g. '0 9 * * *').")
+
+    # schedule list
+    sched_sub.add_parser("list", help="Show all scheduled jobs.")
+
+    # schedule edit
+    p_sched_edit = sched_sub.add_parser("edit", help="Modify an existing job's schedule.")
+    p_sched_edit.add_argument("id", help="Job ID (e.g. sched_01).")
+    sched_edit_group = p_sched_edit.add_mutually_exclusive_group(required=True)
+    sched_edit_group.add_argument("--at", help="One-time execution (ISO 8601 datetime).")
+    sched_edit_group.add_argument("--every", help="Recurring interval (e.g. 30s, 5m, 1h, 2d).")
+    sched_edit_group.add_argument("--cron", help="Cron expression (5 fields).")
+
+    # schedule remove
+    p_sched_remove = sched_sub.add_parser("remove", help="Delete a scheduled job.")
+    p_sched_remove.add_argument("id", help="Job ID (e.g. sched_01).")
+
+    # schedule logs
+    p_sched_logs = sched_sub.add_parser("logs", help="Show execution history for a job.")
+    p_sched_logs.add_argument("id", help="Job ID (e.g. sched_01).")
+    p_sched_logs.add_argument("--limit", type=int, default=10, help="Number of log entries to show (default: 10).")
+
+    # schedule _run (internal — called by launchd)
+    p_sched_run = sched_sub.add_parser("_run", help=argparse.SUPPRESS)
+    p_sched_run.add_argument("id", help="Job ID.")
 
     return parser
 

@@ -70,7 +70,15 @@ Run the script:
 lumon --working-dir sandbox scripts/<task>.lumon
 ```
 
-When the script suspends with `ask` or `spawn`, respond with your judgment. The orchestrator records your responses so the script can be replayed later.
+When the script suspends with `ask` or `spawn`, respond with your judgment. For short responses, use inline `respond '<json>'`. For long responses (~2KB+), write the JSON to a temp file and use `respond --file`:
+
+```bash
+# Write response to temp file, respond, then clean up
+lumon --working-dir sandbox respond --file tmp/response.json
+lumon --working-dir sandbox 'io.delete("tmp/response.json")'
+```
+
+The orchestrator records your responses so the script can be replayed later.
 
 ### If the script fails
 
