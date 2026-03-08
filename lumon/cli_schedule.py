@@ -40,6 +40,11 @@ def cmd_schedule(args: argparse.Namespace) -> int:
         if sched.start_at:
             msg += f" starting {sched.start_at}"
         print(msg)
+        print(
+            "\nNote: macOS may show a \"Background Items Added\" notification.\n"
+            "This is normal — lumon registers a launchd agent to run your script\n"
+            "on schedule. You can manage it in System Settings > General > Login Items."
+        )
         return 0
 
     if sub == "list":

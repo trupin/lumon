@@ -20,7 +20,9 @@ from lumon.scheduler import (
     _log_result,
     _next_id,
     _plist_label,
+    _project_dir,
     _require_deployed_agent,
+    _resolve_claude,
     _run_with_claude,
     _validate_start_at,
     add_schedule,
@@ -35,6 +37,13 @@ from lumon.scheduler import (
     run_job,
     save_schedules,
 )
+
+
+@pytest.fixture(autouse=True)
+def _use_tmp_lumon_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Redirect scheduler storage to tmp_path/.lumon so tests don't touch ~/.lumon."""
+    lumon_home = tmp_path / ".lumon"
+    monkeypatch.setattr("lumon.scheduler.LUMON_HOME", lumon_home)
 
 
 @pytest.fixture()
@@ -460,7 +469,7 @@ class TestLogs:
         assert get_logs(str(tmp_path), "sched_01") == []
 
     def test_get_logs(self, tmp_path: Path) -> None:
-        log_dir = tmp_path / ".lumon" / "logs" / "sched_01"
+        log_dir = _project_dir(str(tmp_path)) / "logs" / "sched_01"
         log_dir.mkdir(parents=True)
         entry = {"timestamp": "2026-01-01T00:00:00", "job_id": "sched_01", "result": {"type": "result", "value": 42}}
         (log_dir / "20260101_000000.json").write_text(json.dumps(entry))
@@ -470,7 +479,7 @@ class TestLogs:
 
     def test_get_logs_malformed(self, tmp_path: Path) -> None:
         """Malformed JSON log files are silently skipped."""
-        log_dir = tmp_path / ".lumon" / "logs" / "sched_01"
+        log_dir = _project_dir(str(tmp_path)) / "logs" / "sched_01"
         log_dir.mkdir(parents=True)
         (log_dir / "20260101_000000.json").write_text("not valid json")
         (log_dir / "20260102_000000.json").write_text('{"valid": true}')
@@ -479,7 +488,7 @@ class TestLogs:
         assert logs[0]["valid"] is True
 
     def test_get_logs_limit(self, tmp_path: Path) -> None:
-        log_dir = tmp_path / ".lumon" / "logs" / "sched_01"
+        log_dir = _project_dir(str(tmp_path)) / "logs" / "sched_01"
         log_dir.mkdir(parents=True)
         for i in range(5):
             entry = {"timestamp": f"2026-01-0{i+1}T00:00:00", "job_id": "sched_01", "result": {"type": "result"}}
@@ -564,6 +573,28 @@ class TestPlist:
         idx = args.index("--working-dir")
         assert args[idx + 1] == "/tmp/project"
 
+    @patch.dict("os.environ", {"PATH": "/usr/local/bin:/usr/bin:/home/user/.local/bin"})
+    def test_plist_includes_path(self) -> None:
+        sched = self._make_schedule()
+        plist = _build_plist(sched)
+        assert "EnvironmentVariables" in plist
+        assert plist["EnvironmentVariables"]["PATH"] == "/usr/local/bin:/usr/bin:/home/user/.local/bin"
+
+
+# ---------------------------------------------------------------------------
+# _resolve_claude
+# ---------------------------------------------------------------------------
+
+
+class TestResolveClaude:
+    @patch("lumon.scheduler.shutil.which", return_value="/usr/local/bin/claude")
+    def test_found(self, _mock_which: MagicMock) -> None:
+        assert _resolve_claude() == "/usr/local/bin/claude"
+
+    @patch("lumon.scheduler.shutil.which", return_value=None)
+    def test_fallback(self, _mock_which: MagicMock) -> None:
+        assert _resolve_claude() == "claude"
+
 
 # ---------------------------------------------------------------------------
 # run_job
@@ -587,7 +618,7 @@ class TestRunJob:
         mock_claude.assert_called_once()
 
         # Verify log was written
-        log_dir = deployed_dir / ".lumon" / "logs" / "sched_01"
+        log_dir = _project_dir(str(deployed_dir)) / "logs" / "sched_01"
         log_files = [f for f in log_dir.glob("*.json") if f.stem not in ("stdout", "stderr")]
         assert len(log_files) == 1
 
@@ -631,45 +662,39 @@ class TestRunJob:
 
 
 class TestRunWithClaude:
+    @patch("lumon.scheduler._resolve_claude", return_value="/usr/local/bin/claude")
     @patch("lumon.scheduler.subprocess.run")
-    def test_success(self, mock_run: MagicMock, tmp_path: Path) -> None:
+    def test_success(self, mock_run: MagicMock, _mock_resolve: MagicMock, tmp_path: Path) -> None:
         sched = Schedule(
             id="sched_01", file="/tmp/test.lumon", schedule_type="every",
             schedule_value="1h", working_dir=str(tmp_path), created_at="2026-01-01",
         )
-        mock_run.return_value = MagicMock(returncode=0, stdout="done", stderr="")
+        mock_run.return_value = MagicMock(returncode=0, stdout="done")
         result = _run_with_claude(sched)
         assert result == {"type": "result", "value": "done"}
+        cmd = mock_run.call_args[0][0]
+        assert cmd[0] == "/usr/local/bin/claude"
+        assert "--verbose" in cmd
 
     @patch("lumon.scheduler.subprocess.run")
-    def test_error(self, mock_run: MagicMock, tmp_path: Path) -> None:
+    def test_error_exit_code(self, mock_run: MagicMock, tmp_path: Path) -> None:
         sched = Schedule(
             id="sched_01", file="/tmp/test.lumon", schedule_type="every",
             schedule_value="1h", working_dir=str(tmp_path), created_at="2026-01-01",
         )
-        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="something went wrong")
+        mock_run.return_value = MagicMock(returncode=1, stdout="")
         result = _run_with_claude(sched)
-        assert result == {"type": "error", "message": "something went wrong"}
+        assert result == {"type": "error", "message": "claude exited with code 1"}
 
     @patch("lumon.scheduler.subprocess.run", side_effect=FileNotFoundError)
-    def test_not_found(self, _mock_run: MagicMock) -> None:
+    def test_not_found(self, _mock_run: MagicMock, tmp_path: Path) -> None:
         sched = Schedule(
             id="sched_01", file="/tmp/test.lumon", schedule_type="every",
-            schedule_value="1h", working_dir="/tmp", created_at="2026-01-01",
+            schedule_value="1h", working_dir=str(tmp_path), created_at="2026-01-01",
         )
         result = _run_with_claude(sched)
         assert result["type"] == "error"
         assert "claude CLI not found" in result["message"]
-
-    @patch("lumon.scheduler.subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="claude", timeout=300))
-    def test_timeout(self, _mock_run: MagicMock) -> None:
-        sched = Schedule(
-            id="sched_01", file="/tmp/test.lumon", schedule_type="every",
-            schedule_value="1h", working_dir="/tmp", created_at="2026-01-01",
-        )
-        result = _run_with_claude(sched)
-        assert result["type"] == "error"
-        assert "timed out" in result["message"]
 
 
 # ---------------------------------------------------------------------------

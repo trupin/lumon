@@ -60,6 +60,11 @@ lumon spec
 | `lumon respond '<json>'` | Resume suspended execution (after ask/spawn) |
 | `lumon respond --file path` | Resume with JSON payload from a file |
 | `lumon deploy <target>` | Deploy Claude Code agent config to a directory |
+| `lumon schedule add <file>` | Schedule a script to run automatically (macOS) |
+| `lumon schedule list` | List all scheduled jobs |
+| `lumon schedule edit <id>` | Change a job's schedule |
+| `lumon schedule remove <id>` | Remove a scheduled job |
+| `lumon schedule logs <id>` | View execution logs for a job |
 | `lumon spec` | Print the language specification |
 
 ## Development

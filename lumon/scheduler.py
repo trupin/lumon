@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import platform
 import plistlib
 import shutil
@@ -18,7 +19,7 @@ from pathlib import Path
 # Data model
 # ---------------------------------------------------------------------------
 
-LUMON_DIR = ".lumon"
+LUMON_HOME = Path.home() / ".lumon"
 SCHEDULES_FILE = "schedules.json"
 LOGS_DIR = "logs"
 
@@ -114,16 +115,26 @@ def parse_at(value: str) -> dict[str, int]:
 # ---------------------------------------------------------------------------
 
 
+def _project_hash(working_dir: str) -> str:
+    """Short hash to scope data per project directory."""
+    return hashlib.sha256(str(Path(working_dir).resolve()).encode()).hexdigest()[:8]
+
+
+def _project_dir(working_dir: str) -> Path:
+    """Return ~/.lumon/<project_hash>/ for the given project."""
+    return LUMON_HOME / _project_hash(working_dir)
+
+
 def _schedules_path(working_dir: str) -> Path:
-    return Path(working_dir) / LUMON_DIR / SCHEDULES_FILE
+    return _project_dir(working_dir) / SCHEDULES_FILE
 
 
 def _logs_path(working_dir: str) -> Path:
-    return Path(working_dir) / LUMON_DIR / LOGS_DIR
+    return _project_dir(working_dir) / LOGS_DIR
 
 
 def load_schedules(working_dir: str) -> list[Schedule]:
-    """Load all schedules from the project's .lumon/schedules.json."""
+    """Load all schedules from ~/.lumon/<project>/schedules.json."""
     path = _schedules_path(working_dir)
     if not path.exists():
         return []
@@ -132,7 +143,7 @@ def load_schedules(working_dir: str) -> list[Schedule]:
 
 
 def save_schedules(working_dir: str, schedules: list[Schedule]) -> None:
-    """Save schedules to the project's .lumon/schedules.json."""
+    """Save schedules to ~/.lumon/<project>/schedules.json."""
     path = _schedules_path(working_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -356,27 +367,37 @@ def _log_result(working_dir: str, job_id: str, schedule: Schedule, result: dict)
     )
 
 
+def _resolve_claude() -> str:
+    """Return the absolute path to the claude CLI, or 'claude' as fallback."""
+    return shutil.which("claude") or "claude"
+
+
 def _run_with_claude(schedule: Schedule) -> dict:
-    """Run a Lumon script via the claude CLI subprocess."""
+    """Run a Lumon script via the claude CLI subprocess.
+
+    Streams stderr to the job's stderr.log for live debugging.
+    No timeout — Claude runs until completion.
+    """
+    stderr_path = _logs_path(schedule.working_dir) / schedule.id / "stderr.log"
+    stderr_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        result = subprocess.run(
-            [
-                "claude", "--print",
-                f"Run this Lumon script and handle all ask/spawn prompts: {schedule.file}",
-            ],
-            capture_output=True,
-            text=True,
-            cwd=schedule.working_dir,
-            timeout=300,
-            check=False,
-        )
-        if result.returncode != 0 and result.stderr.strip():
-            return {"type": "error", "message": result.stderr.strip()}
+        with open(stderr_path, "a", encoding="utf-8") as stderr_file:
+            result = subprocess.run(
+                [
+                    _resolve_claude(), "--print", "--verbose",
+                    f"Run this Lumon script and handle all ask/spawn prompts: {schedule.file}",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=stderr_file,
+                text=True,
+                cwd=schedule.working_dir,
+                check=False,
+            )
+        if result.returncode != 0:
+            return {"type": "error", "message": f"claude exited with code {result.returncode}"}
         return {"type": "result", "value": result.stdout.strip()}
     except FileNotFoundError:
         return {"type": "error", "message": "claude CLI not found — install it to run scheduled scripts"}
-    except subprocess.TimeoutExpired:
-        return {"type": "error", "message": "claude subprocess timed out (300s)"}
 
 
 # ---------------------------------------------------------------------------
@@ -386,8 +407,7 @@ def _run_with_claude(schedule: Schedule) -> dict:
 
 def _plist_label(schedule: Schedule) -> str:
     """Generate a unique launchd label for a schedule."""
-    project_hash = hashlib.sha256(schedule.working_dir.encode()).hexdigest()[:8]
-    return f"com.lumon.{project_hash}.{schedule.id}"
+    return f"com.lumon.{_project_hash(schedule.working_dir)}.{schedule.id}"
 
 
 def _plist_path(schedule: Schedule) -> Path:
@@ -416,6 +436,9 @@ def _build_plist(schedule: Schedule) -> dict:
         ],
         "StandardOutPath": str(_logs_path(schedule.working_dir) / schedule.id / "stdout.log"),
         "StandardErrorPath": str(_logs_path(schedule.working_dir) / schedule.id / "stderr.log"),
+        "EnvironmentVariables": {
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin:/usr/sbin:/sbin"),
+        },
     }
 
     if schedule.schedule_type == "every":
