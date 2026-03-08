@@ -162,6 +162,29 @@ def _find_schedule(schedules: list[Schedule], job_id: str) -> Schedule:
     raise ValueError(f"schedule not found: {job_id}")
 
 
+_DEPLOY_REQUIRED_FILES = (
+    "CLAUDE.md",
+    ".claude/settings.json",
+    ".claude/hooks/sandbox-guard.py",
+)
+
+
+def _require_deployed_agent(working_dir: str) -> None:
+    """Ensure the working directory has a fully deployed Lumon agent.
+
+    Checks for CLAUDE.md, settings.json, and the sandbox-guard hook.
+    All three are required for safe scheduled execution.
+    """
+    abs_dir = str(Path(working_dir).resolve())
+    missing = [f for f in _DEPLOY_REQUIRED_FILES if not (Path(abs_dir) / f).exists()]
+    if missing:
+        raise FileNotFoundError(
+            f"incomplete Lumon agent deployment in {abs_dir} "
+            f"(missing: {', '.join(missing)}) "
+            f"— run 'lumon deploy {abs_dir}' first"
+        )
+
+
 def _validate_start_at(start_at: str) -> None:
     """Validate an ISO 8601 start_at string."""
     if start_at:
@@ -204,6 +227,7 @@ def add_schedule(
     if not Path(abs_file).exists():
         raise FileNotFoundError(f"script not found: {file}")
 
+    _require_deployed_agent(working_dir)
     _validate_schedule_value(schedule_type, schedule_value)
     _validate_start_at(start_at)
 
@@ -290,6 +314,13 @@ def run_job(working_dir: str, job_id: str) -> int:
         found = _find_schedule(schedules, job_id)
     except ValueError:
         print(f"error: schedule not found: {job_id}", file=sys.stderr)
+        return 1
+
+    # Verify the agent is deployed (CLAUDE.md + settings + sandbox-guard hook)
+    try:
+        _require_deployed_agent(found.working_dir)
+    except FileNotFoundError as e:
+        print(f"error: {e}", file=sys.stderr)
         return 1
 
     # Skip if before the configured start time

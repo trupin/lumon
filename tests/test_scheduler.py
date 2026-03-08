@@ -20,6 +20,7 @@ from lumon.scheduler import (
     _log_result,
     _next_id,
     _plist_label,
+    _require_deployed_agent,
     _run_with_claude,
     _validate_start_at,
     add_schedule,
@@ -34,6 +35,17 @@ from lumon.scheduler import (
     run_job,
     save_schedules,
 )
+
+
+@pytest.fixture()
+def deployed_dir(tmp_path: Path) -> Path:
+    """Create a tmp_path with full agent deployment (CLAUDE.md + settings + hook)."""
+    (tmp_path / "CLAUDE.md").write_text("# Deployed agent")
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "settings.json").write_text("{}")
+    (tmp_path / ".claude" / "hooks").mkdir()
+    (tmp_path / ".claude" / "hooks" / "sandbox-guard.py").write_text("# hook")
+    return tmp_path
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +199,44 @@ class TestFindSchedule:
 
 
 # ---------------------------------------------------------------------------
+# _require_deployed_agent
+# ---------------------------------------------------------------------------
+
+
+class TestRequireDeployedAgent:
+    def test_fully_deployed(self, deployed_dir: Path) -> None:
+        _require_deployed_agent(str(deployed_dir))  # should not raise
+
+    def test_empty_dir(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError, match="incomplete Lumon agent deployment"):
+            _require_deployed_agent(str(tmp_path))
+
+    def test_missing_hook(self, tmp_path: Path) -> None:
+        """CLAUDE.md + settings but no sandbox-guard hook → fails."""
+        (tmp_path / "CLAUDE.md").write_text("# Agent")
+        (tmp_path / ".claude").mkdir()
+        (tmp_path / ".claude" / "settings.json").write_text("{}")
+        with pytest.raises(FileNotFoundError, match="sandbox-guard.py"):
+            _require_deployed_agent(str(tmp_path))
+
+    def test_missing_settings(self, tmp_path: Path) -> None:
+        """CLAUDE.md + hook but no settings.json → fails."""
+        (tmp_path / "CLAUDE.md").write_text("# Agent")
+        (tmp_path / ".claude" / "hooks").mkdir(parents=True)
+        (tmp_path / ".claude" / "hooks" / "sandbox-guard.py").write_text("# hook")
+        with pytest.raises(FileNotFoundError, match="settings.json"):
+            _require_deployed_agent(str(tmp_path))
+
+    @patch("lumon.scheduler.platform.system", return_value="Darwin")
+    def test_add_schedule_rejects_undeployed(self, _mock_sys: MagicMock, tmp_path: Path) -> None:
+        """add_schedule fails if the working dir has no deployed agent."""
+        script = tmp_path / "job.lumon"
+        script.write_text("return 42")
+        with pytest.raises(FileNotFoundError, match="incomplete Lumon agent deployment"):
+            add_schedule(str(tmp_path), str(script), "every", "1h")
+
+
+# ---------------------------------------------------------------------------
 # _validate_start_at
 # ---------------------------------------------------------------------------
 
@@ -225,17 +275,17 @@ class TestScheduleCRUD:
 
     @patch("lumon.scheduler.platform.system", return_value="Darwin")
     @patch("lumon.scheduler._install_launchd")
-    def test_add_schedule(self, mock_install: MagicMock, _mock_sys: MagicMock, tmp_path: Path) -> None:
-        script = tmp_path / "job.lumon"
+    def test_add_schedule(self, mock_install: MagicMock, _mock_sys: MagicMock, deployed_dir: Path) -> None:
+        script = deployed_dir / "job.lumon"
         script.write_text("return 42")
-        sched = add_schedule(str(tmp_path), str(script), "every", "1h")
+        sched = add_schedule(str(deployed_dir), str(script), "every", "1h")
         assert sched.id == "sched_01"
         assert sched.schedule_type == "every"
         assert sched.schedule_value == "1h"
         mock_install.assert_called_once()
 
         # Verify it was persisted
-        loaded = load_schedules(str(tmp_path))
+        loaded = load_schedules(str(deployed_dir))
         assert len(loaded) == 1
 
     @patch("lumon.scheduler.platform.system", return_value="Linux")
@@ -247,9 +297,9 @@ class TestScheduleCRUD:
 
     @patch("lumon.scheduler.platform.system", return_value="Darwin")
     @patch("lumon.scheduler._install_launchd")
-    def test_add_schedule_file_not_found(self, _mock_install: MagicMock, _mock_sys: MagicMock, tmp_path: Path) -> None:
+    def test_add_schedule_file_not_found(self, _mock_install: MagicMock, _mock_sys: MagicMock, deployed_dir: Path) -> None:
         with pytest.raises(FileNotFoundError, match="script not found"):
-            add_schedule(str(tmp_path), str(tmp_path / "nonexistent.lumon"), "every", "1h")
+            add_schedule(str(deployed_dir), str(deployed_dir / "nonexistent.lumon"), "every", "1h")
 
     @patch("lumon.scheduler._uninstall_launchd")
     def test_remove_schedule(self, mock_uninstall: MagicMock, tmp_path: Path) -> None:
@@ -288,11 +338,11 @@ class TestScheduleCRUD:
 
     @patch("lumon.scheduler.platform.system", return_value="Darwin")
     @patch("lumon.scheduler._install_launchd")
-    def test_add_unknown_type(self, _mock_install: MagicMock, _mock_sys: MagicMock, tmp_path: Path) -> None:
-        script = tmp_path / "job.lumon"
+    def test_add_unknown_type(self, _mock_install: MagicMock, _mock_sys: MagicMock, deployed_dir: Path) -> None:
+        script = deployed_dir / "job.lumon"
         script.write_text("return 42")
         with pytest.raises(ValueError, match="unknown schedule type"):
-            add_schedule(str(tmp_path), str(script), "invalid", "1h")
+            add_schedule(str(deployed_dir), str(script), "invalid", "1h")
 
     def test_edit_unknown_type(self, tmp_path: Path) -> None:
         sched = Schedule(
@@ -323,21 +373,21 @@ class TestScheduleCRUD:
 class TestStartAt:
     @patch("lumon.scheduler.platform.system", return_value="Darwin")
     @patch("lumon.scheduler._install_launchd")
-    def test_add_with_start_at(self, _mock_install: MagicMock, _mock_sys: MagicMock, tmp_path: Path) -> None:
-        script = tmp_path / "job.lumon"
+    def test_add_with_start_at(self, _mock_install: MagicMock, _mock_sys: MagicMock, deployed_dir: Path) -> None:
+        script = deployed_dir / "job.lumon"
         script.write_text("return 42")
-        sched = add_schedule(str(tmp_path), str(script), "every", "1h", start_at="2026-06-01T09:00")
+        sched = add_schedule(str(deployed_dir), str(script), "every", "1h", start_at="2026-06-01T09:00")
         assert sched.start_at == "2026-06-01T09:00"
-        loaded = load_schedules(str(tmp_path))
+        loaded = load_schedules(str(deployed_dir))
         assert loaded[0].start_at == "2026-06-01T09:00"
 
     @patch("lumon.scheduler.platform.system", return_value="Darwin")
     @patch("lumon.scheduler._install_launchd")
-    def test_add_invalid_start_at(self, _mock_install: MagicMock, _mock_sys: MagicMock, tmp_path: Path) -> None:
-        script = tmp_path / "job.lumon"
+    def test_add_invalid_start_at(self, _mock_install: MagicMock, _mock_sys: MagicMock, deployed_dir: Path) -> None:
+        script = deployed_dir / "job.lumon"
         script.write_text("return 42")
         with pytest.raises(ValueError, match="invalid start time"):
-            add_schedule(str(tmp_path), str(script), "every", "1h", start_at="not-a-date")
+            add_schedule(str(deployed_dir), str(script), "every", "1h", start_at="not-a-date")
 
     @patch("lumon.scheduler._uninstall_launchd")
     @patch("lumon.scheduler._install_launchd")
@@ -367,35 +417,35 @@ class TestStartAt:
             edit_schedule(str(tmp_path), "sched_01", "every", "1h", start_at="not-a-date")
 
     @patch("lumon.scheduler._run_with_claude")
-    def test_run_job_skips_before_start(self, mock_claude: MagicMock, tmp_path: Path) -> None:
-        script = tmp_path / "job.lumon"
+    def test_run_job_skips_before_start(self, mock_claude: MagicMock, deployed_dir: Path) -> None:
+        script = deployed_dir / "job.lumon"
         script.write_text("return 42")
         sched = Schedule(
             id="sched_01", file=str(script), schedule_type="every",
-            schedule_value="1h", working_dir=str(tmp_path), created_at="2026-01-01",
+            schedule_value="1h", working_dir=str(deployed_dir), created_at="2026-01-01",
             start_at="2099-01-01T00:00",  # far in the future
         )
-        save_schedules(str(tmp_path), [sched])
-        exit_code = run_job(str(tmp_path), "sched_01")
+        save_schedules(str(deployed_dir), [sched])
+        exit_code = run_job(str(deployed_dir), "sched_01")
         assert exit_code == 0
         mock_claude.assert_not_called()
         # Verify a "skipped" log was written
-        logs = get_logs(str(tmp_path), "sched_01")
+        logs = get_logs(str(deployed_dir), "sched_01")
         assert len(logs) == 1
         assert logs[0]["result"]["type"] == "skipped"
 
     @patch("lumon.scheduler._run_with_claude")
-    def test_run_job_runs_after_start(self, mock_claude: MagicMock, tmp_path: Path) -> None:
-        script = tmp_path / "job.lumon"
+    def test_run_job_runs_after_start(self, mock_claude: MagicMock, deployed_dir: Path) -> None:
+        script = deployed_dir / "job.lumon"
         script.write_text("return 42")
         sched = Schedule(
             id="sched_01", file=str(script), schedule_type="every",
-            schedule_value="1h", working_dir=str(tmp_path), created_at="2026-01-01",
+            schedule_value="1h", working_dir=str(deployed_dir), created_at="2026-01-01",
             start_at="2020-01-01T00:00",  # in the past
         )
-        save_schedules(str(tmp_path), [sched])
+        save_schedules(str(deployed_dir), [sched])
         mock_claude.return_value = {"type": "result", "value": "done"}
-        exit_code = run_job(str(tmp_path), "sched_01")
+        exit_code = run_job(str(deployed_dir), "sched_01")
         assert exit_code == 0
         mock_claude.assert_called_once()
 
@@ -522,22 +572,22 @@ class TestPlist:
 
 class TestRunJob:
     @patch("lumon.scheduler._run_with_claude")
-    def test_run_job_success(self, mock_claude: MagicMock, tmp_path: Path) -> None:
-        script = tmp_path / "job.lumon"
+    def test_run_job_success(self, mock_claude: MagicMock, deployed_dir: Path) -> None:
+        script = deployed_dir / "job.lumon"
         script.write_text("return 42")
         sched = Schedule(
             id="sched_01", file=str(script), schedule_type="every",
-            schedule_value="1h", working_dir=str(tmp_path), created_at="2026-01-01",
+            schedule_value="1h", working_dir=str(deployed_dir), created_at="2026-01-01",
         )
-        save_schedules(str(tmp_path), [sched])
+        save_schedules(str(deployed_dir), [sched])
 
         mock_claude.return_value = {"type": "result", "value": "42"}
-        exit_code = run_job(str(tmp_path), "sched_01")
+        exit_code = run_job(str(deployed_dir), "sched_01")
         assert exit_code == 0
         mock_claude.assert_called_once()
 
         # Verify log was written
-        log_dir = tmp_path / ".lumon" / "logs" / "sched_01"
+        log_dir = deployed_dir / ".lumon" / "logs" / "sched_01"
         log_files = [f for f in log_dir.glob("*.json") if f.stem not in ("stdout", "stderr")]
         assert len(log_files) == 1
 
@@ -547,18 +597,31 @@ class TestRunJob:
         assert exit_code == 1
         assert "schedule not found" in capsys.readouterr().err
 
-    @patch("lumon.scheduler._run_with_claude")
-    def test_run_job_error_result(self, mock_claude: MagicMock, tmp_path: Path) -> None:
-        script = tmp_path / "job.lumon"
-        script.write_text("fail")
+    def test_run_job_not_deployed(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """run_job fails if the working dir has no deployed agent."""
         sched = Schedule(
-            id="sched_01", file=str(script), schedule_type="every",
+            id="sched_01", file="job.lumon", schedule_type="every",
             schedule_value="1h", working_dir=str(tmp_path), created_at="2026-01-01",
         )
         save_schedules(str(tmp_path), [sched])
+        exit_code = run_job(str(tmp_path), "sched_01")
+        assert exit_code == 1
+        err = capsys.readouterr().err
+        assert "incomplete Lumon agent deployment" in err
+        assert "lumon deploy" in err
+
+    @patch("lumon.scheduler._run_with_claude")
+    def test_run_job_error_result(self, mock_claude: MagicMock, deployed_dir: Path) -> None:
+        script = deployed_dir / "job.lumon"
+        script.write_text("fail")
+        sched = Schedule(
+            id="sched_01", file=str(script), schedule_type="every",
+            schedule_value="1h", working_dir=str(deployed_dir), created_at="2026-01-01",
+        )
+        save_schedules(str(deployed_dir), [sched])
 
         mock_claude.return_value = {"type": "error", "message": "something broke"}
-        exit_code = run_job(str(tmp_path), "sched_01")
+        exit_code = run_job(str(deployed_dir), "sched_01")
         assert exit_code == 1
 
 

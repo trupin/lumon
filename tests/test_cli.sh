@@ -889,11 +889,22 @@ assert_eq "schedule: logs empty" \
     "No logs for sched_99." \
     "$(cd "$SCHED_ROOT" && run schedule logs sched_99)"
 
-# Create a test script and schedule it, then run it via _run
-# (claude CLI won't be available, so _run will log a graceful error)
+# add without deployed agent → error
 cat > "$SCHED_ROOT/job.lumon" <<'LUMON'
 return 42
 LUMON
+
+assert_contains "schedule: add rejects undeployed dir" \
+    "incomplete Lumon agent deployment" \
+    "$(cd "$SCHED_ROOT" && run schedule add job.lumon --every 1h 2>&1 || true)"
+
+# Deploy the agent (CLAUDE.md + settings + sandbox-guard hook)
+cat > "$SCHED_ROOT/CLAUDE.md" <<'EOF'
+# Test agent
+EOF
+mkdir -p "$SCHED_ROOT/.claude/hooks"
+echo '{}' > "$SCHED_ROOT/.claude/settings.json"
+echo '# hook' > "$SCHED_ROOT/.claude/hooks/sandbox-guard.py"
 
 # add → creates schedule and writes schedules.json
 # (launchctl will be called but may fail in CI — we only check the output message)
