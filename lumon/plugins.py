@@ -211,7 +211,7 @@ def validate_contracts(
                         f"expected number, got {type(value).__name__}"
                     )
                 lo, hi = contract
-                if not lo <= value <= hi:
+                if value < lo or value > hi:
                     raise LumonError(
                         f"Contract violation in {name}: parameter '{param.name}' "
                         f"value {value} outside range [{lo}, {hi}]"

@@ -31,7 +31,7 @@ class Schedule:
     schedule_value: str
     working_dir: str
     created_at: str
-    start_at: str = ""  # ISO 8601 datetime — delays first run until this time
+    start_at: str = ""  # ISO 8601 datetime (naive) — delays first run until this time
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +98,9 @@ def parse_at(value: str) -> dict[str, int]:
     try:
         dt = datetime.fromisoformat(value)
     except ValueError:
-        raise ValueError(f"invalid datetime: {value} — use ISO 8601 format (e.g. 2026-03-08T09:00)") from None
+        raise ValueError(
+            f"invalid datetime: {value} — use ISO 8601 format (e.g. 2026-03-08T09:00)"
+        ) from None
     return {
         "Month": dt.month,
         "Day": dt.day,
@@ -152,22 +154,28 @@ def _next_id(schedules: list[Schedule]) -> str:
     return f"sched_{max_num + 1:02d}"
 
 
-def add_schedule(
-    working_dir: str,
-    file: str,
-    schedule_type: str,
-    schedule_value: str,
-    start_at: str = "",
-) -> Schedule:
-    """Create a new scheduled job and install the launchd plist."""
-    if platform.system() != "Darwin":
-        raise RuntimeError("lumon schedule is only supported on macOS (launchd) — Linux support is not yet available")
+def _find_schedule(schedules: list[Schedule], job_id: str) -> Schedule:
+    """Find a schedule by ID or raise ValueError."""
+    for s in schedules:
+        if s.id == job_id:
+            return s
+    raise ValueError(f"schedule not found: {job_id}")
 
-    abs_file = str(Path(file).resolve())
-    if not Path(abs_file).exists():
-        raise FileNotFoundError(f"script not found: {file}")
 
-    # Validate the schedule value
+def _validate_start_at(start_at: str) -> None:
+    """Validate an ISO 8601 start_at string."""
+    if start_at:
+        try:
+            datetime.fromisoformat(start_at)
+        except ValueError:
+            raise ValueError(
+                f"invalid start time: {start_at} — use ISO 8601 format "
+                f"(e.g. 2026-03-08T09:00)"
+            ) from None
+
+
+def _validate_schedule_value(schedule_type: str, schedule_value: str) -> None:
+    """Validate a schedule type and value pair."""
     if schedule_type == "every":
         parse_interval(schedule_value)
     elif schedule_type == "cron":
@@ -177,12 +185,27 @@ def add_schedule(
     else:
         raise ValueError(f"unknown schedule type: {schedule_type}")
 
-    # Validate start_at if provided
-    if start_at:
-        try:
-            datetime.fromisoformat(start_at)
-        except ValueError:
-            raise ValueError(f"invalid start time: {start_at} — use ISO 8601 format (e.g. 2026-03-08T09:00)") from None
+
+def add_schedule(
+    working_dir: str,
+    file: str,
+    schedule_type: str,
+    schedule_value: str,
+    start_at: str = "",
+) -> Schedule:
+    """Create a new scheduled job and install the launchd plist."""
+    if platform.system() != "Darwin":
+        raise RuntimeError(
+            "lumon schedule is only supported on macOS (launchd) "
+            "— Linux support is not yet available"
+        )
+
+    abs_file = str(Path(file).resolve())
+    if not Path(abs_file).exists():
+        raise FileNotFoundError(f"script not found: {file}")
+
+    _validate_schedule_value(schedule_type, schedule_value)
+    _validate_start_at(start_at)
 
     schedules = load_schedules(working_dir)
     job_id = _next_id(schedules)
@@ -206,14 +229,7 @@ def add_schedule(
 def remove_schedule(working_dir: str, job_id: str) -> None:
     """Remove a scheduled job and unload its launchd plist."""
     schedules = load_schedules(working_dir)
-    found = None
-    for s in schedules:
-        if s.id == job_id:
-            found = s
-            break
-    if found is None:
-        raise ValueError(f"schedule not found: {job_id}")
-
+    found = _find_schedule(schedules, job_id)
     _uninstall_launchd(found)
     schedules = [s for s in schedules if s.id != job_id]
     save_schedules(working_dir, schedules)
@@ -227,30 +243,11 @@ def edit_schedule(
     start_at: str = "",
 ) -> Schedule:
     """Update an existing job's schedule and reinstall its plist."""
-    # Validate the new schedule value
-    if schedule_type == "every":
-        parse_interval(schedule_value)
-    elif schedule_type == "cron":
-        parse_cron(schedule_value)
-    elif schedule_type == "once":
-        parse_at(schedule_value)
-    else:
-        raise ValueError(f"unknown schedule type: {schedule_type}")
-
-    if start_at:
-        try:
-            datetime.fromisoformat(start_at)
-        except ValueError:
-            raise ValueError(f"invalid start time: {start_at}") from None
+    _validate_schedule_value(schedule_type, schedule_value)
+    _validate_start_at(start_at)
 
     schedules = load_schedules(working_dir)
-    found = None
-    for s in schedules:
-        if s.id == job_id:
-            found = s
-            break
-    if found is None:
-        raise ValueError(f"schedule not found: {job_id}")
+    found = _find_schedule(schedules, job_id)
 
     _uninstall_launchd(found)
     found.schedule_type = schedule_type
@@ -289,18 +286,16 @@ def get_logs(working_dir: str, job_id: str, limit: int = 10) -> list[dict]:
 def run_job(working_dir: str, job_id: str) -> int:
     """Execute a scheduled job via claude and log the result."""
     schedules = load_schedules(working_dir)
-    found = None
-    for s in schedules:
-        if s.id == job_id:
-            found = s
-            break
-    if found is None:
+    try:
+        found = _find_schedule(schedules, job_id)
+    except ValueError:
         print(f"error: schedule not found: {job_id}", file=sys.stderr)
         return 1
 
     # Skip if before the configured start time
     if found.start_at:
-        start_dt = datetime.fromisoformat(found.start_at)
+        # Strip timezone — datetime.now() is naive, so comparison must be too
+        start_dt = datetime.fromisoformat(found.start_at).replace(tzinfo=None)
         if datetime.now() < start_dt:
             result = {"type": "skipped", "reason": f"before start time ({found.start_at})"}
             _log_result(working_dir, job_id, found, result)
@@ -334,7 +329,10 @@ def _run_with_claude(schedule: Schedule) -> dict:
     """Run a Lumon script via the claude CLI subprocess."""
     try:
         result = subprocess.run(
-            ["claude", "--print", f"Run this Lumon script and handle all ask/spawn prompts: {schedule.file}"],
+            [
+                "claude", "--print",
+                f"Run this Lumon script and handle all ask/spawn prompts: {schedule.file}",
+            ],
             capture_output=True,
             text=True,
             cwd=schedule.working_dir,

@@ -863,6 +863,85 @@ assert_contains "namespace conflict: browse index detects conflict" \
     "$(cd "$CONFLICT_ROOT/sandbox" && run browse 2>&1 || true)"
 
 # ---------------------------------------------------------------------------
+# Schedule subcommand
+# ---------------------------------------------------------------------------
+
+SCHED_ROOT="$TMPDIR_ROOT/sched_project"
+mkdir -p "$SCHED_ROOT"
+
+# No subcommand → shows help/examples
+assert_contains "schedule: no subcommand shows help" \
+    "Examples:" \
+    "$(cd "$SCHED_ROOT" && run schedule 2>&1)"
+
+# list on empty project → "No scheduled jobs."
+assert_eq "schedule: list empty" \
+    "No scheduled jobs." \
+    "$(cd "$SCHED_ROOT" && run schedule list)"
+
+# _run with nonexistent job → error
+assert_contains "schedule: _run not found" \
+    "schedule not found" \
+    "$(cd "$SCHED_ROOT" && run schedule _run sched_99 2>&1 || true)"
+
+# logs for nonexistent job → "No logs"
+assert_eq "schedule: logs empty" \
+    "No logs for sched_99." \
+    "$(cd "$SCHED_ROOT" && run schedule logs sched_99)"
+
+# Create a test script and schedule it, then run it via _run
+# (claude CLI won't be available, so _run will log a graceful error)
+cat > "$SCHED_ROOT/job.lumon" <<'LUMON'
+return 42
+LUMON
+
+# add → creates schedule and writes schedules.json
+# (launchctl will be called but may fail in CI — we only check the output message)
+SCHED_OUT="$(cd "$SCHED_ROOT" && run schedule add job.lumon --every 1h 2>&1 || true)"
+assert_contains "schedule: add creates job" \
+    "Created sched_01" \
+    "$SCHED_OUT"
+
+# list → shows the job we just created
+LIST_OUT="$(cd "$SCHED_ROOT" && run schedule list 2>&1 || true)"
+assert_contains "schedule: list shows job" \
+    "sched_01" \
+    "$LIST_OUT"
+assert_contains "schedule: list shows schedule type" \
+    "every" \
+    "$LIST_OUT"
+
+# _run the job → will produce a result (error if claude CLI unavailable/restricted)
+# but should still create a log entry
+RUN_OUT="$(cd "$SCHED_ROOT" && run schedule _run sched_01 2>&1 || true)"
+assert_contains "schedule: _run produces json output" \
+    '"type"' \
+    "$RUN_OUT"
+
+# logs → should now have an entry from the _run
+LOGS_OUT="$(cd "$SCHED_ROOT" && run schedule logs sched_01 2>&1 || true)"
+assert_contains "schedule: logs shows entry after _run" \
+    "error" \
+    "$LOGS_OUT"
+
+# edit → change schedule
+EDIT_OUT="$(cd "$SCHED_ROOT" && run schedule edit sched_01 --cron '0 9 * * *' 2>&1 || true)"
+assert_contains "schedule: edit updates job" \
+    "Updated sched_01" \
+    "$EDIT_OUT"
+
+# remove → delete the schedule
+REMOVE_OUT="$(cd "$SCHED_ROOT" && run schedule remove sched_01 2>&1 || true)"
+assert_eq "schedule: remove deletes job" \
+    "Removed sched_01" \
+    "$REMOVE_OUT"
+
+# list after remove → empty again
+assert_eq "schedule: list empty after remove" \
+    "No scheduled jobs." \
+    "$(cd "$SCHED_ROOT" && run schedule list)"
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 
