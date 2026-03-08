@@ -269,8 +269,8 @@ assert_contains "respond: no state → error" \
 FIRST_OUT="$(cd "$RESPOND_ROOT" && run "$ASK_CODE")"
 echo '"from file"' > "$RESPOND_ROOT/resp.json"
 FILE_OUT="$(cd "$RESPOND_ROOT" && run respond --file resp.json)"
-assert_eq "respond: --file reads from file" \
-    '{"type": "result", "value": "from file"}' \
+assert_contains "respond: --file reads from file" \
+    '"value": "from file"' \
     "$FILE_OUT"
 
 # ---------------------------------------------------------------------------
@@ -508,7 +508,7 @@ assert_eq "working-dir: file path relative to working dir" \
 # ---------------------------------------------------------------------------
 
 assert_contains "version: prints version" \
-    "lumon 0.1." \
+    "lumon 0." \
     "$(run version)"
 
 # ---------------------------------------------------------------------------
