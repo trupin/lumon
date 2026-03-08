@@ -13,9 +13,15 @@ Open a pull request for the current session's work:
    - Run `git diff main...HEAD --stat` to see overall changes
    - Check if remote branch exists and is up to date
 
-2. **Push if needed:** `git push -u origin HEAD`
+2. **Rename branch if needed:** If the current branch name doesn't match the session's work (e.g. a generic name like `feat/interpreter-implementation` when the PR is about a specific feature like scheduling), rename it to something that fits the PR content before pushing:
+   ```bash
+   git branch -m <old-name> <new-name>
+   ```
+   Use the standard prefixes: `feat/...`, `fix/...`, `refactor/...`, etc.
 
-3. **Create the PR** using `gh pr create`:
+3. **Push if needed:** `git push -u origin HEAD`
+
+4. **Create the PR** using `gh pr create`:
    - Title: short summary of the session's work (≤ 70 chars)
    - Body format:
      ```
@@ -30,6 +36,6 @@ Open a pull request for the current session's work:
      🤖 Generated with [Claude Code](https://claude.com/claude-code)
      ```
 
-4. **Report** the PR URL when done.
+5. **Report** the PR URL when done.
 
 If $ARGUMENTS is provided, use it as guidance for the PR title/description.

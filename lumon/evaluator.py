@@ -122,7 +122,7 @@ def eval_node(node: object, env: Environment) -> object:
         case IfStatement(condition=cond, body=body, else_body=else_body):
             if is_truthy(eval_node(cond, env)):
                 return eval_node(body, env)
-            elif else_body is not None:
+            if else_body is not None:
                 return eval_node(else_body, env)
             return None
         case MatchExpr():
@@ -664,16 +664,15 @@ def _match_pattern(pattern: object, value: object) -> dict[str, object] | None:
                     bindings.update(result)
                 bindings[rest] = value[len(elts) :]
                 return bindings
-            else:
-                if len(value) != len(elts):
+            if len(value) != len(elts):
+                return None
+            bindings = {}
+            for i, pat in enumerate(elts):
+                result = _match_pattern(pat, value[i])
+                if result is None:
                     return None
-                bindings = {}
-                for i, pat in enumerate(elts):
-                    result = _match_pattern(pat, value[i])
-                    if result is None:
-                        return None
-                    bindings.update(result)
-                return bindings
+                bindings.update(result)
+            return bindings
         case _:
             return None
 

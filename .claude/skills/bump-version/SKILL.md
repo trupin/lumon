@@ -46,3 +46,9 @@ Bump the version in `lumon/__init__.py` based on the nature of changes since the
    )"
    ```
    Replace the version numbers in the message with the actual old and new versions.
+
+9. **Install the new version** globally so `lumon` CLI reflects the bump:
+   ```bash
+   uv tool install . --reinstall
+   ```
+   Then verify with `lumon version` — it should print the new version.

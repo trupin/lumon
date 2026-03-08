@@ -31,6 +31,7 @@ class Schedule:
     schedule_value: str
     working_dir: str
     created_at: str
+    start_at: str = ""  # ISO 8601 datetime — delays first run until this time
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +157,7 @@ def add_schedule(
     file: str,
     schedule_type: str,
     schedule_value: str,
+    start_at: str = "",
 ) -> Schedule:
     """Create a new scheduled job and install the launchd plist."""
     if platform.system() != "Darwin":
@@ -175,6 +177,13 @@ def add_schedule(
     else:
         raise ValueError(f"unknown schedule type: {schedule_type}")
 
+    # Validate start_at if provided
+    if start_at:
+        try:
+            datetime.fromisoformat(start_at)
+        except ValueError:
+            raise ValueError(f"invalid start time: {start_at} — use ISO 8601 format (e.g. 2026-03-08T09:00)") from None
+
     schedules = load_schedules(working_dir)
     job_id = _next_id(schedules)
     abs_working_dir = str(Path(working_dir).resolve())
@@ -186,6 +195,7 @@ def add_schedule(
         schedule_value=schedule_value,
         working_dir=abs_working_dir,
         created_at=datetime.now().isoformat(timespec="seconds"),
+        start_at=start_at,
     )
     schedules.append(sched)
     save_schedules(working_dir, schedules)
@@ -214,6 +224,7 @@ def edit_schedule(
     job_id: str,
     schedule_type: str,
     schedule_value: str,
+    start_at: str = "",
 ) -> Schedule:
     """Update an existing job's schedule and reinstall its plist."""
     # Validate the new schedule value
@@ -225,6 +236,12 @@ def edit_schedule(
         parse_at(schedule_value)
     else:
         raise ValueError(f"unknown schedule type: {schedule_type}")
+
+    if start_at:
+        try:
+            datetime.fromisoformat(start_at)
+        except ValueError:
+            raise ValueError(f"invalid start time: {start_at}") from None
 
     schedules = load_schedules(working_dir)
     found = None
@@ -238,6 +255,7 @@ def edit_schedule(
     _uninstall_launchd(found)
     found.schedule_type = schedule_type
     found.schedule_value = schedule_value
+    found.start_at = start_at
     save_schedules(working_dir, schedules)
     _install_launchd(found)
     return found
@@ -280,27 +298,36 @@ def run_job(working_dir: str, job_id: str) -> int:
         print(f"error: schedule not found: {job_id}", file=sys.stderr)
         return 1
 
-    result = _run_with_claude(found)
+    # Skip if before the configured start time
+    if found.start_at:
+        start_dt = datetime.fromisoformat(found.start_at)
+        if datetime.now() < start_dt:
+            result = {"type": "skipped", "reason": f"before start time ({found.start_at})"}
+            _log_result(working_dir, job_id, found, result)
+            return 0
 
-    # Log the result
+    result = _run_with_claude(found)
+    _log_result(working_dir, job_id, found, result)
+    print(json.dumps(result, ensure_ascii=False))
+    return 0 if result.get("type") != "error" else 1
+
+
+def _log_result(working_dir: str, job_id: str, schedule: Schedule, result: dict) -> None:
+    """Write a log entry for a job execution."""
     now = datetime.now()
-    timestamp = now.strftime("%Y%m%d_%H%M%S")
     log_dir = _logs_path(working_dir) / job_id
     log_dir.mkdir(parents=True, exist_ok=True)
     log_entry = {
         "timestamp": now.isoformat(timespec="seconds"),
         "job_id": job_id,
-        "file": found.file,
+        "file": schedule.file,
         "result": result,
     }
-    log_file = log_dir / f"{timestamp}.json"
+    log_file = log_dir / f"{now.strftime('%Y%m%d_%H%M%S')}.json"
     log_file.write_text(
         json.dumps(log_entry, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
-
-    print(json.dumps(result, ensure_ascii=False))
-    return 0 if result.get("type") != "error" else 1
 
 
 def _run_with_claude(schedule: Schedule) -> dict:

@@ -1,7 +1,6 @@
 ---
 name: auto-deploy
 description: Detect when Lumon has been updated and deploy the new agent configuration. Run this at the start of every session.
-user-invocable: false
 ---
 
 ## When to run

@@ -378,33 +378,33 @@ def cmd_browse(args: argparse.Namespace) -> int:
             return 0
         print(f"error: manifest for '{namespace}' not found ({path})", file=sys.stderr)
         return 1
-    else:
-        # Index: show bundled index, then append user namespaces from disk, then plugins
-        parts: list[str] = []
-        bundled = _bundled_manifest("index.lumon")
-        if bundled is not None:
-            parts.append(bundled.rstrip("\n"))
-        disk_index = Path("lumon") / "index.lumon"
-        if disk_index.exists():
-            parts.append(disk_index.read_text(encoding="utf-8").rstrip("\n"))
-        # Append plugin namespaces (check for disk conflicts first)
-        plugin_ns, _config = _discover_plugin_namespaces()
-        disk_ns = disk_manifest_namespaces(".")
-        for ns in plugin_ns:
-            if ns in disk_ns:
-                print(
-                    f"Namespace conflict: '{ns}' is both a plugin alias "
-                    f"and a disk manifest (lumon/manifests/{ns}.lumon). "
-                    f"Remove one to avoid ambiguity.",
-                    file=sys.stderr,
-                )
-                return 1
-            parts.append(f"{ns} -- plugin")
-        if not parts:
-            print("error: namespace index not found (lumon/index.lumon)", file=sys.stderr)
+
+    # Index: show bundled index, then append user namespaces from disk, then plugins
+    parts: list[str] = []
+    bundled = _bundled_manifest("index.lumon")
+    if bundled is not None:
+        parts.append(bundled.rstrip("\n"))
+    disk_index = Path("lumon") / "index.lumon"
+    if disk_index.exists():
+        parts.append(disk_index.read_text(encoding="utf-8").rstrip("\n"))
+    # Append plugin namespaces (check for disk conflicts first)
+    plugin_ns, _config = _discover_plugin_namespaces()
+    disk_ns = disk_manifest_namespaces(".")
+    for ns in plugin_ns:
+        if ns in disk_ns:
+            print(
+                f"Namespace conflict: '{ns}' is both a plugin alias "
+                f"and a disk manifest (lumon/manifests/{ns}.lumon). "
+                f"Remove one to avoid ambiguity.",
+                file=sys.stderr,
+            )
             return 1
-        print("\n".join(parts))
-        return 0
+        parts.append(f"{ns} -- plugin")
+    if not parts:
+        print("error: namespace index not found (lumon/index.lumon)", file=sys.stderr)
+        return 1
+    print("\n".join(parts))
+    return 0
 
 
 def cmd_test(args: argparse.Namespace) -> int:
@@ -490,22 +490,26 @@ def cmd_schedule(args: argparse.Namespace) -> int:
 
     sub = getattr(args, "schedule_command", None)
     if sub is None:
-        print("error: provide a schedule subcommand (add, list, edit, remove, logs)", file=sys.stderr)
-        return 1
+        _print_schedule_help()
+        return 0
 
     working_dir = "."
 
     if sub == "add":
-        schedule_type, schedule_value = _schedule_type_from_args(args)
+        schedule_type, schedule_value, start_at = _schedule_opts_from_args(args)
         if schedule_type is None:
-            print("error: exactly one of --at, --every, or --cron is required", file=sys.stderr)
-            return 1
+            schedule_type, schedule_value, start_at = _prompt_schedule_type()
+            if schedule_type is None:
+                return 1
         try:
-            sched = add_schedule(working_dir, args.file, schedule_type, schedule_value)
+            sched = add_schedule(working_dir, args.file, schedule_type, schedule_value, start_at=start_at)
         except (ValueError, FileNotFoundError, RuntimeError) as e:
             print(f"error: {e}", file=sys.stderr)
             return 1
-        print(f"Created {sched.id}: {sched.file} ({sched.schedule_type} {sched.schedule_value})")
+        msg = f"Created {sched.id}: {sched.file} ({sched.schedule_type} {sched.schedule_value})"
+        if sched.start_at:
+            msg += f" starting {sched.start_at}"
+        print(msg)
         return 0
 
     if sub == "list":
@@ -513,23 +517,28 @@ def cmd_schedule(args: argparse.Namespace) -> int:
         if not schedules:
             print("No scheduled jobs.")
             return 0
-        print(f"{'ID':<12} {'Type':<6} {'Schedule':<20} {'File'}")
-        print("-" * 70)
+        print(f"{'ID':<12} {'Type':<6} {'Schedule':<20} {'Start':<22} {'File'}")
+        print("-" * 90)
         for s in schedules:
-            print(f"{s.id:<12} {s.schedule_type:<6} {s.schedule_value:<20} {s.file}")
+            start = s.start_at if s.start_at else "-"
+            print(f"{s.id:<12} {s.schedule_type:<6} {s.schedule_value:<20} {start:<22} {s.file}")
         return 0
 
     if sub == "edit":
-        schedule_type, schedule_value = _schedule_type_from_args(args)
+        schedule_type, schedule_value, start_at = _schedule_opts_from_args(args)
         if schedule_type is None:
-            print("error: exactly one of --at, --every, or --cron is required", file=sys.stderr)
-            return 1
+            schedule_type, schedule_value, start_at = _prompt_schedule_type()
+            if schedule_type is None:
+                return 1
         try:
-            sched = edit_schedule(working_dir, args.id, schedule_type, schedule_value)
+            sched = edit_schedule(working_dir, args.id, schedule_type, schedule_value, start_at=start_at)
         except ValueError as e:
             print(f"error: {e}", file=sys.stderr)
             return 1
-        print(f"Updated {sched.id}: {sched.schedule_type} {sched.schedule_value}")
+        msg = f"Updated {sched.id}: {sched.schedule_type} {sched.schedule_value}"
+        if sched.start_at:
+            msg += f" starting {sched.start_at}"
+        print(msg)
         return 0
 
     if sub == "remove":
@@ -561,15 +570,92 @@ def cmd_schedule(args: argparse.Namespace) -> int:
     return 1
 
 
-def _schedule_type_from_args(args: argparse.Namespace) -> tuple[str | None, str]:
-    """Extract the schedule type and value from mutually exclusive args."""
+def _schedule_opts_from_args(args: argparse.Namespace) -> tuple[str | None, str, str]:
+    """Extract schedule type, value, and start_at from args."""
+    start_at = getattr(args, "start", None) or ""
     if getattr(args, "at", None):
-        return "once", args.at
+        return "once", args.at, ""
     if getattr(args, "every", None):
-        return "every", args.every
+        return "every", args.every, start_at
     if getattr(args, "cron", None):
-        return "cron", args.cron
-    return None, ""
+        return "cron", args.cron, start_at
+    return None, "", ""
+
+
+def _prompt_schedule_type() -> tuple[str | None, str, str]:
+    """Interactively ask the user what kind of schedule they want."""
+    print("How should this script run?\n")
+    print("  1) Once at a specific time        (e.g. 2026-03-08T09:00)")
+    print("  2) Repeating on an interval        (e.g. every 1h, 30m, 2d)")
+    print("  3) On a cron schedule              (e.g. 0 9 * * *)")
+    print()
+    try:
+        choice = input("Choice [1/2/3]: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return None, "", ""
+
+    if choice == "1":
+        try:
+            value = input("Run at (ISO 8601 datetime, e.g. 2026-03-08T09:00): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None, "", ""
+        return "once", value, ""
+    if choice == "2":
+        try:
+            value = input("Repeat every (e.g. 30s, 5m, 1h, 2d): ").strip()
+            start = input("First run at (ISO 8601, e.g. 2026-03-08T09:00 — Enter for now): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None, "", ""
+        return "every", value, start
+    if choice == "3":
+        try:
+            value = input("Cron expression (5 fields, e.g. 0 9 * * *): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return None, "", ""
+        return "cron", value, ""
+
+    print("Invalid choice.", file=sys.stderr)
+    return None, "", ""
+
+
+def _print_schedule_help() -> None:
+    """Print a friendly guide for the schedule command."""
+    print(
+        "Schedule Lumon scripts to run automatically.\n"
+        "\n"
+        "Examples:\n"
+        "\n"
+        "  # Run a script every hour\n"
+        "  lumon schedule add scripts/report.lumon --every 1h\n"
+        "\n"
+        "  # Run every hour, starting tomorrow at 9am\n"
+        "  lumon schedule add scripts/report.lumon --every 1h --start 2026-03-09T09:00\n"
+        "\n"
+        "  # Run daily at 9am\n"
+        "  lumon schedule add scripts/daily.lumon --cron '0 9 * * *'\n"
+        "\n"
+        "  # Run once at a specific time\n"
+        "  lumon schedule add scripts/migrate.lumon --at 2026-03-08T09:00\n"
+        "\n"
+        "  # Interactive — prompts you for the schedule\n"
+        "  lumon schedule add scripts/report.lumon\n"
+        "\n"
+        "  # List all scheduled jobs\n"
+        "  lumon schedule list\n"
+        "\n"
+        "  # View logs for a job\n"
+        "  lumon schedule logs sched_01\n"
+        "\n"
+        "  # Change a job's schedule\n"
+        "  lumon schedule edit sched_01 --every 2h\n"
+        "\n"
+        "  # Remove a job\n"
+        "  lumon schedule remove sched_01\n"
+    )
 
 
 def _prompt_overwrite(rel_path: str) -> bool:
@@ -691,7 +777,10 @@ def cmd_deploy(args: argparse.Namespace) -> int:
             print(f"  + {f}" if not dry_run else f"  + {f} (new)")
 
     if skipped:
-        print(f"\nWould update (differ from bundled version):" if dry_run else "\nSkipped (differ — use --force to overwrite):")
+        if dry_run:
+            print("\nWould update (differ from bundled version):")
+        else:
+            print("\nSkipped (differ — use --force to overwrite):")
         for f in skipped:
             print(f"  ~ {f}")
 
@@ -886,10 +975,14 @@ def _build_parser() -> argparse.ArgumentParser:
     # schedule add
     p_sched_add = sched_sub.add_parser("add", help="Create a new scheduled job.")
     p_sched_add.add_argument("file", help="Path to the Lumon script to schedule.")
-    sched_add_group = p_sched_add.add_mutually_exclusive_group(required=True)
+    sched_add_group = p_sched_add.add_mutually_exclusive_group()
     sched_add_group.add_argument("--at", help="One-time execution (ISO 8601 datetime, e.g. 2026-03-08T09:00).")
     sched_add_group.add_argument("--every", help="Recurring interval (e.g. 30s, 5m, 1h, 2d).")
     sched_add_group.add_argument("--cron", help="Cron expression (5 fields, e.g. '0 9 * * *').")
+    p_sched_add.add_argument(
+        "--start",
+        help="First run time for --every schedules (ISO 8601 datetime). Runs are skipped until this time.",
+    )
 
     # schedule list
     sched_sub.add_parser("list", help="Show all scheduled jobs.")
@@ -897,10 +990,11 @@ def _build_parser() -> argparse.ArgumentParser:
     # schedule edit
     p_sched_edit = sched_sub.add_parser("edit", help="Modify an existing job's schedule.")
     p_sched_edit.add_argument("id", help="Job ID (e.g. sched_01).")
-    sched_edit_group = p_sched_edit.add_mutually_exclusive_group(required=True)
+    sched_edit_group = p_sched_edit.add_mutually_exclusive_group()
     sched_edit_group.add_argument("--at", help="One-time execution (ISO 8601 datetime).")
     sched_edit_group.add_argument("--every", help="Recurring interval (e.g. 30s, 5m, 1h, 2d).")
     sched_edit_group.add_argument("--cron", help="Cron expression (5 fields).")
+    p_sched_edit.add_argument("--start", help="First run time for --every schedules (ISO 8601 datetime).")
 
     # schedule remove
     p_sched_remove = sched_sub.add_parser("remove", help="Delete a scheduled job.")

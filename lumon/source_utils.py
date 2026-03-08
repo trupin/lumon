@@ -36,12 +36,13 @@ def extract_blocks(source: str) -> list[tuple[str, str, str]]:
                     lookahead = i + 1
                     while lookahead < len(lines) and lines[lookahead].strip() == "":
                         lookahead += 1
-                    if lookahead < len(lines) and (lines[lookahead].startswith("  ") or lines[lookahead].startswith("\t")):
+                    next_nonblank = lines[lookahead] if lookahead < len(lines) else ""
+                    if next_nonblank.startswith("  ") or next_nonblank.startswith("\t"):
                         block_lines.append(next_line)
                         i += 1
                         continue
                     break
-                elif next_line.startswith("  ") or next_line.startswith("\t"):
+                if next_line.startswith("  ") or next_line.startswith("\t"):
                     block_lines.append(next_line)
                     i += 1
                 else:
@@ -87,7 +88,8 @@ def save_blocks(working_dir: str, blocks: list[tuple[str, str, str]]) -> None:
         file_path = os.path.join(dir_path, f"{namespace}.lumon")
 
         if os.path.isfile(file_path):
-            existing = open(file_path, encoding="utf-8").read()
+            with open(file_path, encoding="utf-8") as f:
+                existing = f.read()
             updated = _replace_or_append(existing, block_type, ns_path, source_text)
         else:
             updated = source_text + "\n"

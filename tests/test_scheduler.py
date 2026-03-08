@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import plistlib
 import subprocess
@@ -374,6 +375,59 @@ class TestPlist:
 # ---------------------------------------------------------------------------
 
 
+class TestStartAt:
+    @patch("lumon.scheduler.platform.system", return_value="Darwin")
+    @patch("lumon.scheduler._install_launchd")
+    def test_add_with_start_at(self, _mock_install: MagicMock, _mock_sys: MagicMock, tmp_path: Path) -> None:
+        script = tmp_path / "job.lumon"
+        script.write_text("return 42")
+        sched = add_schedule(str(tmp_path), str(script), "every", "1h", start_at="2026-06-01T09:00")
+        assert sched.start_at == "2026-06-01T09:00"
+        loaded = load_schedules(str(tmp_path))
+        assert loaded[0].start_at == "2026-06-01T09:00"
+
+    @patch("lumon.scheduler.platform.system", return_value="Darwin")
+    @patch("lumon.scheduler._install_launchd")
+    def test_add_invalid_start_at(self, _mock_install: MagicMock, _mock_sys: MagicMock, tmp_path: Path) -> None:
+        script = tmp_path / "job.lumon"
+        script.write_text("return 42")
+        with pytest.raises(ValueError, match="invalid start time"):
+            add_schedule(str(tmp_path), str(script), "every", "1h", start_at="not-a-date")
+
+    @patch("lumon.scheduler._run_with_claude")
+    def test_run_job_skips_before_start(self, mock_claude: MagicMock, tmp_path: Path) -> None:
+        script = tmp_path / "job.lumon"
+        script.write_text("return 42")
+        sched = Schedule(
+            id="sched_01", file=str(script), schedule_type="every",
+            schedule_value="1h", working_dir=str(tmp_path), created_at="2026-01-01",
+            start_at="2099-01-01T00:00",  # far in the future
+        )
+        save_schedules(str(tmp_path), [sched])
+        exit_code = run_job(str(tmp_path), "sched_01")
+        assert exit_code == 0
+        mock_claude.assert_not_called()
+        # Verify a "skipped" log was written
+        logs = get_logs(str(tmp_path), "sched_01")
+        assert len(logs) == 1
+        assert logs[0]["result"]["type"] == "skipped"
+
+    @patch("lumon.scheduler._run_with_claude")
+    def test_run_job_runs_after_start(self, mock_claude: MagicMock, tmp_path: Path) -> None:
+        script = tmp_path / "job.lumon"
+        script.write_text("return 42")
+        sched = Schedule(
+            id="sched_01", file=str(script), schedule_type="every",
+            schedule_value="1h", working_dir=str(tmp_path), created_at="2026-01-01",
+            start_at="2020-01-01T00:00",  # in the past
+        )
+        save_schedules(str(tmp_path), [sched])
+        mock_claude.return_value = {"type": "result", "value": "done"}
+        exit_code = run_job(str(tmp_path), "sched_01")
+        assert exit_code == 0
+        mock_claude.assert_called_once()
+
+
 class TestRunJob:
     @patch("lumon.scheduler._run_with_claude")
     def test_run_job_success(self, mock_claude: MagicMock, tmp_path: Path) -> None:
@@ -526,8 +580,76 @@ class TestCLIIntegration:
         with pytest.raises(SystemExit):
             parser.parse_args(["schedule", "add", "job.lumon", "--every", "1h", "--cron", "0 9 * * *"])
 
-    def test_schedule_add_requires_option(self) -> None:
+    def test_schedule_add_with_start(self) -> None:
         from lumon.cli import _build_parser
         parser = _build_parser()
-        with pytest.raises(SystemExit):
-            parser.parse_args(["schedule", "add", "job.lumon"])
+        args = parser.parse_args(["schedule", "add", "job.lumon", "--every", "1h", "--start", "2026-03-09T09:00"])
+        assert args.every == "1h"
+        assert args.start == "2026-03-09T09:00"
+
+    def test_schedule_add_no_option_parses(self) -> None:
+        """Without --at/--every/--cron, argparse accepts it (interactive prompt kicks in)."""
+        from lumon.cli import _build_parser
+        parser = _build_parser()
+        args = parser.parse_args(["schedule", "add", "job.lumon"])
+        assert args.file == "job.lumon"
+        assert args.at is None
+        assert args.every is None
+        assert args.cron is None
+
+
+class TestScheduleInteractive:
+    def test_no_subcommand_shows_help(self, capsys: pytest.CaptureFixture[str]) -> None:
+        from lumon.cli import cmd_schedule
+        args = argparse.Namespace(command="schedule")
+        # schedule_command not set → shows help
+        result = cmd_schedule(args)
+        assert result == 0
+        out = capsys.readouterr().out
+        assert "Examples:" in out
+        assert "--every" in out
+        assert "--cron" in out
+
+    @patch("builtins.input", side_effect=["2", "1h", "2026-03-09T09:00"])
+    def test_prompt_every_with_start(self, _mock_input: MagicMock) -> None:
+        from lumon.cli import _prompt_schedule_type
+        stype, svalue, start_at = _prompt_schedule_type()
+        assert stype == "every"
+        assert svalue == "1h"
+        assert start_at == "2026-03-09T09:00"
+
+    @patch("builtins.input", side_effect=["2", "1h", ""])
+    def test_prompt_every_no_start(self, _mock_input: MagicMock) -> None:
+        from lumon.cli import _prompt_schedule_type
+        stype, svalue, start_at = _prompt_schedule_type()
+        assert stype == "every"
+        assert svalue == "1h"
+        assert start_at == ""
+
+    @patch("builtins.input", side_effect=["1", "2026-03-08T09:00"])
+    def test_prompt_once(self, _mock_input: MagicMock) -> None:
+        from lumon.cli import _prompt_schedule_type
+        stype, svalue, start_at = _prompt_schedule_type()
+        assert stype == "once"
+        assert svalue == "2026-03-08T09:00"
+        assert start_at == ""
+
+    @patch("builtins.input", side_effect=["3", "0 9 * * *"])
+    def test_prompt_cron(self, _mock_input: MagicMock) -> None:
+        from lumon.cli import _prompt_schedule_type
+        stype, svalue, start_at = _prompt_schedule_type()
+        assert stype == "cron"
+        assert svalue == "0 9 * * *"
+        assert start_at == ""
+
+    @patch("builtins.input", side_effect=["7"])
+    def test_prompt_invalid(self, _mock_input: MagicMock) -> None:
+        from lumon.cli import _prompt_schedule_type
+        stype, _svalue, _start = _prompt_schedule_type()
+        assert stype is None
+
+    @patch("builtins.input", side_effect=EOFError)
+    def test_prompt_eof(self, _mock_input: MagicMock) -> None:
+        from lumon.cli import _prompt_schedule_type
+        stype, _svalue, _start = _prompt_schedule_type()
+        assert stype is None

@@ -31,28 +31,19 @@ disable = [
     "missing-module-docstring",
     "missing-class-docstring",
     "missing-function-docstring",
-    "too-many-return-statements",
-    "too-many-branches",
-    "too-many-statements",
-    "too-many-locals",
-    "too-many-arguments",
-    "too-many-positional-arguments",
-    "too-many-instance-attributes",
-    "too-few-public-methods",
-    "line-too-long",              # enforced by pyright / formatter
-    "import-outside-toplevel",    # used for circular dep resolution
-    "protected-access",          # internal modules access _fields by design
-    "unnecessary-lambda",        # lambdas used for builtin registration clarity
-    "duplicate-code",            # builtins/evaluator share type-checking patterns
-    "consider-using-f-string",
-    "superfluous-parens",
-    "no-else-break",
-    "no-else-return",
-    "too-many-public-methods",    # lark Transformer has many visit methods
-    "global-statement",           # parser caching pattern
-    "too-many-nested-blocks",     # plugin setup has nested try/for/if
-    "consider-using-with",        # one-shot file reads don't need with
-    "f-string-without-interpolation",
+    "too-many-return-statements",   # evaluator/parser dispatch functions
+    "too-many-branches",            # evaluator/parser dispatch functions
+    "too-many-statements",          # evaluator/parser dispatch functions
+    "too-many-locals",              # evaluator/parser dispatch functions
+    "too-many-arguments",           # evaluator/parser dispatch functions
+    "too-many-positional-arguments",# evaluator/parser dispatch functions
+    "too-many-instance-attributes", # Environment has many fields by design
+    "too-few-public-methods",       # dataclasses / AST nodes
+    "too-many-public-methods",      # lark Transformer has many visit methods
+    "too-many-nested-blocks",       # plugin setup has nested try/for/if
+    "protected-access",             # internal modules access _fields by design
+    "unnecessary-lambda",           # lambdas used for builtin registration clarity
+    "duplicate-code",               # builtins/evaluator share type-checking patterns
 ]
 
 [tool.pylint.format]
