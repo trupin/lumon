@@ -33,7 +33,8 @@ def _setup_loader(env: Environment, working_dir: str) -> None:
 
         for path in (manifest_path, impl_path):
             if os.path.isfile(path):
-                source = open(path, encoding="utf-8").read()
+                with open(path, encoding="utf-8") as f:
+                    source = f.read()
                 try:
                     ast = parse(source)
                     eval_node(ast, env)
@@ -74,7 +75,8 @@ def _setup_plugins(
     for plugin in plugins:
         # Parse and register manifest (defines)
         if os.path.isfile(plugin.manifest_path):
-            source = open(plugin.manifest_path, encoding="utf-8").read()
+            with open(plugin.manifest_path, encoding="utf-8") as f:
+                source = f.read()
             try:
                 ast = parse(source)
                 eval_node(ast, env)
@@ -85,7 +87,8 @@ def _setup_plugins(
 
         # Parse and register impl (implements)
         if os.path.isfile(plugin.impl_path):
-            source = open(plugin.impl_path, encoding="utf-8").read()
+            with open(plugin.impl_path, encoding="utf-8") as f:
+                source = f.read()
             try:
                 ast = parse(source)
                 eval_node(ast, env)
@@ -101,12 +104,16 @@ def _setup_plugins(
                 if fn_name.startswith(source_prefix):
                     alias_name = plugin.alias + "." + fn_name.split(".", 1)[1]
                     old_node = env._defines.pop(fn_name)
-                    env._defines[alias_name] = dataclasses.replace(old_node, namespace_path=alias_name)  # type: ignore[type-var]
+                    env._defines[alias_name] = dataclasses.replace(  # type: ignore[type-var]
+                        old_node, namespace_path=alias_name
+                    )
             for fn_name in list(env._implements.keys()):
                 if fn_name.startswith(source_prefix):
                     alias_name = plugin.alias + "." + fn_name.split(".", 1)[1]
                     old_node = env._implements.pop(fn_name)
-                    env._implements[alias_name] = dataclasses.replace(old_node, namespace_path=alias_name)  # type: ignore[type-var]
+                    env._implements[alias_name] = dataclasses.replace(  # type: ignore[type-var]
+                        old_node, namespace_path=alias_name
+                    )
             # Register the alias as a namespace prefix
             env._namespace_prefixes.add(plugin.alias)
 

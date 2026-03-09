@@ -31,7 +31,9 @@ class Environment:
         # Plugin system (shared)
         self._plugin_dirs: dict[str, str] = {} if parent is None else parent._plugin_dirs
         self._plugin_contracts: dict[str, dict] = {} if parent is None else parent._plugin_contracts
-        self._plugin_forced_values: dict[str, dict[str, object]] = {} if parent is None else parent._plugin_forced_values
+        self._plugin_forced_values: dict[str, dict[str, object]] = (
+            {} if parent is None else parent._plugin_forced_values
+        )
         self._plugin_instances: dict[str, str] = {} if parent is None else parent._plugin_instances
         self._plugin_env_vars: dict[str, dict[str, str]] = {} if parent is None else parent._plugin_env_vars
         self._plugin_executor: Callable[..., object] | None = None if parent is None else parent._plugin_executor

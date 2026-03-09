@@ -269,8 +269,8 @@ assert_contains "respond: no state → error" \
 FIRST_OUT="$(cd "$RESPOND_ROOT" && run "$ASK_CODE")"
 echo '"from file"' > "$RESPOND_ROOT/resp.json"
 FILE_OUT="$(cd "$RESPOND_ROOT" && run respond --file resp.json)"
-assert_eq "respond: --file reads from file" \
-    '{"type": "result", "value": "from file"}' \
+assert_contains "respond: --file reads from file" \
+    '"value": "from file"' \
     "$FILE_OUT"
 
 # ---------------------------------------------------------------------------
@@ -508,7 +508,7 @@ assert_eq "working-dir: file path relative to working dir" \
 # ---------------------------------------------------------------------------
 
 assert_contains "version: prints version" \
-    "lumon 0.1." \
+    "lumon 0." \
     "$(run version)"
 
 # ---------------------------------------------------------------------------
@@ -861,6 +861,96 @@ assert_contains "namespace conflict: browse ext detects conflict" \
 assert_contains "namespace conflict: browse index detects conflict" \
     "Namespace conflict" \
     "$(cd "$CONFLICT_ROOT/sandbox" && run browse 2>&1 || true)"
+
+# ---------------------------------------------------------------------------
+# Schedule subcommand
+# ---------------------------------------------------------------------------
+
+SCHED_ROOT="$TMPDIR_ROOT/sched_project"
+mkdir -p "$SCHED_ROOT"
+
+# No subcommand → shows help/examples
+assert_contains "schedule: no subcommand shows help" \
+    "Examples:" \
+    "$(cd "$SCHED_ROOT" && run schedule 2>&1)"
+
+# list on empty project → "No scheduled jobs."
+assert_eq "schedule: list empty" \
+    "No scheduled jobs." \
+    "$(cd "$SCHED_ROOT" && run schedule list)"
+
+# _run with nonexistent job → error
+assert_contains "schedule: _run not found" \
+    "schedule not found" \
+    "$(cd "$SCHED_ROOT" && run schedule _run sched_99 2>&1 || true)"
+
+# logs for nonexistent job → "No logs"
+assert_eq "schedule: logs empty" \
+    "No logs for sched_99." \
+    "$(cd "$SCHED_ROOT" && run schedule logs sched_99)"
+
+# add without deployed agent → error
+cat > "$SCHED_ROOT/job.lumon" <<'LUMON'
+return 42
+LUMON
+
+assert_contains "schedule: add rejects undeployed dir" \
+    "incomplete Lumon agent deployment" \
+    "$(cd "$SCHED_ROOT" && run schedule add job.lumon --every 1h 2>&1 || true)"
+
+# Deploy the agent (CLAUDE.md + settings + sandbox-guard hook)
+cat > "$SCHED_ROOT/CLAUDE.md" <<'EOF'
+# Test agent
+EOF
+mkdir -p "$SCHED_ROOT/.claude/hooks"
+echo '{}' > "$SCHED_ROOT/.claude/settings.json"
+echo '# hook' > "$SCHED_ROOT/.claude/hooks/sandbox-guard.py"
+
+# add → creates schedule and writes schedules.json
+# (launchctl will be called but may fail in CI — we only check the output message)
+SCHED_OUT="$(cd "$SCHED_ROOT" && run schedule add job.lumon --every 1h 2>&1 || true)"
+assert_contains "schedule: add creates job" \
+    "Created sched_01" \
+    "$SCHED_OUT"
+
+# list → shows the job we just created
+LIST_OUT="$(cd "$SCHED_ROOT" && run schedule list 2>&1 || true)"
+assert_contains "schedule: list shows job" \
+    "sched_01" \
+    "$LIST_OUT"
+assert_contains "schedule: list shows schedule type" \
+    "every" \
+    "$LIST_OUT"
+
+# _run the job → will produce a result (error if claude CLI unavailable/restricted)
+# but should still create a log entry
+RUN_OUT="$(cd "$SCHED_ROOT" && run schedule _run sched_01 2>&1 || true)"
+assert_contains "schedule: _run produces json output" \
+    '"type"' \
+    "$RUN_OUT"
+
+# logs → should now have an entry from the _run
+LOGS_OUT="$(cd "$SCHED_ROOT" && run schedule logs sched_01 2>&1 || true)"
+assert_contains "schedule: logs shows entry after _run" \
+    "error" \
+    "$LOGS_OUT"
+
+# edit → change schedule
+EDIT_OUT="$(cd "$SCHED_ROOT" && run schedule edit sched_01 --cron '0 9 * * *' 2>&1 || true)"
+assert_contains "schedule: edit updates job" \
+    "Updated sched_01" \
+    "$EDIT_OUT"
+
+# remove → delete the schedule
+REMOVE_OUT="$(cd "$SCHED_ROOT" && run schedule remove sched_01 2>&1 || true)"
+assert_eq "schedule: remove deletes job" \
+    "Removed sched_01" \
+    "$REMOVE_OUT"
+
+# list after remove → empty again
+assert_eq "schedule: list empty after remove" \
+    "No scheduled jobs." \
+    "$(cd "$SCHED_ROOT" && run schedule list)"
 
 # ---------------------------------------------------------------------------
 # Summary

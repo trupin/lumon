@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from lumon import __version__
+from lumon.cli_schedule import cmd_schedule
 from lumon.ast_nodes import TestBlock
 from lumon.backends import RealFS, RealGit
 from lumon.builtins import register_builtins
@@ -25,7 +26,7 @@ from lumon.type_checker import type_check
 
 _STATE_FILE = Path(".lumon_state.json")
 
-_SUBCOMMANDS = {"deploy", "browse", "test", "respond", "spec", "version"}
+_SUBCOMMANDS = {"deploy", "browse", "test", "respond", "spec", "version", "schedule"}
 
 
 # ---------------------------------------------------------------------------
@@ -203,6 +204,11 @@ def cmd_respond(args: argparse.Namespace) -> int:
         responses=responses,
         working_dir=".",
     )
+
+    # Add cleanup hint when --file was used
+    if getattr(args, "file", None):
+        result["cleanup"] = [args.file]
+
     print(json.dumps(result, ensure_ascii=False))
 
     if result.get("type") in ("ask", "spawn_batch"):
@@ -373,33 +379,33 @@ def cmd_browse(args: argparse.Namespace) -> int:
             return 0
         print(f"error: manifest for '{namespace}' not found ({path})", file=sys.stderr)
         return 1
-    else:
-        # Index: show bundled index, then append user namespaces from disk, then plugins
-        parts: list[str] = []
-        bundled = _bundled_manifest("index.lumon")
-        if bundled is not None:
-            parts.append(bundled.rstrip("\n"))
-        disk_index = Path("lumon") / "index.lumon"
-        if disk_index.exists():
-            parts.append(disk_index.read_text(encoding="utf-8").rstrip("\n"))
-        # Append plugin namespaces (check for disk conflicts first)
-        plugin_ns, _config = _discover_plugin_namespaces()
-        disk_ns = disk_manifest_namespaces(".")
-        for ns in plugin_ns:
-            if ns in disk_ns:
-                print(
-                    f"Namespace conflict: '{ns}' is both a plugin alias "
-                    f"and a disk manifest (lumon/manifests/{ns}.lumon). "
-                    f"Remove one to avoid ambiguity.",
-                    file=sys.stderr,
-                )
-                return 1
-            parts.append(f"{ns} -- plugin")
-        if not parts:
-            print("error: namespace index not found (lumon/index.lumon)", file=sys.stderr)
+
+    # Index: show bundled index, then append user namespaces from disk, then plugins
+    parts: list[str] = []
+    bundled = _bundled_manifest("index.lumon")
+    if bundled is not None:
+        parts.append(bundled.rstrip("\n"))
+    disk_index = Path("lumon") / "index.lumon"
+    if disk_index.exists():
+        parts.append(disk_index.read_text(encoding="utf-8").rstrip("\n"))
+    # Append plugin namespaces (check for disk conflicts first)
+    plugin_ns, _config = _discover_plugin_namespaces()
+    disk_ns = disk_manifest_namespaces(".")
+    for ns in plugin_ns:
+        if ns in disk_ns:
+            print(
+                f"Namespace conflict: '{ns}' is both a plugin alias "
+                f"and a disk manifest (lumon/manifests/{ns}.lumon). "
+                f"Remove one to avoid ambiguity.",
+                file=sys.stderr,
+            )
             return 1
-        print("\n".join(parts))
-        return 0
+        parts.append(f"{ns} -- plugin")
+    if not parts:
+        print("error: namespace index not found (lumon/index.lumon)", file=sys.stderr)
+        return 1
+    print("\n".join(parts))
+    return 0
 
 
 def cmd_test(args: argparse.Namespace) -> int:
@@ -470,6 +476,7 @@ def cmd_test(args: argparse.Namespace) -> int:
     total = passed + failed
     print(f"\n{passed}/{total} passed")
     return 0 if failed == 0 else 1
+
 
 
 def _prompt_overwrite(rel_path: str) -> bool:
@@ -591,7 +598,10 @@ def cmd_deploy(args: argparse.Namespace) -> int:
             print(f"  + {f}" if not dry_run else f"  + {f} (new)")
 
     if skipped:
-        print(f"\nWould update (differ from bundled version):" if dry_run else "\nSkipped (differ — use --force to overwrite):")
+        if dry_run:
+            print("\nWould update (differ from bundled version):")
+        else:
+            print("\nSkipped (differ — use --force to overwrite):")
         for f in skipped:
             print(f"  ~ {f}")
 
@@ -664,6 +674,8 @@ def main() -> None:
         sys.exit(cmd_spec(args))
     elif args.command == "version":
         sys.exit(cmd_version())
+    elif args.command == "schedule":
+        sys.exit(cmd_schedule(args))
     else:
         parser.print_help()
         sys.exit(0)
@@ -772,6 +784,51 @@ def _build_parser() -> argparse.ArgumentParser:
         "version",
         help="Print the Lumon version.",
     )
+
+    # schedule
+    p_schedule = sub.add_parser(
+        "schedule",
+        help="Manage scheduled execution of Lumon scripts.",
+        description="Schedule Lumon scripts to run at specific times or on recurring intervals via launchd.",
+    )
+    sched_sub = p_schedule.add_subparsers(dest="schedule_command", metavar="<subcommand>")
+
+    # schedule add
+    p_sched_add = sched_sub.add_parser("add", help="Create a new scheduled job.")
+    p_sched_add.add_argument("file", help="Path to the Lumon script to schedule.")
+    sched_add_group = p_sched_add.add_mutually_exclusive_group()
+    sched_add_group.add_argument("--at", help="One-time execution (ISO 8601 datetime, e.g. 2026-03-08T09:00).")
+    sched_add_group.add_argument("--every", help="Recurring interval (e.g. 30s, 5m, 1h, 2d).")
+    sched_add_group.add_argument("--cron", help="Cron expression (5 fields, e.g. '0 9 * * *').")
+    p_sched_add.add_argument(
+        "--start",
+        help="First run time for --every schedules (ISO 8601 datetime). Runs are skipped until this time.",
+    )
+
+    # schedule list
+    sched_sub.add_parser("list", help="Show all scheduled jobs.")
+
+    # schedule edit
+    p_sched_edit = sched_sub.add_parser("edit", help="Modify an existing job's schedule.")
+    p_sched_edit.add_argument("id", help="Job ID (e.g. sched_01).")
+    sched_edit_group = p_sched_edit.add_mutually_exclusive_group()
+    sched_edit_group.add_argument("--at", help="One-time execution (ISO 8601 datetime).")
+    sched_edit_group.add_argument("--every", help="Recurring interval (e.g. 30s, 5m, 1h, 2d).")
+    sched_edit_group.add_argument("--cron", help="Cron expression (5 fields).")
+    p_sched_edit.add_argument("--start", help="First run time for --every schedules (ISO 8601 datetime).")
+
+    # schedule remove
+    p_sched_remove = sched_sub.add_parser("remove", help="Delete a scheduled job.")
+    p_sched_remove.add_argument("id", help="Job ID (e.g. sched_01).")
+
+    # schedule logs
+    p_sched_logs = sched_sub.add_parser("logs", help="Show execution history for a job.")
+    p_sched_logs.add_argument("id", help="Job ID (e.g. sched_01).")
+    p_sched_logs.add_argument("--limit", type=int, default=10, help="Number of log entries to show (default: 10).")
+
+    # schedule _run (internal — called by launchd)
+    p_sched_run = sched_sub.add_parser("_run", help=argparse.SUPPRESS)
+    p_sched_run.add_argument("id", help="Job ID.")
 
     return parser
 

@@ -25,7 +25,7 @@ from lumon.values import LumonFunction, LumonTag, is_truthy
 def _call_fn(fn_val: object, args: list[object]) -> object:
     """Call a LumonFunction or Python callable with args."""
     if isinstance(fn_val, LumonFunction):
-        from lumon.evaluator import call_lumon_fn  # circular: evaluator imports builtins
+        from lumon.evaluator import call_lumon_fn  # pylint: disable=import-outside-toplevel  # circular dep
         return call_lumon_fn(fn_val, args)
     if callable(fn_val):
         return fn_val(*args)

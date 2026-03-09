@@ -169,8 +169,7 @@ class LumonIndenter(Indenter):
 
                 if indent != self.indent_level[-1]:
                     raise DedentError(
-                        'Unexpected dedent to column %s. Expected dedent to %s'
-                        % (indent, self.indent_level[-1])
+                        f'Unexpected dedent to column {indent}. Expected dedent to {self.indent_level[-1]}'
                     )
 
                 if dedented:
@@ -196,8 +195,7 @@ class LumonIndenter(Indenter):
 
             if indent != self.indent_level[-1]:
                 raise DedentError(
-                    'Unexpected dedent to column %s. Expected dedent to %s'
-                    % (indent, self.indent_level[-1])
+                    f'Unexpected dedent to column {indent}. Expected dedent to {self.indent_level[-1]}'
                 )
 
             # After dedent(s), emit an extra _NL so the grammar has a
@@ -889,7 +887,7 @@ _parser: Lark | None = None  # pylint: disable=invalid-name
 
 
 def _get_parser() -> Lark:
-    global _parser
+    global _parser  # pylint: disable=global-statement  # module-level cache
     if _parser is None:
         _parser = Lark(
             GRAMMAR,
