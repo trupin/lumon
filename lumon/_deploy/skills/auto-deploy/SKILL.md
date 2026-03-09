@@ -7,17 +7,10 @@ description: Detect when Lumon has been updated and deploy the new agent configu
 
 At the **start of every session**, before any other work. This ensures you're always running with the latest agent configuration.
 
-## Step 1: Check for updates
+## Step 1: Dry-run to see what changed
 
-```bash
-lumon version
-```
-
-Compare the output (e.g., `lumon 0.1.5`) against the version stored in `sandbox/.lumon_version`. If the file doesn't exist, treat it as "no previous version" and proceed to deploy.
-
-If the versions match, stop here — you're up to date.
-
-## Step 2: Dry-run to see what changed
+## IMPORTANT
+**Do not** run lumon from within the sandbox. The deploy command should **always** run from the root.
 
 ```bash
 lumon deploy . --dry-run
@@ -29,7 +22,7 @@ This lists:
 
 If the output says "Nothing to deploy — already up to date.", skip to Step 5.
 
-## Step 3: Decide per file
+## Step 2: Decide per file
 
 For each file listed under "Would update":
 
@@ -40,7 +33,7 @@ For each file listed under "Would update":
 
 Most of the time, all listed files should be updated — they're managed by Lumon and any changes are improvements or fixes.
 
-## Step 4: Deploy
+## Step 3: Deploy
 
 If you decided to accept all updates:
 
@@ -50,17 +43,7 @@ lumon deploy . --force
 
 This overwrites all differing managed files. `.lumon.json` is never touched (it contains your plugin configuration).
 
-## Step 5: Record the version
-
-Store the current version so future sessions can detect the next update:
-
-```bash
-lumon --working-dir sandbox 'io.write(".lumon_version", "VERSION_STRING")'
-```
-
-Replace `VERSION_STRING` with the version from Step 1 (e.g., `0.1.5`).
-
-## Step 6: Reload context
+## Step 4: Reload context
 
 After deploying, read the updated files so the new instructions apply to this session:
 

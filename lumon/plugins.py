@@ -269,7 +269,7 @@ def exec_plugin_script(
             capture_output=True,
             text=True,
             cwd=plugin_dir,
-            timeout=30,
+            timeout=300,
             env=sub_env,
             check=False,
         )

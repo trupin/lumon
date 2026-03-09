@@ -229,6 +229,111 @@ assert_contains "test: missing namespace reports skip" \
     "SKIP" \
     "$(cd "$TEST_ROOT" && run test nonexistent)"
 
+# mock_io: test runner provides io builtins and mock_io for seeding data
+MOCK_ROOT="$TMPDIR_ROOT/mock_project"
+mkdir -p "$MOCK_ROOT/lumon/tests"
+cat > "$MOCK_ROOT/lumon/tests/io_mock.lumon" <<'LUMON'
+test io.mock_read
+  mock_io([{path: "data/test.csv", content: "hello"}])
+  let result = io.read("data/test.csv")
+  let content = match result
+    :ok(c) -> c
+    :error(e) -> ""
+  assert content == "hello"
+
+test io.fresh_per_test
+  let result = io.read("data/test.csv")
+  let is_err = match result
+    :ok(c) -> false
+    :error(e) -> true
+  assert is_err == true
+LUMON
+
+assert_contains "test: mock_io seeds data for io.read" \
+    "2/2 passed" \
+    "$(cd "$MOCK_ROOT" && run test io_mock)"
+
+# mock_ask: test runner provides mock_ask for ask expressions
+MOCK_ASK_ROOT="$TMPDIR_ROOT/mock_ask_project"
+mkdir -p "$MOCK_ASK_ROOT/lumon/tests"
+cat > "$MOCK_ASK_ROOT/lumon/tests/ask_mock.lumon" <<'LUMON'
+define helper.greet
+  "greets the user by asking for a style"
+  takes:
+    name: text "name"
+  returns: text "greeting"
+
+implement helper.greet
+  let style = ask
+    "How should I greet?"
+  return style + " " + name
+
+test mock.ask_response
+  mock_ask("Hello")
+  let result = helper.greet("Alice")
+  assert result == "Hello Alice"
+LUMON
+
+assert_contains "test: mock_ask provides ask response" \
+    "1/1 passed" \
+    "$(cd "$MOCK_ASK_ROOT" && run test ask_mock)"
+
+# mock_spawn: test runner provides mock_spawn for spawn expressions
+MOCK_SPAWN_ROOT="$TMPDIR_ROOT/mock_spawn_project"
+mkdir -p "$MOCK_SPAWN_ROOT/lumon/tests"
+cat > "$MOCK_SPAWN_ROOT/lumon/tests/spawn_mock.lumon" <<'LUMON'
+define helper.gather
+  "gathers data from sub-agents"
+  returns: list "results"
+
+implement helper.gather
+  let a = spawn
+    "fetch A"
+  let b = spawn
+    "fetch B"
+  return [a, b]
+
+test mock.spawn_responses
+  mock_spawn(["result_a", "result_b"])
+  let result = helper.gather()
+  assert result == ["result_a", "result_b"]
+LUMON
+
+assert_contains "test: mock_spawn provides spawn responses" \
+    "1/1 passed" \
+    "$(cd "$MOCK_SPAWN_ROOT" && run test spawn_mock)"
+
+# mock_plugin: test runner provides mock_plugin for plugin calls
+MOCK_PLUGIN_ROOT="$TMPDIR_ROOT/mock_plugin_project"
+mkdir -p "$MOCK_PLUGIN_ROOT/sandbox/lumon/tests"
+mkdir -p "$MOCK_PLUGIN_ROOT/plugins/email"
+cat > "$MOCK_PLUGIN_ROOT/.lumon.json" <<'JSON'
+{"plugins": {"email": {}}}
+JSON
+cat > "$MOCK_PLUGIN_ROOT/plugins/email/manifest.lumon" <<'LUMON'
+define email.send
+  "sends an email"
+  takes:
+    to: text "recipient"
+    body: text "email body"
+  returns: text "status"
+LUMON
+cat > "$MOCK_PLUGIN_ROOT/plugins/email/impl.lumon" <<'LUMON'
+implement email.send
+  let result = plugin.exec("./send.sh", {to: to, body: body})
+  return result
+LUMON
+cat > "$MOCK_PLUGIN_ROOT/sandbox/lumon/tests/plugin_mock.lumon" <<'LUMON'
+test mock.plugin_response
+  mock_plugin("email", "./send.sh", "sent")
+  let result = email.send("bob@x.com", "hi")
+  assert result == "sent"
+LUMON
+
+assert_contains "test: mock_plugin provides plugin response" \
+    "1/1 passed" \
+    "$(cd "$MOCK_PLUGIN_ROOT/sandbox" && run test plugin_mock)"
+
 # ---------------------------------------------------------------------------
 # Respond (ask/spawn replay)
 # ---------------------------------------------------------------------------
@@ -240,38 +345,35 @@ ASK_CODE='let choice = ask
   "Which item?"
 return choice'
 
-# First run: should produce an ask envelope and create state file
+# First run: should produce an ask envelope and create comm directory
 FIRST_OUT="$(cd "$RESPOND_ROOT" && run "$ASK_CODE")"
 assert_contains "respond: first run produces ask" \
     '"type": "ask"' \
     "$FIRST_OUT"
 
-assert_eq "respond: state file created" \
+assert_eq "respond: comm directory created" \
     "yes" \
-    "$([ -f "$RESPOND_ROOT/.lumon_state.json" ] && echo yes || echo no)"
+    "$([ -d "$RESPOND_ROOT/.lumon_comm" ] && echo yes || echo no)"
+
+# Extract session ID and write response file
+SESSION="$(echo "$FIRST_OUT" | python3 -c 'import sys,json; print(json.load(sys.stdin)["session"])')"
+RESP_FILE="$RESPOND_ROOT/.lumon_comm/$SESSION/ask_response.json"
+echo '"pay bill"' > "$RESP_FILE"
 
 # Second run (respond): should produce a result
-SECOND_OUT="$(cd "$RESPOND_ROOT" && run respond '"pay bill"')"
+SECOND_OUT="$(cd "$RESPOND_ROOT" && run respond)"
 assert_eq "respond: result after response" \
     '{"type": "result", "value": "pay bill"}' \
     "$SECOND_OUT"
 
-assert_eq "respond: state file cleared after result" \
+assert_eq "respond: comm directory cleared after result" \
     "no" \
-    "$([ -f "$RESPOND_ROOT/.lumon_state.json" ] && echo yes || echo no)"
+    "$([ -d "$RESPOND_ROOT/.lumon_comm" ] && echo yes || echo no)"
 
 # Respond with no state should error
 assert_contains "respond: no state → error" \
     "error:" \
-    "$(cd "$RESPOND_ROOT" && run respond '42' 2>&1 || true)"
-
-# Respond from file
-FIRST_OUT="$(cd "$RESPOND_ROOT" && run "$ASK_CODE")"
-echo '"from file"' > "$RESPOND_ROOT/resp.json"
-FILE_OUT="$(cd "$RESPOND_ROOT" && run respond --file resp.json)"
-assert_contains "respond: --file reads from file" \
-    '"value": "from file"' \
-    "$FILE_OUT"
+    "$(cd "$RESPOND_ROOT" && run respond 2>&1 || true)"
 
 # ---------------------------------------------------------------------------
 # Spec
@@ -355,7 +457,12 @@ assert_eq "deploy: hook allows Edit in sandbox" \
     "" \
     "$(echo '{"tool_name": "Edit", "tool_input": {"file_path": "sandbox/foo.lumon"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
 
-# Edit hook: blocked outside sandbox
+# Edit hook: allowed inside .claude/ (memory)
+assert_eq "deploy: hook allows Edit in .claude" \
+    "" \
+    "$(echo '{"tool_name": "Edit", "tool_input": {"file_path": ".claude/memory/MEMORY.md"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
+# Edit hook: blocked outside sandbox and .claude
 assert_contains "deploy: hook blocks Edit outside sandbox" \
     "BLOCKED" \
     "$(echo '{"tool_name": "Edit", "tool_input": {"file_path": "CLAUDE.md"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
@@ -364,6 +471,21 @@ assert_contains "deploy: hook blocks Edit outside sandbox" \
 assert_contains "deploy: hook blocks Edit traversal" \
     "BLOCKED" \
     "$(echo '{"tool_name": "Edit", "tool_input": {"file_path": "sandbox/../secret.txt"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
+
+# Write hook: allowed inside sandbox
+assert_eq "deploy: hook allows Write in sandbox" \
+    "" \
+    "$(echo '{"tool_name": "Write", "tool_input": {"file_path": "sandbox/tmp/test.lumon"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
+# Write hook: allowed inside .claude/ (memory)
+assert_eq "deploy: hook allows Write in .claude" \
+    "" \
+    "$(echo '{"tool_name": "Write", "tool_input": {"file_path": ".claude/memory/patterns.md"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
+# Write hook: blocked outside sandbox and .claude
+assert_contains "deploy: hook blocks Write outside sandbox" \
+    "BLOCKED" \
+    "$(echo '{"tool_name": "Write", "tool_input": {"file_path": "secret.txt"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
 
 # Read hook: allowed inside current directory
 assert_eq "deploy: hook allows Read in current dir" \
@@ -374,7 +496,12 @@ assert_eq "deploy: hook allows Read in sandbox subdir" \
     "" \
     "$(echo '{"tool_name": "Read", "tool_input": {"file_path": "sandbox/foo.lumon"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
 
-# Read hook: blocked outside current directory
+# Read hook: allowed for ~/.claude/ tool result files
+assert_eq "deploy: hook allows Read in ~/.claude" \
+    "" \
+    "$(echo '{"tool_name": "Read", "tool_input": {"file_path": "'"$HOME"'/.claude/projects/test/tool-results/abc123.txt"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
+# Read hook: blocked outside current directory and ~/.claude
 assert_contains "deploy: hook blocks Read outside current dir" \
     "BLOCKED" \
     "$(echo '{"tool_name": "Read", "tool_input": {"file_path": "../outside/secret.txt"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
@@ -431,6 +558,10 @@ assert_eq "deploy: plugins-issues skill deployed" \
 assert_eq "deploy: review skill deployed" \
     "yes" \
     "$([ -f "$DEPLOY_ROOT/.claude/skills/review/SKILL.md" ] && echo yes || echo no)"
+
+assert_eq "deploy: version-control skill deployed" \
+    "yes" \
+    "$([ -f "$DEPLOY_ROOT/.claude/skills/version-control/SKILL.md" ] && echo yes || echo no)"
 
 assert_eq "deploy: plugin fix-issues skill deployed" \
     "yes" \

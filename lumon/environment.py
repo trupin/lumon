@@ -49,6 +49,9 @@ class Environment:
         self._working_dir: str | None = None if parent is None else parent._working_dir
         # Log entries (shared)
         self._logs: list[object] = [] if parent is None else parent._logs
+        # Suspend callback for daemon mode (shared) — when set, ask/spawn
+        # block on this instead of raising AskSignal
+        self._suspend_callback: object | None = None if parent is None else parent._suspend_callback
 
     def get(self, name: str) -> object:
         if name in self._bindings:
@@ -90,6 +93,7 @@ class Environment:
         snap._active_plugin = self._active_plugin
         snap._working_dir = self._working_dir
         snap._logs = self._logs
+        snap._suspend_callback = self._suspend_callback
         return snap
 
     def consume_response(self) -> tuple[object] | None:

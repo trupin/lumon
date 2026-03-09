@@ -6,60 +6,104 @@ import argparse
 import importlib.resources
 import json
 import os
+import signal
 import sys
 from pathlib import Path
 
 from lumon import __version__
 from lumon.cli_schedule import cmd_schedule
 from lumon.ast_nodes import TestBlock
-from lumon.backends import RealFS, RealGit
+from lumon.backends import MemoryFS, MemoryGit, RealFS, RealGit
 from lumon.builtins import register_builtins
 from lumon.environment import Environment
-from lumon.errors import LumonError, ReturnSignal
+from lumon.errors import AskSignal, LumonError, ReturnSignal
 from lumon.evaluator import eval_node
-from lumon.interpreter import _setup_loader, _setup_plugins, interpret
+from lumon.daemon import (
+    SuspendEvent,
+    cleanup_stale_sessions,
+    is_daemon_alive,
+    read_daemon_output,
+    run_with_daemon,
+)
+from lumon.interpreter import (
+    _setup_loader,
+    _setup_plugins,
+    cleanup_comm_dir,
+    generate_session_id,
+    interpret_with_suspend,
+)
 from lumon.parser import parse
 from lumon.plugins import disk_manifest_namespaces, load_config, split_contracts
-from lumon.serializer import deserialize
 from lumon.source_utils import extract_blocks
 from lumon.type_checker import type_check
 
-_STATE_FILE = Path(".lumon_state.json")
+_COMM_BASE = ".lumon_comm"
 
 _SUBCOMMANDS = {"deploy", "browse", "test", "respond", "spec", "version", "schedule"}
 
 
 # ---------------------------------------------------------------------------
-# State helpers (for ask/spawn replay)
+# Session helpers (daemon model)
 # ---------------------------------------------------------------------------
 
 
-def _save_state(code: str, responses: list[object], batch_size: int = 0) -> None:
-    _STATE_FILE.write_text(
-        json.dumps({"code": code, "responses": responses, "batch_size": batch_size}, ensure_ascii=False),
-        encoding="utf-8",
-    )
+def _comm_dir_for_session(session: str) -> str:
+    """Return the comm directory path for a session."""
+    return os.path.join(_COMM_BASE, session)
 
 
-def _load_state() -> dict | None:
-    if not _STATE_FILE.exists():
+def _save_script_marker(comm_dir: str, script: str) -> None:
+    """Save a script marker file so we can detect pending sessions for a script."""
+    os.makedirs(comm_dir, exist_ok=True)
+    marker_file = os.path.join(comm_dir, "script.txt")
+    with open(marker_file, "w", encoding="utf-8") as f:
+        f.write(script)
+
+
+def _find_session() -> str | None:
+    """Find the single active session, if any."""
+    if not os.path.isdir(_COMM_BASE):
         return None
-    return json.loads(_STATE_FILE.read_text(encoding="utf-8"))
+    sessions = [
+        d for d in os.listdir(_COMM_BASE)
+        if os.path.isdir(os.path.join(_COMM_BASE, d))
+    ]
+    if len(sessions) == 1:
+        return sessions[0]
+    return None
 
 
-def _batch_size_from_result(result: dict) -> int:
-    """Extract spawn batch size from an interpreter result."""
-    if result.get("type") != "spawn_batch":
-        return 0
-    spawns = result.get("spawns")
-    if isinstance(spawns, list):
-        return len(spawns)
-    return 1
+def _clear_state(session: str) -> None:
+    """Remove a session directory (kill daemon if alive)."""
+    comm_dir = _comm_dir_for_session(session)
+    # Try to kill daemon process
+    pid_file = os.path.join(comm_dir, "pid")
+    if os.path.isfile(pid_file):
+        try:
+            with open(pid_file, encoding="utf-8") as f:
+                pid = int(f.read().strip())
+            os.kill(pid, signal.SIGKILL)
+        except (ValueError, ProcessLookupError, PermissionError, OSError):
+            pass
+    cleanup_comm_dir(comm_dir)
 
 
-def _clear_state() -> None:
-    if _STATE_FILE.exists():
-        _STATE_FILE.unlink()
+def _find_pending_daemon(script: str) -> str | None:
+    """Find a pending daemon session associated with the given script path."""
+    if not os.path.isdir(_COMM_BASE):
+        return None
+    for name in os.listdir(_COMM_BASE):
+        session_dir = os.path.join(_COMM_BASE, name)
+        if not os.path.isdir(session_dir):
+            continue
+        marker_file = os.path.join(session_dir, "script.txt")
+        if not os.path.isfile(marker_file):
+            continue
+        with open(marker_file, encoding="utf-8") as f:
+            saved_script = f.read().strip()
+        if saved_script == script and is_daemon_alive(session_dir):
+            return name
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -117,108 +161,117 @@ def cmd_spec(_args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_run_code(code: str) -> int:
-    """Execute Lumon code and print the JSON result to stdout."""
-    state = _load_state()
-    if state is not None and state.get("code") == code:
-        # Resuming the same code — shouldn't happen via cmd_run, but be safe
-        responses: list[object] = [deserialize(r) for r in state.get("responses", [])]
-    else:
-        responses = []
+def cmd_run_code(code: str, *, script: str | None = None) -> int:
+    """Execute Lumon code and print the JSON result to stdout.
+
+    Uses the persistent daemon model: on suspension, forks a child process
+    that stays alive and polls for response files. The parent prints the
+    suspension envelope and exits.
+    """
+    # Block re-run if the same script already has a pending daemon session
+    if script:
+        pending = _find_pending_daemon(script)
+        if pending:
+            msg = (
+                f"Script has pending session {pending}. "
+                f"Use 'lumon respond' to resume or 'lumon respond --clear' to discard."
+            )
+            result: dict[str, object] = {"type": "error", "message": msg}
+            print(json.dumps(result, ensure_ascii=False))
+            return 1
+
+    # Clean up stale daemon sessions
+    cleanup_stale_sessions(_COMM_BASE)
+
+    session = generate_session_id()
+    comm_dir = _comm_dir_for_session(session)
 
     io_backend = RealFS(".")
-    git_backend = RealGit(".")
-    result = interpret(
-        code,
-        io_backend=io_backend,
-        git_backend=git_backend,
-        responses=responses if responses else None,
-        working_dir=".",
-        persist=True,
-    )
+    git_backend = RealGit(_project_root or ".")
+
+    def run_fn(suspend: SuspendEvent) -> dict:
+        return interpret_with_suspend(
+            code,
+            io_backend=io_backend,
+            git_backend=git_backend,
+            working_dir=".",
+            persist=True,
+            comm_dir=comm_dir,
+            suspend_event=suspend,
+        )
+
+    result = run_with_daemon(run_fn, comm_dir, session)
+
+    # Save script association for pending session detection
+    if result.get("type") in ("ask", "spawn_batch") and script:
+        _save_script_marker(comm_dir, script)
+
     print(json.dumps(result, ensure_ascii=False))
 
-    if result.get("type") in ("ask", "spawn_batch"):
-        _save_state(code, [], batch_size=_batch_size_from_result(result))
-    else:
-        _clear_state()
+    if result.get("type") not in ("ask", "spawn_batch"):
+        # No suspension — clean up comm dir
+        cleanup_comm_dir(comm_dir)
 
     return 0 if result.get("type") != "error" else 1
 
 
 def cmd_respond(args: argparse.Namespace) -> int:
-    """Resume suspended execution by feeding a response."""
-    state = _load_state()
-    if state is None:
+    """Resume suspended execution by reading output from the daemon process."""
+    session: str | None = getattr(args, "session", None)
+
+    # Auto-detect session if not provided
+    if not session:
+        session = _find_session()
+
+    # Handle --clear before checking for daemon
+    if getattr(args, "clear", False):
+        if not session:
+            print("error: no pending session to clear", file=sys.stderr)
+            return 1
+        _clear_state(session)
+        print(json.dumps({"type": "result", "value": f"Session {session} cleared."}))
+        return 0
+
+    if not session:
         print(
             "error: no suspended execution — run some Lumon code first",
             file=sys.stderr,
         )
         return 1
 
-    # Read JSON from --file, stdin ("-"), or inline argument
-    if getattr(args, "file", None):
-        try:
-            response_text = Path(args.file).read_text(encoding="utf-8")
-        except FileNotFoundError:
-            print(f"error: file not found: {args.file}", file=sys.stderr)
-            return 1
-    elif args.response == "-":
-        response_text = sys.stdin.read()
-    elif args.response is not None:
-        response_text = args.response
-    else:
-        print("error: provide a JSON response, --file, or '-' for stdin", file=sys.stderr)
+    comm_dir = _comm_dir_for_session(session)
+
+    if not os.path.isdir(comm_dir):
+        print(
+            f"error: no session directory for '{session}'",
+            file=sys.stderr,
+        )
         return 1
 
-    try:
-        response_raw = json.loads(response_text)
-    except json.JSONDecodeError as exc:
-        print(f"error: invalid JSON: {exc}", file=sys.stderr)
+    # Check if daemon is alive
+    if not is_daemon_alive(comm_dir):
+        print(
+            f"error: daemon for session '{session}' is not running (process died). "
+            f"Re-run the script to start a new session.",
+            file=sys.stderr,
+        )
+        cleanup_comm_dir(comm_dir)
         return 1
 
-    batch_size = state.get("batch_size", 0)
-    prev_responses: list[object] = [deserialize(r) for r in state.get("responses", [])]
-
-    if batch_size > 1 and isinstance(response_raw, list) and len(response_raw) == batch_size:
-        new_responses = [deserialize(r) for r in response_raw]
-        responses = prev_responses + new_responses
-    elif batch_size > 1 and isinstance(response_raw, dict):
-        # Dict keyed by spawn_0, spawn_1, ... — distribute to each spawn
-        if all(f"spawn_{i}" in response_raw for i in range(batch_size)):
-            new_responses = [deserialize(response_raw[f"spawn_{i}"]) for i in range(batch_size)]
-            responses = prev_responses + new_responses
-        else:
-            response = deserialize(response_raw)
-            responses = prev_responses + [response]
-    else:
-        response = deserialize(response_raw)
-        responses = prev_responses + [response]
-
-    io_backend = RealFS(".")
-    git_backend = RealGit(".")
-    result = interpret(
-        state["code"],
-        io_backend=io_backend,
-        git_backend=git_backend,
-        responses=responses,
-        working_dir=".",
-    )
-
-    # Add cleanup hint when --file was used
-    if getattr(args, "file", None):
-        result["cleanup"] = [args.file]
+    # Read output from daemon (polls for output.json)
+    result = read_daemon_output(comm_dir, timeout=60)
+    if result is None:
+        print(
+            f"error: timed out waiting for daemon output for session '{session}'",
+            file=sys.stderr,
+        )
+        return 1
 
     print(json.dumps(result, ensure_ascii=False))
 
-    if result.get("type") in ("ask", "spawn_batch"):
-        _save_state(
-            state["code"],
-            [json.loads(json.dumps(r)) for r in responses],
-            batch_size=_batch_size_from_result(result),
-        )
-    else:
-        _clear_state()
+    if result.get("type") not in ("ask", "spawn_batch"):
+        # Execution completed — clean up
+        cleanup_comm_dir(comm_dir)
 
     return 0 if result.get("type") != "error" else 1
 
@@ -408,6 +461,47 @@ def cmd_browse(args: argparse.Namespace) -> int:
     return 0
 
 
+def _register_test_builtins(
+    env: Environment, test_fs: MemoryFS,
+) -> dict[tuple[str, str], list[object]]:
+    """Register mock_io, mock_ask, mock_spawn, mock_plugin builtins for test mode.
+
+    Returns the plugin_mocks dict so callers can clear it between tests.
+    """
+    plugin_mocks: dict[tuple[str, str], list[object]] = {}
+
+    def _mock_io(entries: list[dict]) -> None:
+        files = {e["path"]: e["content"] for e in entries}
+        test_fs.seed(files)
+
+    def _mock_plugin_executor(
+        command: str, _args_map: dict[str, object],
+        _plugin_dir: str, instance: str,
+    ) -> object:
+        key = (instance, command)
+        if key not in plugin_mocks or not plugin_mocks[key]:
+            raise LumonError(
+                f"No mock registered for plugin ({instance}, {command})"
+            )
+        return plugin_mocks[key].pop(0)
+
+    def _mock_plugin(ns: str, command: str, response: object) -> None:
+        plugin_mocks.setdefault((ns, command), []).append(response)
+
+    def _mock_ask(response: object) -> None:
+        env._response_queue.append(response)
+
+    def _mock_spawn(responses: list[object]) -> None:
+        env._response_queue.extend(responses)
+
+    env.register_builtin("mock_io", _mock_io)
+    env._plugin_executor = _mock_plugin_executor
+    env.register_builtin("mock_plugin", _mock_plugin)
+    env.register_builtin("mock_ask", _mock_ask)
+    env.register_builtin("mock_spawn", _mock_spawn)
+    return plugin_mocks
+
+
 def cmd_test(args: argparse.Namespace) -> int:
     """Run Lumon test files and report results."""
     namespace: str | None = getattr(args, "namespace", None)
@@ -436,9 +530,13 @@ def cmd_test(args: argparse.Namespace) -> int:
 
         try:
             ast = parse(code)
-            type_check(ast)
+            type_check(ast, io_backend=True, git_backend=True, test_mode=True)
+            test_fs = MemoryFS(root="/sandbox")
+            test_git = MemoryGit()
             env = Environment()
-            register_builtins(env, None, None)
+            register_builtins(env, test_fs, test_git)
+            plugin_mocks = _register_test_builtins(env, test_fs)
+
             env._working_dir = "."
             _setup_loader(env, ".")
             _setup_plugins(env, ".")
@@ -455,11 +553,19 @@ def cmd_test(args: argparse.Namespace) -> int:
                 for test in tests:
                     assert isinstance(test, TestBlock)
                     try:
+                        test_fs.clear()
+                        plugin_mocks.clear()
+                        env._response_queue.clear()
+                        env._pending_spawns.clear()
+                        env._spawn_counter[0] = 0
                         test_env = env.child_scope()
                         for stmt in test.body:
                             eval_node(stmt, test_env)
                         print(f"  PASS  {test.name}")
                         passed += 1
+                    except AskSignal:
+                        print(f"  FAIL  {test.name}: ask expression reached without mock_ask")
+                        failed += 1
                     except (LumonError, ReturnSignal) as e:
                         msg = str(e) if isinstance(e, LumonError) else "unexpected return"
                         print(f"  FAIL  {test.name}: {msg}")
@@ -616,8 +722,17 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
+_project_root: str = ""
+
+
 def _apply_working_dir() -> None:
-    """Extract and apply --working-dir before argparse runs."""
+    """Extract and apply --working-dir before argparse runs.
+
+    Saves the original directory as *_project_root* so that git commands
+    run from the project root rather than the sandbox.
+    """
+    global _project_root  # noqa: PLW0603
+    _project_root = os.getcwd()
     for i, arg in enumerate(sys.argv[1:], start=1):
         if arg == "--working-dir" and i + 1 < len(sys.argv):
             wd = sys.argv[i + 1]
@@ -648,15 +763,17 @@ def main() -> None:
     if sys.argv[1] not in _SUBCOMMANDS and not sys.argv[1].startswith("-"):
         # Positional arg: inline code or a file path
         arg = sys.argv[1]
+        script: str | None = None
         if "\n" in arg or len(arg) > 255:
             code = arg
         else:
             path = Path(arg)
             if path.exists() and path.suffix == ".lumon":
                 code = path.read_text(encoding="utf-8")
+                script = str(path)
             else:
                 code = arg
-        sys.exit(cmd_run_code(code))
+        sys.exit(cmd_run_code(code, script=script))
 
     # Subcommand dispatch via argparse
     parser = _build_parser()
@@ -691,7 +808,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "From stdin:  echo 'return 42' | lumon\n"
             "Browse:      lumon browse [<namespace>]\n"
             "Test:        lumon test [<namespace>]\n"
-            "Respond:     lumon respond '<json>' | --file path | -\n"
+            "Respond:     lumon respond [<session>]\n"
             "Deploy:      lumon deploy <target>\n"
             "Spec:        lumon spec"
         ),
@@ -733,19 +850,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "respond",
         help="Resume suspended execution (after ask/spawn).",
         description=(
-            "Feed a JSON response back to a suspended Lumon execution.\n"
-            "The state is loaded from .lumon_state.json in the current directory."
+            "Resume a suspended Lumon execution by reading response files\n"
+            "from .lumon_comm/<session>/. The session ID is auto-detected\n"
+            "if there is exactly one active session."
         ),
     )
     p_respond.add_argument(
-        "response",
+        "session",
         nargs="?",
         default=None,
-        help="JSON value to feed back (e.g. '{\"action\": \"process\"}'). Use '-' for stdin.",
+        help="Session ID to respond to (auto-detected if omitted).",
     )
     p_respond.add_argument(
-        "--file",
-        help="Read JSON response from a file instead of inline argument.",
+        "--clear",
+        action="store_true",
+        help="Discard a pending session instead of resuming it.",
     )
 
     # deploy

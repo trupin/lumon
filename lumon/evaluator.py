@@ -703,7 +703,7 @@ def _eval_with(node: WithExpr, env: Environment) -> object:
 # --- Ask / Spawn ---
 
 def _eval_ask(node: AskExpr, env: Environment) -> object:
-    # If a response has been queued (replay mode), return it directly.
+    # If a response has been queued (test/replay mode), return it directly.
     queued = env.consume_response()
     if queued is not None:
         return queued[0]
@@ -720,6 +720,10 @@ def _eval_ask(node: AskExpr, env: Environment) -> object:
         envelope["context"] = serialize(context)
     if expects is not None:
         envelope["expects"] = expects
+
+    # Daemon mode: block on suspend callback instead of raising
+    if env._suspend_callback is not None:
+        return env._suspend_callback.suspend_for_ask(envelope)  # type: ignore[union-attr]
 
     raise AskSignal(envelope)
 

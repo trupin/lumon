@@ -1,67 +1,8 @@
 # Lumon
 
-> **Status**: Early development — the interpreter is implemented but the language spec and APIs may change without notice. Not suitable for production use.
+A minimal, safe, pseudocode-like interpreted language that defines the cognitive boundary of an AI agent.
 
-**A safe, self-implementing language for AI agents.**
-
-Lumon is a minimal interpreted language that defines what an AI agent can and cannot do — not through sandboxing, but through language design. If a primitive doesn't exist in Lumon, the agent cannot conceive of the action. There is nothing to escape from.
-
-## Why Lumon
-
-Production AI systems face three compounding problems:
-
-**Context bloat.** Every tool schema lives in the prompt, on every request. As agents gain capabilities, context grows — and so does cost. There's no way to selectively unload tools without losing them.
-
-**Security by hope.** MCP servers and tool registries are trust decisions. Each tool implementation must be reviewed, sandboxed, or trusted wholesale. Prompt injection can trick an agent into misusing any tool it can reach.
-
-**Maintenance overhead.** Tools are written by humans, registered by humans, updated by humans. Agents can use them but not adapt or extend them. Every new capability requires a development cycle.
-
-Lumon takes a different approach to all three.
-
-## How It Works
-
-Agents write their own capabilities in Lumon at runtime, using only the language's safe primitives. Those implementations persist as code and are reloaded on demand — not kept in context.
-
-```
--- Agent writes this the first time it needs to triage an inbox
-implement inbox.triage
-  let items = io.read("inbox.json") |> json.parse
-  let urgent = items |> list.filter(fn(item) -> item.priority == "high")
-  return urgent |> list.map(fn(item) -> item.subject)
-```
-
-Next session, that function loads from disk in a handful of tokens. The agent doesn't rewrite it. The LLM isn't involved at runtime — it's just code.
-
-## Key Properties
-
-**Safety by construction.** Lumon's primitives are small, auditable, and safe. Composition of safe primitives produces safe programs — no runtime enforcement needed. The agent can't exfiltrate data via HTTP POST because `http.post` doesn't exist. It can't escape the filesystem because `io.*` is bounded to the working directory. These aren't restrictions bolted on — they're the shape of the language.
-
-**Flat context cost.** The agent keeps only the language spec and a lightweight namespace index in context. Capabilities load on demand when called. An agent with 200 self-authored functions costs the same to run as one with 5. Context cost stays flat as capability grows.
-
-**CLI-native interoperability.** Lumon runs as a standard CLI. Any AI agent with shell access — Claude Code, Cursor, Aider, custom agents — can use it without SDK integration or tool registration. Output is structured JSON. Resuming suspended execution (`ask`/`spawn` coroutines) is one shell command.
-
-```bash
-lumon 'return 1 + 2'          # inline execution
-lumon path/to/file.lumon      # execute a file
-lumon respond '{"answer": 42}'  # resume after agent decision
-lumon browse inbox             # discover available functions
-```
-
-**Self-implementing agents.** Agents write their own `implement` blocks at runtime. The interface (function signatures + descriptions) is community-maintained and stable. Implementations are agent-authored and environment-specific. New users start with a full interface and zero implementations — the agent builds its toolbox as it works.
-
-**Self-healing.** When an implementation fails, the interpreter returns structured JSON with full context — the function that failed, its inputs, the stack trace. The agent reads the error like a developer reads a traceback and rewrites the implementation. No human triages bugs in agent-authored code.
-
-## Comparison
-
-| | MCP / Tool Use | Lumon |
-|:--|:--|:--|
-| Capabilities | Pre-defined by developers | Self-authored by agent at runtime |
-| Adding new ones | Human writes code, registers tool | Agent writes code in safe language |
-| Context cost | Every tool schema in context | Language spec + manifest index only |
-| Safety | Trust each tool implementation | Trust the language's primitives |
-| Auditability | Check each tool call | Read the agent's source code |
-| Persistence | Stateless per session | Code is memory, persists across sessions |
-| Discovery | Flat list of tools | Hierarchical, semantic, incremental |
+Safety is achieved by construction — agents can only operate within the primitives the language provides. No sandboxing, no permission prompts.
 
 ## Install
 
@@ -92,6 +33,57 @@ return """
 
 Key features: immutable bindings (`let`), no loops (use `list.map`/`filter`/`fold`), pattern matching (`match`), pipes (`|>`), tags (`:ok`, `:error("msg")`), triple-quoted strings (`"""..."""`), and agent coroutines (`ask`/`spawn`).
 
+### Agent Coroutines
+
+The defining feature: `ask` suspends execution for agent judgment, `spawn` delegates to sub-agents. Code handles the mechanical work, agents handle the reasoning.
+
+```lua
+-- Two sub-agents debate, then the main agent picks a winner
+
+let topic = "Tabs vs spaces"
+
+let for_position = spawn
+  "Argue FOR the following position. Be concise and persuasive."
+  context: topic
+  expects: {argument: text}
+
+let against_position = spawn
+  "Argue AGAINST the following position. Be concise and persuasive."
+  context: topic
+  expects: {argument: text}
+
+let verdict = ask
+  "Two agents debated this topic. Read both arguments and pick a winner."
+  context: {
+    topic: topic,
+    for: for_position.argument,
+    against: against_position.argument
+  }
+  expects: {winner: text, reasoning: text}
+
+return verdict
+```
+
+Running this from the CLI:
+
+```bash
+$ lumon debate.lumon
+# {"type":"spawn_batch","spawns":[...], "session":"a3f2e1b9", ...}
+
+# The orchestrator runs two sub-agents and writes their responses:
+$ echo '{"argument":"Tabs are..."}' > .lumon_comm/a3f2e1b9/spawn_0_response.json
+$ echo '{"argument":"Spaces are..."}' > .lumon_comm/a3f2e1b9/spawn_1_response.json
+$ lumon respond
+# {"type":"ask","prompt":"Two agents debated...","session":"a3f2e1b9", ...}
+
+# The main agent reads both arguments, makes a judgment call:
+$ echo '{"winner":"spaces","reasoning":"..."}' > .lumon_comm/a3f2e1b9/ask_response.json
+$ lumon respond
+# {"type":"result","value":{"winner":"spaces","reasoning":"..."}}
+```
+
+The pattern: **code** structures the workflow, **spawn** farms out independent reasoning in parallel, **ask** brings results to the main agent for judgment. The script suspends and resumes automatically — the agent just writes JSON to files and calls `lumon respond`.
+
 ## Usage
 
 ```bash
@@ -116,8 +108,8 @@ lumon spec
 | `lumon <file.lumon>` | Execute a Lumon file |
 | `lumon browse [namespace]` | Show namespace index or a specific manifest |
 | `lumon test [namespace]` | Run Lumon test files |
-| `lumon respond '<json>'` | Resume suspended execution (after ask/spawn) |
-| `lumon respond --file path` | Resume with JSON payload from a file |
+| `lumon respond [session]` | Resume suspended execution (after ask/spawn) |
+| `lumon respond --clear` | Discard a pending session |
 | `lumon deploy <target>` | Deploy Claude Code agent config to a directory |
 | `lumon schedule add <file>` | Schedule a script to run automatically (macOS) |
 | `lumon schedule list` | List all scheduled jobs |

@@ -80,7 +80,7 @@ Write a single JSON value to stdout.
 - Read ALL of stdin before processing (the interpreter closes stdin after writing)
 - Write ONLY valid JSON to stdout — no debug prints, no extra text
 - Use stderr for debug output or error messages
-- Keep execution under 30 seconds (the interpreter enforces a timeout)
+- Keep execution under 5 minutes (the interpreter enforces a timeout)
 
 ## Understanding the Lumon agent
 

@@ -105,30 +105,23 @@ lumon --working-dir sandbox 'test inbox.read
 
 ## How to respond to ask/spawn
 
-When execution suspends for agent judgment, the output will be:
+When execution suspends for agent judgment, the output includes a `session` ID and `response_file` paths:
 
 ```json
-{"type": "ask", "prompt": "Which item first?", "context": [...], "expects": {"action": "text"}}
+{"type": "ask", "session": "a3f2e1b9", "prompt": "Which item first?\n\nContext data: .lumon_comm/a3f2e1b9/ask_context.json", "expects": {"action": "text"}, "response_file": ".lumon_comm/a3f2e1b9/ask_response.json"}
 ```
 
-**Short responses** (under ~2KB) — respond inline:
+Write your response JSON to the `response_file` path, then resume:
 
 ```bash
-lumon --working-dir sandbox respond '{"action": "process", "item": "Pay bill"}'
+# 1. Read context from the context file if present
+# 2. Write the JSON response to the response_file path from the output
+echo '{"action": "process", "item": "Pay bill"}' > .lumon_comm/a3f2e1b9/ask_response.json
+# 3. Resume execution
+lumon --working-dir sandbox respond
 ```
 
-**Long responses** (over ~2KB, or containing quotes/special characters) — write to a file, then respond with `--file`:
-
-```bash
-# 1. Write the JSON response to a temp file
-#    (use the Write tool to create sandbox/tmp/response.json)
-# 2. Respond using --file
-lumon --working-dir sandbox respond --file tmp/response.json
-# 3. Delete the temp file — do NOT leave it behind
-lumon --working-dir sandbox 'io.delete("tmp/response.json")'
-```
-
-**Always use `--file` when the response is longer than ~2KB.** Inline shell arguments break on long text due to shell escaping and argument length limits. This is especially common with `spawn expects: text` where the response is multi-paragraph analysis.
+For spawn batches, each spawn has its own `response_file` (e.g. `spawn_0_response.json`). Write all responses, then run `lumon respond` once.
 
 ## Error handling
 
