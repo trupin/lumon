@@ -1,6 +1,9 @@
 """Tests for Lumon control flow: if/else, match (patterns, guards, exhaustiveness),
 with/then/else, ask, spawn, async/await."""
 
+import json
+import os
+
 import pytest
 
 from tests.conftest import MockFS
@@ -509,6 +512,24 @@ class TestSpawn:
         assert result["type"] == "result"
         assert result["value"] == {"a": "result A", "b": "result B"}
 
+    def test_spawn_wrapped_response_unwrapped_by_cli(self) -> None:
+        """Spawn responses wrapped in {result: ..., spawn_id: N} are unwrapped at CLI boundary.
+
+        The interpreter itself passes responses through as-is; unwrapping
+        happens in cmd_respond (tested in test_cli_unit.py). This test
+        confirms raw values work correctly through interpret().
+        """
+        from lumon.interpreter import interpret
+        code = (
+            'let x = spawn\n'
+            '  "Task"\n'
+            '  expects: text\n'
+            'return x'
+        )
+        result = interpret(code, responses=["raw value"])
+        assert result["type"] == "result"
+        assert result["value"] == "raw value"
+
 
 # ===================================================================
 # async / await
@@ -678,3 +699,180 @@ class TestAskSpawnSignals:
             '  context: [1, 2, 3]'
         )
         assert r.type in ("spawn_batch", "ask")
+
+
+# ===================================================================
+# file-based comm (comm_dir)
+# ===================================================================
+
+
+class TestCommDir:
+    """Tests for file-based spawn/ask communication via comm_dir."""
+
+    def test_spawn_batch_writes_context_files(self, tmp_path: object) -> None:
+        """spawn_batch with comm_dir writes context to files and returns lightweight output."""
+        assert isinstance(tmp_path, os.PathLike)
+        from lumon.interpreter import interpret
+
+        comm_dir = os.path.join(str(tmp_path), "session1")
+        code = (
+            'let a = spawn\n'
+            '  "Task A"\n'
+            '  context: {data: "large payload"}\n'
+            '  expects: text\n'
+            'let b = spawn\n'
+            '  "Task B"\n'
+            '  context: [1, 2, 3]\n'
+            '  expects: text\n'
+            'return [a, b]'
+        )
+        result = interpret(code, comm_dir=comm_dir)
+        assert result["type"] == "spawn_batch"
+        assert result["session"] == "session1"
+        assert "spawns" in result
+        spawns = result["spawns"]
+        assert len(spawns) == 2
+
+        # Check spawn_0
+        s0 = spawns[0]
+        assert s0["spawn_id"] == "spawn_0"
+        assert "context_file" in s0
+        assert s0["context_file"].endswith("spawn_0_context.json")
+        assert "response_file" in s0
+        assert "Context data:" in s0["prompt"]
+        # Context should NOT be inline
+        assert "large payload" not in json.dumps(s0)
+        # Context file should exist with correct content
+        with open(s0["context_file"], encoding="utf-8") as f:
+            ctx = json.load(f)
+        assert ctx == {"data": "large payload"}
+
+        # Check spawn_1
+        s1 = spawns[1]
+        assert s1["spawn_id"] == "spawn_1"
+        with open(s1["context_file"], encoding="utf-8") as f:
+            ctx = json.load(f)
+        assert ctx == [1, 2, 3]
+
+    def test_ask_writes_context_file(self, tmp_path: object) -> None:
+        """ask with comm_dir writes context to a file and returns lightweight output."""
+        assert isinstance(tmp_path, os.PathLike)
+        from lumon.interpreter import interpret
+
+        comm_dir = os.path.join(str(tmp_path), "session2")
+        code = (
+            'let x = ask\n'
+            '  "Which item?"\n'
+            '  context: {items: [1, 2, 3]}\n'
+            '  expects: text'
+        )
+        result = interpret(code, comm_dir=comm_dir)
+        assert result["type"] == "ask"
+        assert result["session"] == "session2"
+        assert "context_file" in result
+        assert "response_file" in result
+        assert "Context data:" in result["prompt"]
+        # Context should NOT be inline
+        assert "items" not in result.get("prompt", "").split("Context data:")[0]
+
+        with open(result["context_file"], encoding="utf-8") as f:
+            ctx = json.load(f)
+        assert ctx == {"items": [1, 2, 3]}
+
+    def test_spawn_no_context_no_file(self, tmp_path: object) -> None:
+        """spawn without context should not create a context file."""
+        assert isinstance(tmp_path, os.PathLike)
+        from lumon.interpreter import interpret
+
+        comm_dir = os.path.join(str(tmp_path), "session3")
+        code = (
+            'let x = spawn\n'
+            '  "Simple task"\n'
+            '  expects: text\n'
+            'return x'
+        )
+        result = interpret(code, comm_dir=comm_dir)
+        assert result["type"] == "spawn_batch"
+        # Single spawn is flattened
+        assert "context_file" not in result
+        assert "response_file" in result
+        assert "Context data:" not in result["prompt"]
+
+    def test_ask_no_context_no_file(self, tmp_path: object) -> None:
+        """ask without context should not create a context file."""
+        assert isinstance(tmp_path, os.PathLike)
+        from lumon.interpreter import interpret
+
+        comm_dir = os.path.join(str(tmp_path), "session4")
+        code = (
+            'let x = ask\n'
+            '  "Yes or no?"\n'
+            '  expects: bool'
+        )
+        result = interpret(code, comm_dir=comm_dir)
+        assert result["type"] == "ask"
+        assert "context_file" not in result
+        assert "response_file" in result
+        assert result["prompt"] == "Yes or no?"
+
+    def test_no_comm_dir_keeps_inline_context(self) -> None:
+        """Without comm_dir, context stays inline (backwards compat)."""
+        from lumon.interpreter import interpret
+
+        code = (
+            'let x = ask\n'
+            '  "Choose"\n'
+            '  context: "data"\n'
+            '  expects: text'
+        )
+        result = interpret(code)
+        assert result["type"] == "ask"
+        assert result["context"] == "data"
+        assert "context_file" not in result
+        assert "response_file" not in result
+        assert "session" not in result
+
+    def test_cleanup_comm_dir(self, tmp_path: object) -> None:
+        """cleanup_comm_dir removes the session directory."""
+        assert isinstance(tmp_path, os.PathLike)
+        from lumon.interpreter import cleanup_comm_dir
+
+        comm_dir = os.path.join(str(tmp_path), "to_clean")
+        os.makedirs(comm_dir)
+        with open(os.path.join(comm_dir, "test.json"), "w") as f:
+            f.write("{}")
+        cleanup_comm_dir(comm_dir)
+        assert not os.path.exists(comm_dir)
+
+    def test_cleanup_all_comm(self, tmp_path: object) -> None:
+        """cleanup_all_comm removes the entire .lumon_comm directory."""
+        assert isinstance(tmp_path, os.PathLike)
+        from lumon.interpreter import cleanup_all_comm
+
+        base = os.path.join(str(tmp_path), ".lumon_comm")
+        os.makedirs(os.path.join(base, "session1"))
+        os.makedirs(os.path.join(base, "session2"))
+        cleanup_all_comm(base)
+        assert not os.path.exists(base)
+
+    def test_single_spawn_with_comm_dir(self, tmp_path: object) -> None:
+        """Single spawn with comm_dir still produces correct output."""
+        assert isinstance(tmp_path, os.PathLike)
+        from lumon.interpreter import interpret
+
+        comm_dir = os.path.join(str(tmp_path), "session5")
+        code = (
+            'let x = spawn\n'
+            '  "Analyze"\n'
+            '  context: "article"\n'
+            '  expects: text\n'
+            'return x'
+        )
+        result = interpret(code, comm_dir=comm_dir)
+        assert result["type"] == "spawn_batch"
+        assert result["session"] == "session5"
+        # Single spawn is flattened (no "spawns" list)
+        assert "spawns" not in result
+        assert result["spawn_id"] == "spawn_0"
+        assert "Context data:" in result["prompt"]
+        assert "response_file" in result

@@ -76,6 +76,52 @@ class TestIoWrite:
 
 
 # ===================================================================
+# io.mkdir
+# ===================================================================
+
+class TestIoMkdir:
+    def test_creates_directory(self, run):
+        fs = MockFS()
+        r = run('return io.mkdir("newdir")', io=fs)
+        assert r.tag_name == "ok"
+
+    def test_created_dir_appears_in_list_dir(self, run):
+        fs = MockFS()
+        code = """
+let m = io.mkdir("newdir")
+return io.list_dir(".")
+"""
+        r = run(code, io=fs)
+        assert r.tag_name == "ok"
+        assert "newdir" in r.tag_value
+
+    def test_creates_intermediate_parents(self, run):
+        fs = MockFS()
+        r = run('return io.mkdir("a/b/c")', io=fs)
+        assert r.tag_name == "ok"
+
+    def test_intermediate_parents_visible(self, run):
+        fs = MockFS()
+        code = """
+let m = io.mkdir("a/b/c")
+return io.list_dir("a")
+"""
+        r = run(code, io=fs)
+        assert r.tag_name == "ok"
+        assert "b" in r.tag_value
+
+    def test_existing_dir_succeeds(self, run):
+        fs = MockFS({"dir/file.md": "x"})
+        r = run('return io.mkdir("dir")', io=fs)
+        assert r.tag_name == "ok"
+
+    def test_traversal_blocked(self, run):
+        fs = MockFS()
+        r = run('return io.mkdir("../../evil")', io=fs)
+        assert r.tag_name == "error"
+
+
+# ===================================================================
 # io.list_dir
 # ===================================================================
 

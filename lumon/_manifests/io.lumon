@@ -11,6 +11,12 @@ define io.write
     content: text "The content to write"
   returns: :ok | :error(text) "Success or error with message"
 
+define io.mkdir
+  "Create a directory and any intermediate parents"
+  takes:
+    path: text "The directory path to create"
+  returns: :ok | :error(text) "Success or error with message"
+
 define io.list_dir
   "List files in a directory"
   takes:

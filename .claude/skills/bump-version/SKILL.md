@@ -31,13 +31,15 @@ Bump the version in `lumon/__init__.py` based on the nature of changes since the
    - If ANY commit is a feature → bump **minor** (X.Y+1.0)
    - If ALL commits are fixes (or non-functional changes) → bump **patch** (X.Y.Z+1)
 
-6. **Apply the bump** — edit `lumon/__init__.py`, changing the `__version__` string to the new version.
+6. **Apply the bump** — edit BOTH version locations to keep them in sync:
+   - `lumon/__init__.py` — change the `__version__` string to the new version
+   - `pyproject.toml` — change the `version` field to the new version
 
 7. **Report** the old version, new version, bump level, and the list of commits included.
 
 8. **Commit the bump:**
    ```bash
-   git add lumon/__init__.py
+   git add lumon/__init__.py pyproject.toml
    git commit -m "$(cat <<'EOF'
    Bump version X.Y.Z → A.B.C
 

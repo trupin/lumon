@@ -64,6 +64,38 @@ class TestRealFSWrite:
         assert result["tag"] == "error"
 
 
+class TestRealFSMkdir:
+    def test_creates_directory(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        root = str(tmp_path)
+        fs = RealFS(root)
+        result = fs.mkdir("newdir")
+        assert result["tag"] == "ok"
+        assert os.path.isdir(os.path.join(root, "newdir"))
+
+    def test_creates_intermediate_parents(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        root = str(tmp_path)
+        fs = RealFS(root)
+        result = fs.mkdir("a/b/c")
+        assert result["tag"] == "ok"
+        assert os.path.isdir(os.path.join(root, "a", "b", "c"))
+
+    def test_existing_dir_succeeds(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        root = str(tmp_path)
+        os.makedirs(os.path.join(root, "existing"))
+        fs = RealFS(root)
+        result = fs.mkdir("existing")
+        assert result["tag"] == "ok"
+
+    def test_outside_root_blocked(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        fs = RealFS(str(tmp_path))
+        result = fs.mkdir("../../evil")
+        assert result["tag"] == "error"
+
+
 class TestRealFSListDir:
     def test_list_dir(self, tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
@@ -302,3 +334,179 @@ class TestRealGit:
         git = RealGit(str(tmp_path))
         result = git.log(5)
         assert result["tag"] == "error"
+
+    @staticmethod
+    def _init_repo(tmp_path: object) -> tuple[str, RealGit]:
+        assert isinstance(tmp_path, os.PathLike)
+        root = str(tmp_path)
+        subprocess.run(["git", "init"], cwd=root, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=root, capture_output=True, check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=root, capture_output=True, check=True)
+        return root, RealGit(root)
+
+    def test_init_creates_repo(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        root = str(tmp_path)
+        git = RealGit(root)
+        result = git.init()
+        assert result["tag"] == "ok"
+        assert os.path.isdir(os.path.join(root, ".git"))
+
+    def test_add_stages_file(self, tmp_path: object) -> None:
+        root, git = self._init_repo(tmp_path)
+        Path(os.path.join(root, "file.txt")).write_text("hello")
+        result = git.add("file.txt")
+        assert result["tag"] == "ok"
+
+    def test_add_nonexistent_errors(self, tmp_path: object) -> None:
+        _root, git = self._init_repo(tmp_path)
+        result = git.add("nonexistent.txt")
+        assert result["tag"] == "error"
+
+    def test_commit_creates_commit(self, tmp_path: object) -> None:
+        root, git = self._init_repo(tmp_path)
+        Path(os.path.join(root, "file.txt")).write_text("hello")
+        git.add("file.txt")
+        result = git.commit("initial commit")
+        assert result["tag"] == "ok"
+        assert isinstance(result["value"], str)
+        assert len(result["value"]) > 0
+
+    def test_commit_nothing_staged_errors(self, tmp_path: object) -> None:
+        _root, git = self._init_repo(tmp_path)
+        # Need at least one commit for git to exist properly
+        result = git.commit("empty")
+        assert result["tag"] == "error"
+
+    def test_diff_shows_changes(self, tmp_path: object) -> None:
+        root, git = self._init_repo(tmp_path)
+        fpath = os.path.join(root, "file.txt")
+        Path(fpath).write_text("hello")
+        git.add("file.txt")
+        git.commit("init")
+        Path(fpath).write_text("hello world")
+        result = git.diff()
+        assert result["tag"] == "ok"
+        assert "hello world" in result["value"]
+
+    def test_diff_staged_shows_staged(self, tmp_path: object) -> None:
+        root, git = self._init_repo(tmp_path)
+        fpath = os.path.join(root, "file.txt")
+        Path(fpath).write_text("hello")
+        git.add("file.txt")
+        git.commit("init")
+        Path(fpath).write_text("updated")
+        git.add("file.txt")
+        result = git.diff_staged()
+        assert result["tag"] == "ok"
+        assert "updated" in result["value"]
+
+    def test_branch_and_list(self, tmp_path: object) -> None:
+        root, git = self._init_repo(tmp_path)
+        Path(os.path.join(root, "f.txt")).write_text("x")
+        git.add("f.txt")
+        git.commit("init")
+        result = git.branch("feature")
+        assert result["tag"] == "ok"
+        branches = git.branch_list()
+        assert branches["tag"] == "ok"
+        assert "feature" in branches["value"]
+
+    def test_branch_duplicate_errors(self, tmp_path: object) -> None:
+        root, git = self._init_repo(tmp_path)
+        Path(os.path.join(root, "f.txt")).write_text("x")
+        git.add("f.txt")
+        git.commit("init")
+        git.branch("feature")
+        result = git.branch("feature")
+        assert result["tag"] == "error"
+
+    def test_checkout_switches_branch(self, tmp_path: object) -> None:
+        root, git = self._init_repo(tmp_path)
+        Path(os.path.join(root, "f.txt")).write_text("x")
+        git.add("f.txt")
+        git.commit("init")
+        git.branch("feature")
+        result = git.checkout("feature")
+        assert result["tag"] == "ok"
+
+    def test_checkout_bad_ref_errors(self, tmp_path: object) -> None:
+        root, git = self._init_repo(tmp_path)
+        Path(os.path.join(root, "f.txt")).write_text("x")
+        git.add("f.txt")
+        git.commit("init")
+        result = git.checkout("nonexistent")
+        assert result["tag"] == "error"
+
+    def test_reset_unstages_file(self, tmp_path: object) -> None:
+        root, git = self._init_repo(tmp_path)
+        Path(os.path.join(root, "f.txt")).write_text("x")
+        git.add("f.txt")
+        git.commit("init")
+        Path(os.path.join(root, "f.txt")).write_text("changed")
+        git.add("f.txt")
+        result = git.reset("f.txt")
+        assert result["tag"] == "ok"
+        # After reset, diff_staged should be empty for that file
+        staged = git.diff_staged()
+        assert "changed" not in staged["value"]
+
+    def test_show_commit(self, tmp_path: object) -> None:
+        root, git = self._init_repo(tmp_path)
+        Path(os.path.join(root, "f.txt")).write_text("x")
+        git.add("f.txt")
+        git.commit("init")
+        result = git.show("HEAD")
+        assert result["tag"] == "ok"
+        assert "init" in result["value"]
+
+    def test_show_bad_ref_errors(self, tmp_path: object) -> None:
+        root, git = self._init_repo(tmp_path)
+        Path(os.path.join(root, "f.txt")).write_text("x")
+        git.add("f.txt")
+        git.commit("init")
+        result = git.show("nonexistent_ref_abc")
+        assert result["tag"] == "error"
+
+    def test_tag_and_list(self, tmp_path: object) -> None:
+        root, git = self._init_repo(tmp_path)
+        Path(os.path.join(root, "f.txt")).write_text("x")
+        git.add("f.txt")
+        git.commit("init")
+        result = git.tag("v1.0")
+        assert result["tag"] == "ok"
+        tags = git.tag_list()
+        assert tags["tag"] == "ok"
+        assert "v1.0" in tags["value"]
+
+    def test_tag_duplicate_errors(self, tmp_path: object) -> None:
+        root, git = self._init_repo(tmp_path)
+        Path(os.path.join(root, "f.txt")).write_text("x")
+        git.add("f.txt")
+        git.commit("init")
+        git.tag("v1.0")
+        result = git.tag("v1.0")
+        assert result["tag"] == "error"
+
+    def test_not_git_repo_errors(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        # Test each function individually with a fresh non-repo directory
+        for name, fn_factory in [
+            ("add", lambda g: (g.add, ["f.txt"])),
+            ("commit", lambda g: (g.commit, ["msg"])),
+            ("diff", lambda g: (g.diff, [])),
+            ("diff_staged", lambda g: (g.diff_staged, [])),
+            ("branch", lambda g: (g.branch, ["x"])),
+            ("branch_list", lambda g: (g.branch_list, [])),
+            ("checkout", lambda g: (g.checkout, ["x"])),
+            ("reset", lambda g: (g.reset, ["x"])),
+            ("show", lambda g: (g.show, ["HEAD"])),
+            ("tag", lambda g: (g.tag, ["v1"])),
+            ("tag_list", lambda g: (g.tag_list, [])),
+        ]:
+            subdir = os.path.join(str(tmp_path), name)
+            os.makedirs(subdir)
+            git = RealGit(subdir)
+            fn, args = fn_factory(git)
+            result = fn(*args)
+            assert result["tag"] == "error", f"{name} should error outside git repo"

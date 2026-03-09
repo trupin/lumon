@@ -354,3 +354,56 @@ class TestTextTypeErrors:
     def test_pad_end_wrong_types(self, run):
         r = run('return text.pad_end("x", "5", "0")')
         assert r.type == "error"
+
+
+# ===================================================================
+# Git built-in type errors
+# ===================================================================
+
+class TestGitTypeErrors:
+    """Type checker catches wrong arg types/counts for git.* functions."""
+
+    def test_git_add_wrong_type(self, run):
+        from tests.conftest import MockGit
+        r = run('return git.add(123)', git=MockGit())
+        assert r.type == "error"
+
+    def test_git_commit_no_args(self, run):
+        from tests.conftest import MockGit
+        r = run('return git.commit()', git=MockGit())
+        assert r.type == "error"
+
+    def test_git_commit_wrong_type(self, run):
+        from tests.conftest import MockGit
+        r = run('return git.commit(42)', git=MockGit())
+        assert r.type == "error"
+
+    def test_git_branch_wrong_type(self, run):
+        from tests.conftest import MockGit
+        r = run('return git.branch(true)', git=MockGit())
+        assert r.type == "error"
+
+    def test_git_checkout_wrong_type(self, run):
+        from tests.conftest import MockGit
+        r = run('return git.checkout(42)', git=MockGit())
+        assert r.type == "error"
+
+    def test_git_log_wrong_type(self, run):
+        from tests.conftest import MockGit
+        r = run('return git.log("five")', git=MockGit())
+        assert r.type == "error"
+
+    def test_git_status_extra_args(self, run):
+        from tests.conftest import MockGit
+        r = run('return git.status("extra")', git=MockGit())
+        assert r.type == "error"
+
+    def test_git_show_wrong_type(self, run):
+        from tests.conftest import MockGit
+        r = run('return git.show(123)', git=MockGit())
+        assert r.type == "error"
+
+    def test_git_tag_wrong_type(self, run):
+        from tests.conftest import MockGit
+        r = run('return git.tag(42)', git=MockGit())
+        assert r.type == "error"

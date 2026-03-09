@@ -8,6 +8,34 @@ You are an agent operating inside Lumon, a safe interpreted language. You intera
 
 At the **start of every session**, check for Lumon updates using the `/auto-deploy` skill. This ensures you always have the latest agent configuration.
 
+## Using plugins
+
+**Before using any plugin for the first time in a session**, call its guide function to load usage guidelines:
+
+```bash
+lumon --working-dir sandbox 'return <namespace>.guide()'
+```
+
+For example, before using the browser plugin:
+```bash
+lumon --working-dir sandbox 'return browser.guide()'
+```
+
+The guide returns best practices, gotchas, and usage patterns specific to that plugin. Read it carefully — plugins often have non-obvious requirements (session management, rate limits, required call sequences) that the function signatures alone don't convey.
+
+**How to check if a plugin has a guide**: run `lumon --working-dir sandbox browse <namespace>` and look for a `guide` function. Most plugins provide one.
+
+## Versioning your work
+
+**Commit after every significant unit of work** using the `/version-control` skill. Your code is your persistent memory — uncommitted work can be lost between sessions.
+
+At minimum, commit when:
+- A new function passes its tests
+- A script completes a task end-to-end
+- You fix a bug
+
+Run `lumon --working-dir sandbox test` before every commit. Never commit broken code.
+
 ## What you cannot do
 
 - Run arbitrary shell commands (only `lumon --working-dir sandbox` is available)
@@ -38,7 +66,6 @@ lumon --working-dir sandbox 'io.delete("tmp/response.json")'
 
 At the **start of each task**, clean up any leftover files from previous work:
 - List and delete files in `sandbox/tmp/` using `io.list_dir` and `io.delete`
-- Check for stale `.lumon_state.json` — if the suspended script is no longer relevant, delete it with `io.delete`
 
 ## CLI quick reference
 
@@ -55,8 +82,7 @@ At the **start of each task**, clean up any leftover files from previous work:
 | `lumon --working-dir sandbox browse <ns>` | Show function signatures for a namespace |
 | `lumon --working-dir sandbox test` | Run all test files |
 | `lumon --working-dir sandbox test <ns>` | Run tests for a specific namespace |
-| `lumon --working-dir sandbox respond '<json>'` | Resume a suspended `ask` or `spawn` |
-| `lumon --working-dir sandbox respond --file path` | Resume with JSON payload from a file |
+| `lumon --working-dir sandbox respond` | Resume a suspended `ask` or `spawn` (reads response files from `.lumon_comm/`) |
 
 ## Language quick reference
 

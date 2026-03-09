@@ -623,6 +623,9 @@ def register_builtins(
             lambda path, content: _wrap_tag_result(_io.write(path, content)),  # type: ignore[union-attr]
         )
         env.register_builtin(
+            "io.mkdir", lambda path: _wrap_tag_result(_io.mkdir(path))  # type: ignore[union-attr]
+        )
+        env.register_builtin(
             "io.list_dir",
             lambda path, recursive=False: _wrap_tag_result(  # type: ignore[union-attr]
                 _io.list_dir(path, recursive=bool(recursive))  # type: ignore[union-attr]
@@ -707,6 +710,42 @@ def register_builtins(
         )
         env.register_builtin(
             "git.log", lambda n: _wrap_tag_result(_git.log(n))  # type: ignore[union-attr]
+        )
+        env.register_builtin(
+            "git.init", lambda: _wrap_tag_result(_git.init())  # type: ignore[union-attr]
+        )
+        env.register_builtin(
+            "git.add", lambda path: _wrap_tag_result(_git.add(path))  # type: ignore[union-attr]
+        )
+        env.register_builtin(
+            "git.commit", lambda msg: _wrap_tag_result(_git.commit(msg))  # type: ignore[union-attr]
+        )
+        env.register_builtin(
+            "git.diff", lambda: _wrap_tag_result(_git.diff())  # type: ignore[union-attr]
+        )
+        env.register_builtin(
+            "git.diff_staged", lambda: _wrap_tag_result(_git.diff_staged())  # type: ignore[union-attr]
+        )
+        env.register_builtin(
+            "git.branch", lambda name: _wrap_tag_result(_git.branch(name))  # type: ignore[union-attr]
+        )
+        env.register_builtin(
+            "git.branch_list", lambda: _wrap_tag_result(_git.branch_list())  # type: ignore[union-attr]
+        )
+        env.register_builtin(
+            "git.checkout", lambda ref: _wrap_tag_result(_git.checkout(ref))  # type: ignore[union-attr]
+        )
+        env.register_builtin(
+            "git.reset", lambda path: _wrap_tag_result(_git.reset(path))  # type: ignore[union-attr]
+        )
+        env.register_builtin(
+            "git.show", lambda ref: _wrap_tag_result(_git.show(ref))  # type: ignore[union-attr]
+        )
+        env.register_builtin(
+            "git.tag", lambda name: _wrap_tag_result(_git.tag(name))  # type: ignore[union-attr]
+        )
+        env.register_builtin(
+            "git.tag_list", lambda: _wrap_tag_result(_git.tag_list())  # type: ignore[union-attr]
         )
 
     # --- plugin.* ---

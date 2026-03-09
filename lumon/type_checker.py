@@ -323,14 +323,38 @@ IO_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
         (TText(), TText(), TText()),
         TUnion((TTag("ok"), TTag("error", TText()))),
     ),
+    "io.mkdir": (
+        (TText(),),
+        TUnion((TTag("ok"), TTag("error", TText()))),
+    ),
 }
 
+_OK_OR_ERR = TUnion((TTag("ok"), TTag("error", TText())))
+_OK_TEXT_OR_ERR = TUnion((TTag("ok", TText()), TTag("error", TText())))
+_OK_LIST_TEXT_OR_ERR = TUnion((TTag("ok", TList(TText())), TTag("error", TText())))
+
 GIT_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
-    "git.status": ((), TUnion((TTag("ok", TText()), TTag("error", TText())))),
-    "git.log": (
-        (TNumber(),),
-        TUnion((TTag("ok", TList(TText())), TTag("error", TText()))),
-    ),
+    "git.status": ((), _OK_TEXT_OR_ERR),
+    "git.log": ((TNumber(),), _OK_LIST_TEXT_OR_ERR),
+    "git.init": ((), _OK_OR_ERR),
+    "git.add": ((TText(),), _OK_OR_ERR),
+    "git.commit": ((TText(),), _OK_TEXT_OR_ERR),
+    "git.diff": ((), _OK_TEXT_OR_ERR),
+    "git.diff_staged": ((), _OK_TEXT_OR_ERR),
+    "git.branch": ((TText(),), _OK_OR_ERR),
+    "git.branch_list": ((), _OK_LIST_TEXT_OR_ERR),
+    "git.checkout": ((TText(),), _OK_OR_ERR),
+    "git.reset": ((TText(),), _OK_OR_ERR),
+    "git.show": ((TText(),), _OK_TEXT_OR_ERR),
+    "git.tag": ((TText(),), _OK_OR_ERR),
+    "git.tag_list": ((), _OK_LIST_TEXT_OR_ERR),
+}
+
+TEST_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
+    "mock_io": ((TList(TMap()),), TNone()),
+    "mock_plugin": ((TText(), TText(), TAny()), TNone()),
+    "mock_ask": ((TAny(),), TNone()),
+    "mock_spawn": ((TList(TAny()),), TNone()),
 }
 
 
@@ -770,6 +794,7 @@ def type_check(
     *,
     io_backend: object = None,
     git_backend: object = None,
+    test_mode: bool = False,
 ) -> None:
     """Run static type checking on a parsed AST. Raises LumonError on type errors."""
     sigs = dict(BUILTIN_SIGS)
@@ -777,5 +802,7 @@ def type_check(
         sigs.update(IO_SIGS)
     if git_backend is not None:
         sigs.update(GIT_SIGS)
+    if test_mode:
+        sigs.update(TEST_SIGS)
     env = TypeEnv()
     check_node(ast, env, sigs)

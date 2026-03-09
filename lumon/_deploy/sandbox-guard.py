@@ -150,6 +150,13 @@ def _is_within(path: str, allowed_dir: str) -> bool:
     return resolved == allowed or resolved.startswith(allowed + os.sep)
 
 
+def _is_within_home_subdir(path: str, subdir: str) -> bool:
+    """Check if path is within ~/subdir (absolute path check)."""
+    resolved = os.path.realpath(path)
+    allowed = os.path.realpath(os.path.join(os.path.expanduser("~"), subdir))
+    return resolved == allowed or resolved.startswith(allowed + os.sep)
+
+
 def _block(reason: str) -> None:
     logging.warning("BLOCKED: %s", reason)
     print(f"BLOCKED: {reason}", file=sys.stderr)
@@ -170,19 +177,26 @@ def main() -> None:
             return
         _block(f"Only `lumon --working-dir sandbox` commands are allowed.\n  Attempted: {command}")
 
+    elif tool == "Write":
+        file_path = tool_input.get("file_path", "")
+        if _is_within(file_path, "sandbox") or _is_within(file_path, ".claude"):
+            logging.info("ALLOWED Write: %s", file_path)
+            return
+        _block(f"Write only allowed in sandbox/ and .claude/ directories.\n  Attempted: {file_path}")
+
     elif tool == "Edit":
         file_path = tool_input.get("file_path", "")
-        if _is_within(file_path, "sandbox"):
+        if _is_within(file_path, "sandbox") or _is_within(file_path, ".claude"):
             logging.info("ALLOWED Edit: %s", file_path)
             return
-        _block(f"Edit only allowed in sandbox/ directory.\n  Attempted: {file_path}")
+        _block(f"Edit only allowed in sandbox/ and .claude/ directories.\n  Attempted: {file_path}")
 
     elif tool == "Read":
         file_path = tool_input.get("file_path", "")
-        if _is_within(file_path, "."):
+        if _is_within(file_path, ".") or _is_within_home_subdir(file_path, ".claude"):
             logging.info("ALLOWED Read: %s", file_path)
             return
-        _block(f"Read only allowed in current directory.\n  Attempted: {file_path}")
+        _block(f"Read only allowed in current directory and ~/.claude/.\n  Attempted: {file_path}")
 
 
 if __name__ == "__main__":

@@ -7,3 +7,65 @@ define git.log
   takes:
     n: number "Number of commits to return"
   returns: :ok(list<text>) | :error(text) "List of hash-subject strings or error"
+
+define git.init
+  "Initialize a new git repository"
+  returns: :ok | :error(text) "Success or error"
+
+define git.add
+  "Stage a file for the next commit"
+  takes:
+    path: text "File path to stage"
+  returns: :ok | :error(text) "Success or error"
+
+define git.commit
+  "Create a new commit with staged changes"
+  takes:
+    message: text "Commit message"
+  returns: :ok(text) | :error(text) "Short commit hash or error"
+
+define git.diff
+  "Show unstaged changes in the working tree"
+  returns: :ok(text) | :error(text) "Diff output or error"
+
+define git.diff_staged
+  "Show staged changes (index vs HEAD)"
+  returns: :ok(text) | :error(text) "Diff output or error"
+
+define git.branch
+  "Create a new branch"
+  takes:
+    name: text "Branch name"
+  returns: :ok | :error(text) "Success or error"
+
+define git.branch_list
+  "List all local branches"
+  returns: :ok(list<text>) | :error(text) "Branch names or error"
+
+define git.checkout
+  "Switch to a branch or ref"
+  takes:
+    ref: text "Branch name or commit ref"
+  returns: :ok | :error(text) "Success or error"
+
+define git.reset
+  "Unstage a file (remove from index, keep working tree)"
+  takes:
+    path: text "File path to unstage"
+  returns: :ok | :error(text) "Success or error"
+
+define git.show
+  "Show commit details and stats"
+  takes:
+    ref: text "Commit ref to show"
+  returns: :ok(text) | :error(text) "Commit details or error"
+
+define git.tag
+  "Create a lightweight tag at HEAD"
+  takes:
+    name: text "Tag name"
+  returns: :ok | :error(text) "Success or error"
+
+define git.tag_list
+  "List all tags"
+  returns: :ok(list<text>) | :error(text) "Tag names or error"

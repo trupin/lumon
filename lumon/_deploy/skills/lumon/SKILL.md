@@ -14,8 +14,6 @@ Before starting any task, clean up stale files from previous work:
 lumon --working-dir sandbox 'io.delete_dir("tmp")'
 ```
 
-If `sandbox/.lumon_state.json` exists and the suspended script is no longer relevant, delete it with `io.delete`.
-
 ## Phase 1: Discover existing code
 
 Before writing anything, check if the task (or parts of it) is already automated.
@@ -70,15 +68,17 @@ Run the script:
 lumon --working-dir sandbox scripts/<task>.lumon
 ```
 
-When the script suspends with `ask` or `spawn`, respond with your judgment. For short responses, use inline `respond '<json>'`. For long responses (~2KB+), write the JSON to a temp file and use `respond --file`:
+When the script suspends with `ask` or `spawn`, the output JSON includes a `session` ID and `response_file` paths. Write your response to the indicated file, then resume:
 
 ```bash
-# Write response to temp file, respond, then clean up
-lumon --working-dir sandbox respond --file tmp/response.json
-lumon --working-dir sandbox 'io.delete("tmp/response.json")'
+# Write response to the file path from the suspend output, then resume
+echo '{"action": "process"}' > .lumon_comm/<session>/ask_response.json
+lumon --working-dir sandbox respond
 ```
 
-The orchestrator records your responses so the script can be replayed later.
+For spawn batches, write each response to its `response_file` (e.g. `spawn_0_response.json`, `spawn_1_response.json`), then run `lumon respond`.
+
+The process stays alive in the background between suspensions — each `lumon respond` picks up where execution left off.
 
 ### If the script fails
 

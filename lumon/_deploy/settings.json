@@ -8,7 +8,8 @@
     "allow": [
       "Bash",
       "Read",
-      "Edit"
+      "Edit",
+      "Write"
     ]
   },
   "hooks": {
@@ -24,6 +25,15 @@
       },
       {
         "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 .claude/hooks/sandbox-guard.py"
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
         "hooks": [
           {
             "type": "command",

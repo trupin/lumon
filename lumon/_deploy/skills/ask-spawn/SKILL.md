@@ -73,22 +73,25 @@ The canonical structure for any non-trivial script:
 
 Never collapse steps 2-3 into hardcoded logic. If a human would need to think about it, the script should `ask` or `spawn`.
 
-### Responding to long spawn/ask results
+### Responding to spawn/ask results
 
-When a `spawn expects: text` produces a long response (over ~2KB — common for analysis, reports, summaries):
+When execution suspends, the output includes `response_file` paths for each ask/spawn. Write your JSON response to the indicated file, then resume:
 
-1. Write the JSON response to `sandbox/tmp/response.json` using the Write tool
-2. Respond with `lumon --working-dir sandbox respond --file tmp/response.json`
-3. Delete the temp file: `lumon --working-dir sandbox 'io.delete("tmp/response.json")'`
-
-**Never paste long text as an inline `respond` argument.** Shell escaping breaks on quotes, dollar signs, and special characters in multi-paragraph text.
-
-For spawn batches with multiple long responses, write a single JSON file with all responses:
 ```bash
-# Write {"spawn_0": "...", "spawn_1": "..."} to tmp/response.json
-lumon --working-dir sandbox respond --file tmp/response.json
-lumon --working-dir sandbox 'io.delete("tmp/response.json")'
+# For ask: write response to the ask_response.json path from the output
+echo '"your response"' > .lumon_comm/<session>/ask_response.json
+lumon --working-dir sandbox respond
 ```
+
+For spawn batches, write each response to its `response_file`:
+```bash
+# Write each spawn's response to its response_file
+echo '"analysis A"' > .lumon_comm/<session>/spawn_0_response.json
+echo '"analysis B"' > .lumon_comm/<session>/spawn_1_response.json
+lumon --working-dir sandbox respond
+```
+
+Context data (which can be large) is written to context files automatically. Read the `context_file` from the output to get the full context.
 
 ### Anti-patterns to avoid
 
@@ -97,4 +100,3 @@ lumon --working-dir sandbox 'io.delete("tmp/response.json")'
 - **Sequential reasoning** on independent items — use `spawn` + `await_all` for parallelism
 - **Guessing a format or structure** from partial information — use `ask` to confirm
 - **Swallowing ambiguity with a default** (e.g., `?? "unknown"`) when the agent should decide — use `ask` instead
-- **Inlining long responses** — use `respond --file` for anything over ~2KB

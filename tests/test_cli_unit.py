@@ -6,23 +6,23 @@ import argparse
 import json
 import os
 import sys
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from lumon.cli import (
     _annotate_manifest,
-    _batch_size_from_result,
     _bundled_manifest,
     _clear_state,
+    _COMM_BASE,
+    _comm_dir_for_session,
     _deploy_plugin_skills,
     _deploy_skills,
+    _find_pending_daemon,
+    _find_session,
     _format_contract,
-    _load_state,
     _prompt_overwrite,
-    _STATE_FILE,
-    _save_state,
+    _save_script_marker,
     cmd_browse,
     cmd_deploy,
     cmd_respond,
@@ -32,48 +32,44 @@ from lumon.cli import (
     cmd_version,
     main,
 )
+from lumon.daemon import is_daemon_alive
 
 
-class TestStateHelpers:
-    def test_save_and_load_state(self, tmp_path: object) -> None:
+class TestSessionHelpers:
+    def test_save_script_marker(self, tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
-        with patch("lumon.cli._STATE_FILE", state_file):
-            _save_state("return 42", [])
-            state = _load_state()
-            assert state is not None
-            assert state["code"] == "return 42"
-            assert state["responses"] == []
-            assert state["batch_size"] == 0
-
-    def test_save_and_load_state_with_batch_size(self, tmp_path: object) -> None:
-        assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
-        with patch("lumon.cli._STATE_FILE", state_file):
-            _save_state("return 42", [], batch_size=3)
-            state = _load_state()
-            assert state is not None
-            assert state["batch_size"] == 3
-
-    def test_load_state_missing(self, tmp_path: object) -> None:
-        assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
-        with patch("lumon.cli._STATE_FILE", state_file):
-            assert _load_state() is None
+        comm_dir = os.path.join(str(tmp_path), ".lumon_comm", "abc12345")
+        _save_script_marker(comm_dir, "test.lumon")
+        marker = os.path.join(comm_dir, "script.txt")
+        assert os.path.isfile(marker)
+        with open(marker, encoding="utf-8") as f:
+            assert f.read() == "test.lumon"
 
     def test_clear_state(self, tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
-        with patch("lumon.cli._STATE_FILE", state_file):
-            _save_state("return 42", [])
-            _clear_state()
-            assert _load_state() is None
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        comm_dir = os.path.join(comm_base, "abc12345")
+        os.makedirs(comm_dir)
+        with open(os.path.join(comm_dir, "script.txt"), "w") as f:
+            f.write("test.lumon")
+        with patch("lumon.cli._COMM_BASE", comm_base):
+            _clear_state("abc12345")
+        assert not os.path.isdir(comm_dir)
 
     def test_clear_state_noop_if_missing(self, tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
-        with patch("lumon.cli._STATE_FILE", state_file):
-            _clear_state()  # should not raise
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        with patch("lumon.cli._COMM_BASE", comm_base):
+            _clear_state("nonexistent")  # should not raise
+
+    def test_find_session(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        with patch("lumon.cli._COMM_BASE", comm_base):
+            assert _find_session() is None
+            comm_dir = os.path.join(comm_base, "abc12345")
+            os.makedirs(comm_dir)
+            assert _find_session() == "abc12345"
 
 
 class TestCmdVersion:
@@ -96,8 +92,8 @@ class TestCmdSpec:
 class TestCmdRunCode:
     def test_simple_return(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
-        with patch("lumon.cli._STATE_FILE", state_file):
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        with patch("lumon.cli._COMM_BASE", comm_base):
             old_cwd = os.getcwd()
             os.chdir(str(tmp_path))
             try:
@@ -112,8 +108,8 @@ class TestCmdRunCode:
 
     def test_error_returns_1(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
-        with patch("lumon.cli._STATE_FILE", state_file):
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        with patch("lumon.cli._COMM_BASE", comm_base):
             old_cwd = os.getcwd()
             os.chdir(str(tmp_path))
             try:
@@ -122,50 +118,84 @@ class TestCmdRunCode:
                 os.chdir(old_cwd)
         assert result == 1
 
-    def test_ask_saves_state(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+    def test_ask_creates_session(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
-        with patch("lumon.cli._STATE_FILE", state_file):
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        with patch("lumon.cli._COMM_BASE", comm_base):
             old_cwd = os.getcwd()
             os.chdir(str(tmp_path))
             try:
                 cmd_run_code('let x = ask\n  "what?"')
             finally:
                 os.chdir(old_cwd)
-        assert state_file.exists()
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["type"] == "ask"
+        assert "session" in output
+        # A session directory should exist
+        assert os.path.isdir(comm_base)
+        sessions = os.listdir(comm_base)
+        assert len(sessions) == 1
+        # Wait briefly for daemon to write pid, then clean up
+        import time
+        time.sleep(0.3)
+        with patch("lumon.cli._COMM_BASE", comm_base):
+            _clear_state(sessions[0])
 
 
 class TestCmdRespond:
     def test_no_state_error(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
-        with patch("lumon.cli._STATE_FILE", state_file):
-            args = argparse.Namespace(response='"hello"')
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        with patch("lumon.cli._COMM_BASE", comm_base):
+            args = argparse.Namespace(session=None)
             result = cmd_respond(args)
         assert result == 1
         captured = capsys.readouterr()
         assert "no suspended execution" in captured.err
 
-    def test_invalid_json(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+    def test_dead_daemon_error(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """Respond errors if daemon is dead."""
         assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
-        with patch("lumon.cli._STATE_FILE", state_file):
-            _save_state("return 42", [])
-            args = argparse.Namespace(response="not json{")
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        comm_dir = os.path.join(comm_base, "abc12345")
+        os.makedirs(comm_dir)
+        # Write a PID that doesn't exist
+        with open(os.path.join(comm_dir, "pid"), "w") as f:
+            f.write("999999999")
+        with patch("lumon.cli._COMM_BASE", comm_base):
+            args = argparse.Namespace(session="abc12345", clear=False)
             result = cmd_respond(args)
         assert result == 1
         captured = capsys.readouterr()
-        assert "invalid JSON" in captured.err
+        assert "not running" in captured.err
 
-    def test_respond_resumes(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+    def test_respond_full_cycle(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """Full ask → respond cycle using daemon model."""
+        import time
         assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
-        with patch("lumon.cli._STATE_FILE", state_file):
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        with patch("lumon.cli._COMM_BASE", comm_base):
             old_cwd = os.getcwd()
             os.chdir(str(tmp_path))
             try:
-                _save_state('let x = ask\n  "what?"\nreturn x', [])
-                args = argparse.Namespace(response='"the answer"')
+                # Step 1: Run code that asks
+                capsys.readouterr()
+                cmd_run_code('let x = ask\n  "what?"\nreturn x')
+                captured = capsys.readouterr()
+                first_output = json.loads(captured.out)
+                assert first_output["type"] == "ask"
+                session = first_output["session"]
+
+                # Step 2: Write response file
+                comm_dir = _comm_dir_for_session(session)
+                response_file = os.path.join(comm_dir, "ask_response.json")
+                with open(response_file, "w", encoding="utf-8") as f:
+                    json.dump("the answer", f)
+
+                # Step 3: Respond — daemon should pick up response
+                capsys.readouterr()
+                args = argparse.Namespace(session=session, clear=False)
                 result = cmd_respond(args)
             finally:
                 os.chdir(old_cwd)
@@ -176,17 +206,32 @@ class TestCmdRespond:
         assert output["value"] == "the answer"
 
 
-    def test_respond_with_builtins(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        """respond should have io/text/list builtins available during replay."""
+class TestRespondDaemon:
+    def test_respond_full_ask_cycle(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """Full ask → respond cycle using daemon model."""
         assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
-        with patch("lumon.cli._STATE_FILE", state_file):
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        with patch("lumon.cli._COMM_BASE", comm_base):
             old_cwd = os.getcwd()
             os.chdir(str(tmp_path))
             try:
-                code = 'let n = text.length("hello")\nlet x = ask\n  "how?"\n  context: {n: n}\nreturn x'
-                _save_state(code, [])
-                args = argparse.Namespace(response='"ok"')
+                # Step 1: Run code that asks
+                capsys.readouterr()
+                cmd_run_code('let x = ask\n  "what?"\nreturn x')
+                captured = capsys.readouterr()
+                first_output = json.loads(captured.out)
+                assert first_output["type"] == "ask"
+                session = first_output["session"]
+
+                # Step 2: Write response file
+                comm_dir = _comm_dir_for_session(session)
+                response_file = os.path.join(comm_dir, "ask_response.json")
+                with open(response_file, "w", encoding="utf-8") as f:
+                    json.dump("the answer", f)
+
+                # Step 3: Respond
+                capsys.readouterr()
+                args = argparse.Namespace(session=session, clear=False)
                 result = cmd_respond(args)
             finally:
                 os.chdir(old_cwd)
@@ -194,35 +239,33 @@ class TestCmdRespond:
         captured = capsys.readouterr()
         output = json.loads(captured.out)
         assert output["type"] == "result"
-        assert output["value"] == "ok"
+        assert output["value"] == "the answer"
 
-
-class TestBatchSizeFromResult:
-    def test_non_spawn_returns_zero(self) -> None:
-        assert _batch_size_from_result({"type": "result", "value": 42}) == 0
-        assert _batch_size_from_result({"type": "ask", "prompt": "?"}) == 0
-
-    def test_single_spawn(self) -> None:
-        assert _batch_size_from_result({"type": "spawn_batch", "prompt": "do X"}) == 1
-
-    def test_multiple_spawns(self) -> None:
-        result = {"type": "spawn_batch", "spawns": [{"prompt": "A"}, {"prompt": "B"}, {"prompt": "C"}]}
-        assert _batch_size_from_result(result) == 3
-
-
-class TestRespondBatch:
-    def test_respond_batch_array(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        """Responding with a JSON array matching batch_size feeds all responses at once."""
+    def test_respond_spawn_batch_cycle(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """Full spawn → respond cycle using daemon model."""
         assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
         code = 'let a = spawn\n  "Task A"\nlet b = spawn\n  "Task B"\nreturn [a, b]'
-        with patch("lumon.cli._STATE_FILE", state_file):
+        with patch("lumon.cli._COMM_BASE", comm_base):
             old_cwd = os.getcwd()
             os.chdir(str(tmp_path))
             try:
-                # Save state as if we just ran the code and got a spawn_batch with 2 spawns
-                _save_state(code, [], batch_size=2)
-                args = argparse.Namespace(response='["resp A", "resp B"]')
+                capsys.readouterr()
+                cmd_run_code(code)
+                captured = capsys.readouterr()
+                first_output = json.loads(captured.out)
+                assert first_output["type"] == "spawn_batch"
+                session = first_output["session"]
+
+                # Write spawn response files
+                comm_dir = _comm_dir_for_session(session)
+                for i, resp in enumerate(["resp A", "resp B"]):
+                    resp_file = os.path.join(comm_dir, f"spawn_{i}_response.json")
+                    with open(resp_file, "w", encoding="utf-8") as f:
+                        json.dump(resp, f)
+
+                capsys.readouterr()
+                args = argparse.Namespace(session=session, clear=False)
                 result = cmd_respond(args)
             finally:
                 os.chdir(old_cwd)
@@ -232,151 +275,93 @@ class TestRespondBatch:
         assert output["type"] == "result"
         assert output["value"] == ["resp A", "resp B"]
 
-    def test_respond_single_still_works(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        """Responding with a single JSON value (not array) works even when batch_size > 1."""
+    def test_respond_unwraps_spawn_wrapper(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """Spawn responses with {result: ..., spawn_id: N} wrappers are unwrapped."""
         assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
-        code = 'let x = ask\n  "what?"\nreturn x'
-        with patch("lumon.cli._STATE_FILE", state_file):
-            old_cwd = os.getcwd()
-            os.chdir(str(tmp_path))
-            try:
-                _save_state(code, [], batch_size=0)
-                args = argparse.Namespace(response='"hello"')
-                result = cmd_respond(args)
-            finally:
-                os.chdir(old_cwd)
-        assert result == 0
-        captured = capsys.readouterr()
-        output = json.loads(captured.out)
-        assert output["type"] == "result"
-        assert output["value"] == "hello"
-
-    def test_respond_array_wrong_size_treated_as_single(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        """Array with length != batch_size is treated as a single response."""
-        assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
-        code = 'let x = ask\n  "what?"\nreturn x'
-        with patch("lumon.cli._STATE_FILE", state_file):
-            old_cwd = os.getcwd()
-            os.chdir(str(tmp_path))
-            try:
-                _save_state(code, [], batch_size=3)
-                args = argparse.Namespace(response='["a", "b"]')
-                result = cmd_respond(args)
-            finally:
-                os.chdir(old_cwd)
-        assert result == 0
-        captured = capsys.readouterr()
-        output = json.loads(captured.out)
-        assert output["type"] == "result"
-        # The list is treated as a single value
-        assert output["value"] == ["a", "b"]
-
-    def test_respond_batch_dict(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        """Responding with a dict keyed by spawn_N distributes responses."""
-        assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
         code = 'let a = spawn\n  "Task A"\nlet b = spawn\n  "Task B"\nreturn [a, b]'
-        with patch("lumon.cli._STATE_FILE", state_file):
+        with patch("lumon.cli._COMM_BASE", comm_base):
             old_cwd = os.getcwd()
             os.chdir(str(tmp_path))
             try:
-                _save_state(code, [], batch_size=2)
-                args = argparse.Namespace(response='{"spawn_0": "hello", "spawn_1": "world"}')
-                result = cmd_respond(args)
-            finally:
-                os.chdir(old_cwd)
-        assert result == 0
-        captured = capsys.readouterr()
-        output = json.loads(captured.out)
-        assert output["type"] == "result"
-        assert output["value"] == ["hello", "world"]
-
-    def test_respond_from_file(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        """respond --file reads JSON from a file."""
-        assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
-        response_file = Path(str(tmp_path)) / "response.json"
-        response_file.write_text('"hello from file"', encoding="utf-8")
-        code = 'let x = ask\n  "what?"\nreturn x'
-        with patch("lumon.cli._STATE_FILE", state_file):
-            old_cwd = os.getcwd()
-            os.chdir(str(tmp_path))
-            try:
-                _save_state(code, [])
-                args = argparse.Namespace(response=None, file=str(response_file))
-                result = cmd_respond(args)
-            finally:
-                os.chdir(old_cwd)
-        assert result == 0
-        captured = capsys.readouterr()
-        output = json.loads(captured.out)
-        assert output["type"] == "result"
-        assert output["value"] == "hello from file"
-        assert output["cleanup"] == [str(response_file)]
-
-    def test_respond_file_not_found(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        """respond --file with missing file returns error."""
-        assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
-        with patch("lumon.cli._STATE_FILE", state_file):
-            _save_state("return 42", [])
-            args = argparse.Namespace(response=None, file="/nonexistent/file.json")
-            result = cmd_respond(args)
-        assert result == 1
-        captured = capsys.readouterr()
-        assert "file not found" in captured.err
-
-    def test_respond_from_stdin(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        """respond with '-' reads JSON from stdin."""
-        assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
-        code = 'let x = ask\n  "what?"\nreturn x'
-        with patch("lumon.cli._STATE_FILE", state_file):
-            old_cwd = os.getcwd()
-            os.chdir(str(tmp_path))
-            try:
-                _save_state(code, [])
-                args = argparse.Namespace(response="-", file=None)
-                with patch("sys.stdin") as mock_stdin:
-                    mock_stdin.read.return_value = '"from stdin"'
-                    result = cmd_respond(args)
-            finally:
-                os.chdir(old_cwd)
-        assert result == 0
-        captured = capsys.readouterr()
-        output = json.loads(captured.out)
-        assert output["type"] == "result"
-        assert output["value"] == "from stdin"
-
-    def test_respond_no_args_error(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        """respond with no response and no --file returns error."""
-        assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
-        with patch("lumon.cli._STATE_FILE", state_file):
-            _save_state("return 42", [])
-            args = argparse.Namespace(response=None, file=None)
-            result = cmd_respond(args)
-        assert result == 1
-        captured = capsys.readouterr()
-        assert "provide a JSON response" in captured.err
-
-    def test_run_code_saves_batch_size(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        """cmd_run_code saves batch_size in state when spawn_batch is returned."""
-        assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
-        code = 'let a = spawn\n  "Task A"\nlet b = spawn\n  "Task B"\nreturn [a, b]'
-        with patch("lumon.cli._STATE_FILE", state_file):
-            old_cwd = os.getcwd()
-            os.chdir(str(tmp_path))
-            try:
+                capsys.readouterr()
                 cmd_run_code(code)
+                captured = capsys.readouterr()
+                first_output = json.loads(captured.out)
+                session = first_output["session"]
+
+                comm_dir = _comm_dir_for_session(session)
+                for i, resp in enumerate([{"result": "A", "spawn_id": 0}, {"result": "B", "spawn_id": 1}]):
+                    resp_file = os.path.join(comm_dir, f"spawn_{i}_response.json")
+                    with open(resp_file, "w", encoding="utf-8") as f:
+                        json.dump(resp, f)
+
+                capsys.readouterr()
+                args = argparse.Namespace(session=session, clear=False)
+                result = cmd_respond(args)
             finally:
                 os.chdir(old_cwd)
-            state = _load_state()
-        assert state is not None
-        assert state["batch_size"] == 2
+        assert result == 0
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["type"] == "result"
+        assert output["value"] == ["A", "B"]
+
+    def test_respond_cleans_up_after_result(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """After successful respond, the session comm directory is cleaned up."""
+        assert isinstance(tmp_path, os.PathLike)
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        with patch("lumon.cli._COMM_BASE", comm_base):
+            old_cwd = os.getcwd()
+            os.chdir(str(tmp_path))
+            try:
+                capsys.readouterr()
+                cmd_run_code('let x = ask\n  "what?"\nreturn x')
+                captured = capsys.readouterr()
+                first_output = json.loads(captured.out)
+                session = first_output["session"]
+                comm_dir = _comm_dir_for_session(session)
+
+                response_file = os.path.join(comm_dir, "ask_response.json")
+                with open(response_file, "w", encoding="utf-8") as f:
+                    json.dump("done", f)
+
+                capsys.readouterr()
+                args = argparse.Namespace(session=session, clear=False)
+                cmd_respond(args)
+            finally:
+                os.chdir(old_cwd)
+        # Session directory should be cleaned up
+        assert not os.path.isdir(comm_dir)
+
+    def test_respond_auto_detects_session(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """When session is not specified, auto-detect the single active session."""
+        assert isinstance(tmp_path, os.PathLike)
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        with patch("lumon.cli._COMM_BASE", comm_base):
+            old_cwd = os.getcwd()
+            os.chdir(str(tmp_path))
+            try:
+                capsys.readouterr()
+                cmd_run_code('let x = ask\n  "what?"\nreturn x')
+                captured = capsys.readouterr()
+                first_output = json.loads(captured.out)
+                session = first_output["session"]
+
+                comm_dir = _comm_dir_for_session(session)
+                response_file = os.path.join(comm_dir, "ask_response.json")
+                with open(response_file, "w", encoding="utf-8") as f:
+                    json.dump("auto", f)
+
+                capsys.readouterr()
+                args = argparse.Namespace(session=None, clear=False)
+                result = cmd_respond(args)
+            finally:
+                os.chdir(old_cwd)
+        assert result == 0
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["value"] == "auto"
 
 
 class TestCmdBrowse:
@@ -732,7 +717,7 @@ class TestDeploySkills:
     def test_deploy_skills_returns_expected_skills(self) -> None:
         skills = _deploy_skills()
         assert isinstance(skills, dict)
-        assert sorted(skills.keys()) == ["ask-spawn", "auto-deploy", "code-organization", "issues", "lumon", "plugins-issues", "review", "workflow"]
+        assert sorted(skills.keys()) == ["ask-spawn", "auto-deploy", "code-organization", "issues", "lumon", "plugins-issues", "review", "version-control", "workflow"]
         for name, content in skills.items():
             assert len(content) > 0, f"Skill '{name}' has empty content"
             assert "---" in content, f"Skill '{name}' missing frontmatter"
@@ -830,13 +815,13 @@ class TestCLIMain:
 
     def test_main_inline_code(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
         old_argv = sys.argv
         old_cwd = os.getcwd()
         sys.argv = ["lumon", "return 42"]
         os.chdir(str(tmp_path))
         try:
-            with patch("lumon.cli._STATE_FILE", state_file):
+            with patch("lumon.cli._COMM_BASE", comm_base):
                 main()
         except SystemExit:
             pass
@@ -880,13 +865,13 @@ class TestCLIMain:
         lumon_file = os.path.join(root, "test.lumon")
         with open(lumon_file, "w", encoding="utf-8") as f:
             f.write("return 99\n")
-        state_file = Path(root) / ".lumon_state.json"
+        comm_base = os.path.join(root, ".lumon_comm")
         old_argv = sys.argv
         old_cwd = os.getcwd()
         sys.argv = ["lumon", lumon_file]
         os.chdir(root)
         try:
-            with patch("lumon.cli._STATE_FILE", state_file):
+            with patch("lumon.cli._COMM_BASE", comm_base):
                 main()
         except SystemExit:
             pass
@@ -895,6 +880,42 @@ class TestCLIMain:
             os.chdir(old_cwd)
         captured = capsys.readouterr()
         assert "99" in captured.out
+
+    def test_main_file_path_blocked_by_pending_session(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        root = str(tmp_path)
+        lumon_file = os.path.join(root, "test.lumon")
+        with open(lumon_file, "w", encoding="utf-8") as f:
+            f.write('let x = ask\n  "q"\nreturn x\n')
+        comm_base = os.path.join(root, ".lumon_comm")
+        old_argv = sys.argv
+        old_cwd = os.getcwd()
+        os.chdir(root)
+        try:
+            with patch("lumon.cli._COMM_BASE", comm_base):
+                # Create a pending daemon session for this script
+                comm_dir = os.path.join(comm_base, "sess1234")
+                os.makedirs(comm_dir)
+                _save_script_marker(comm_dir, lumon_file)
+                # Write current PID as daemon (it's alive)
+                with open(os.path.join(comm_dir, "pid"), "w") as f:
+                    f.write(str(os.getpid()))
+                sys.argv = ["lumon", lumon_file]
+                main()
+        except SystemExit:
+            pass
+        finally:
+            sys.argv = old_argv
+            os.chdir(old_cwd)
+            # Clean up fake session (don't use _clear_state as it tries to kill our PID)
+            import shutil
+            fake_dir = os.path.join(comm_base, "sess1234")
+            if os.path.isdir(fake_dir):
+                shutil.rmtree(fake_dir)
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["type"] == "error"
+        assert "pending session" in output["message"]
 
     def test_main_test_subcommand(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
@@ -914,13 +935,13 @@ class TestCLIMain:
 
     def test_main_respond_subcommand(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
         old_argv = sys.argv
         old_cwd = os.getcwd()
-        sys.argv = ["lumon", "respond", '"hello"']
+        sys.argv = ["lumon", "respond"]
         os.chdir(str(tmp_path))
         try:
-            with patch("lumon.cli._STATE_FILE", state_file):
+            with patch("lumon.cli._COMM_BASE", comm_base):
                 main()
         except SystemExit:
             pass
@@ -977,24 +998,25 @@ class TestApplyWorkingDir:
             os.chdir(old_cwd)
 
 
-class TestCmdRunCodeResume:
-    def test_resume_same_code(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        """Line 83: state exists with same code — responses are deserialized."""
+class TestCmdRunCodeCleanup:
+    def test_fresh_run_does_not_clean_live_sessions(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """A fresh cmd_run_code does not remove live daemon sessions."""
         assert isinstance(tmp_path, os.PathLike)
-        state_file = Path(str(tmp_path)) / ".lumon_state.json"
-        code = 'let x = ask\n  "what?"\nreturn x'
-        with patch("lumon.cli._STATE_FILE", state_file):
-            _save_state(code, ['"hello"'])
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        # Create a session with current PID (alive)
+        other_dir = os.path.join(comm_base, "other123")
+        os.makedirs(other_dir)
+        with open(os.path.join(other_dir, "pid"), "w") as f:
+            f.write(str(os.getpid()))
+        with patch("lumon.cli._COMM_BASE", comm_base):
             old_cwd = os.getcwd()
             os.chdir(str(tmp_path))
             try:
-                result = cmd_run_code(code)
+                cmd_run_code("return 42")
             finally:
                 os.chdir(old_cwd)
-        assert result == 0
-        captured = capsys.readouterr()
-        output = json.loads(captured.out)
-        assert output["type"] == "result"
+        # Other session should still exist (daemon is alive)
+        assert os.path.isdir(other_dir)
 
 
 class TestAnnotateManifestEdgeCases:
@@ -1004,3 +1026,174 @@ class TestAnnotateManifestEdgeCases:
         contracts = {"bar": "not_a_dict"}
         result = _annotate_manifest(text, contracts)
         assert result == text
+
+
+class TestPendingSessionDetection:
+    def _make_fake_daemon(self, comm_base: str, session: str, script: str) -> None:
+        """Create a fake daemon session with the current process PID."""
+        comm_dir = os.path.join(comm_base, session)
+        os.makedirs(comm_dir, exist_ok=True)
+        _save_script_marker(comm_dir, script)
+        with open(os.path.join(comm_dir, "pid"), "w") as f:
+            f.write(str(os.getpid()))
+
+    def test_rerun_blocked_by_pending_session(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """Running the same script with a pending daemon returns an error."""
+        assert isinstance(tmp_path, os.PathLike)
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        with patch("lumon.cli._COMM_BASE", comm_base):
+            self._make_fake_daemon(comm_base, "sess1234", "test.lumon")
+            old_cwd = os.getcwd()
+            os.chdir(str(tmp_path))
+            try:
+                exit_code = cmd_run_code('return ask("q")', script="test.lumon")
+            finally:
+                os.chdir(old_cwd)
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["type"] == "error"
+        assert "pending session" in output["message"]
+        assert "lumon respond" in output["message"]
+
+    def test_rerun_allowed_for_different_script(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """Running a different script is not blocked by another script's pending session."""
+        assert isinstance(tmp_path, os.PathLike)
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        with patch("lumon.cli._COMM_BASE", comm_base):
+            self._make_fake_daemon(comm_base, "sess1234", "other.lumon")
+            old_cwd = os.getcwd()
+            os.chdir(str(tmp_path))
+            try:
+                exit_code = cmd_run_code("return 42", script="test.lumon")
+            finally:
+                os.chdir(old_cwd)
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["type"] == "result"
+        assert output["value"] == 42
+
+    def test_rerun_allowed_for_inline_code(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """Inline code (no script) is not blocked by pending sessions."""
+        assert isinstance(tmp_path, os.PathLike)
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        with patch("lumon.cli._COMM_BASE", comm_base):
+            self._make_fake_daemon(comm_base, "sess1234", "test.lumon")
+            old_cwd = os.getcwd()
+            os.chdir(str(tmp_path))
+            try:
+                exit_code = cmd_run_code("return 42")
+            finally:
+                os.chdir(old_cwd)
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["type"] == "result"
+
+
+class TestRespondClear:
+    def test_respond_clear_removes_session(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """--clear removes a pending session."""
+        assert isinstance(tmp_path, os.PathLike)
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        comm_dir = os.path.join(comm_base, "sess1234")
+        os.makedirs(comm_dir)
+        with open(os.path.join(comm_dir, "pid"), "w") as f:
+            f.write("999999999")  # non-existent PID
+        with patch("lumon.cli._COMM_BASE", comm_base):
+            args = argparse.Namespace(session="sess1234", clear=True)
+            exit_code = cmd_respond(args)
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["type"] == "result"
+        assert "cleared" in output["value"]
+        assert not os.path.isdir(comm_dir)
+
+    def test_respond_clear_auto_detect(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """--clear without session ID auto-detects the single active session."""
+        assert isinstance(tmp_path, os.PathLike)
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        comm_dir = os.path.join(comm_base, "sess1234")
+        os.makedirs(comm_dir)
+        with patch("lumon.cli._COMM_BASE", comm_base):
+            args = argparse.Namespace(session=None, clear=True)
+            exit_code = cmd_respond(args)
+        assert exit_code == 0
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["type"] == "result"
+        assert "sess1234" in output["value"]
+
+    def test_respond_clear_specific_session_with_multiple(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """--clear with explicit session ID only clears that session."""
+        assert isinstance(tmp_path, os.PathLike)
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        for sess in ("sess_a", "sess_b"):
+            d = os.path.join(comm_base, sess)
+            os.makedirs(d)
+        with patch("lumon.cli._COMM_BASE", comm_base):
+            args = argparse.Namespace(session="sess_a", clear=True)
+            exit_code = cmd_respond(args)
+        assert exit_code == 0
+        assert not os.path.isdir(os.path.join(comm_base, "sess_a"))
+        assert os.path.isdir(os.path.join(comm_base, "sess_b"))
+
+    def test_respond_clear_no_session_error(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """--clear with no sessions returns an error."""
+        assert isinstance(tmp_path, os.PathLike)
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        with patch("lumon.cli._COMM_BASE", comm_base):
+            args = argparse.Namespace(session=None, clear=True)
+            exit_code = cmd_respond(args)
+        assert exit_code == 1
+        captured = capsys.readouterr()
+        assert "no pending session" in captured.err
+
+
+class TestScriptMarker:
+    def test_script_marker_saved(self, tmp_path: object) -> None:
+        """Verify script marker is saved."""
+        assert isinstance(tmp_path, os.PathLike)
+        comm_dir = os.path.join(str(tmp_path), ".lumon_comm", "sess1234")
+        _save_script_marker(comm_dir, "my_script.lumon")
+        marker = os.path.join(comm_dir, "script.txt")
+        assert os.path.isfile(marker)
+        with open(marker, encoding="utf-8") as f:
+            assert f.read() == "my_script.lumon"
+
+    def test_find_pending_daemon(self, tmp_path: object) -> None:
+        """_find_pending_daemon finds sessions by script with alive daemon."""
+        assert isinstance(tmp_path, os.PathLike)
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        for sess, script in [("sess_a", "a.lumon"), ("sess_b", "b.lumon")]:
+            d = os.path.join(comm_base, sess)
+            os.makedirs(d)
+            _save_script_marker(d, script)
+            # Use current PID (alive)
+            with open(os.path.join(d, "pid"), "w") as f:
+                f.write(str(os.getpid()))
+        with patch("lumon.cli._COMM_BASE", comm_base):
+            assert _find_pending_daemon("a.lumon") == "sess_a"
+            assert _find_pending_daemon("b.lumon") == "sess_b"
+            assert _find_pending_daemon("c.lumon") is None
+
+    def test_find_pending_daemon_no_comm_dir(self, tmp_path: object) -> None:
+        """_find_pending_daemon returns None when .lumon_comm doesn't exist."""
+        assert isinstance(tmp_path, os.PathLike)
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        with patch("lumon.cli._COMM_BASE", comm_base):
+            assert _find_pending_daemon("test.lumon") is None
+
+    def test_find_pending_daemon_ignores_dead(self, tmp_path: object) -> None:
+        """_find_pending_daemon ignores sessions with dead daemon PIDs."""
+        assert isinstance(tmp_path, os.PathLike)
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        d = os.path.join(comm_base, "sess_dead")
+        os.makedirs(d)
+        _save_script_marker(d, "test.lumon")
+        with open(os.path.join(d, "pid"), "w") as f:
+            f.write("999999999")
+        with patch("lumon.cli._COMM_BASE", comm_base):
+            assert _find_pending_daemon("test.lumon") is None

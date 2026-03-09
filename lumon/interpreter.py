@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
+import shutil
+import uuid
 from collections.abc import Callable
 
 from lumon.builtins import register_builtins
+from lumon.daemon import SuspendEvent
 from lumon.environment import Environment
 from lumon.errors import AskSignal, LumonError, ReturnSignal
 from lumon.evaluator import eval_node
@@ -176,6 +180,7 @@ def interpret(
     working_dir: str | None = None,
     persist: bool = False,
     plugin_executor: Callable[..., object] | None = None,
+    comm_dir: str | None = None,
 ) -> dict:
     """Parse, type-check, and execute Lumon code.
 
@@ -184,6 +189,9 @@ def interpret(
       {"type": "error", "function": ..., "trace": [...], "inputs": {...}, "message": ...}
       {"type": "ask", "prompt": ..., "context": ..., "expects": ...}
       {"type": "spawn_batch", ...}
+
+    When *comm_dir* is set, large context data for ask/spawn is written to
+    files under that directory instead of being inlined in the output JSON.
     """
     env = Environment()
     try:
@@ -201,7 +209,7 @@ def interpret(
         result = eval_node(ast, env)
         pending = env.get_pending_spawns()
         if pending:
-            return _make_spawn_batch(pending, env._logs)
+            return _make_spawn_batch(pending, env._logs, comm_dir=comm_dir)
         output: dict[str, object] = {"type": "result", "value": serialize(result)}
         if env._logs:
             output["logs"] = list(env._logs)
@@ -211,7 +219,7 @@ def interpret(
     except ReturnSignal as rs:
         pending = env.get_pending_spawns()
         if pending:
-            return _make_spawn_batch(pending, env._logs)
+            return _make_spawn_batch(pending, env._logs, comm_dir=comm_dir)
         output = {"type": "result", "value": serialize(rs.value)}
         if env._logs:
             output["logs"] = list(env._logs)
@@ -222,6 +230,8 @@ def interpret(
         envelope = ask.envelope
         if env._logs:
             envelope["logs"] = list(env._logs)
+        if comm_dir is not None:
+            envelope = _externalize_ask(envelope, comm_dir)
         return envelope
     except LumonError as e:
         envelope = e.to_envelope()
@@ -235,16 +245,96 @@ def interpret(
         return envelope
 
 
-def _make_spawn_batch(pending: list[tuple[str, dict]], logs: list[object] | None = None) -> dict:
+def _make_spawn_batch(
+    pending: list[tuple[str, dict]],
+    logs: list[object] | None = None,
+    *,
+    comm_dir: str | None = None,
+) -> dict:
     """Build a spawn_batch envelope from pending spawn requests."""
     spawns = [envelope for _handle, envelope in pending]
+    if comm_dir is not None:
+        spawns = _externalize_spawns(spawns, comm_dir)
     if len(spawns) == 1:
         result = {"type": "spawn_batch", **spawns[0]}
     else:
         result = {"type": "spawn_batch", "spawns": spawns}
+    if comm_dir is not None:
+        result["session"] = os.path.basename(comm_dir)
     if logs:
         result["logs"] = list(logs)
     return result
+
+
+def generate_session_id() -> str:
+    """Generate an 8-character hex session ID."""
+    return uuid.uuid4().hex[:8]
+
+
+def _write_comm_file(path: str, data: object) -> None:
+    """Write JSON data to a comm file, creating directories as needed."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+
+
+def _externalize_spawns(spawns: list[dict], comm_dir: str) -> list[dict]:
+    """Write spawn context to files and return lightweight envelopes."""
+    result: list[dict] = []
+    for i, spawn in enumerate(spawns):
+        spawn_id = f"spawn_{i}"
+        lightweight: dict[str, object] = {"spawn_id": spawn_id}
+
+        # Copy prompt (always inline)
+        if "prompt" in spawn:
+            prompt = str(spawn["prompt"])
+            # Write context to file if present, append path to prompt
+            if "context" in spawn:
+                context_file = os.path.join(comm_dir, f"{spawn_id}_context.json")
+                _write_comm_file(context_file, spawn["context"])
+                prompt += f"\n\nContext data: {context_file}"
+                lightweight["context_file"] = context_file
+            lightweight["prompt"] = prompt
+
+        # Copy expects inline (small)
+        if "expects" in spawn:
+            lightweight["expects"] = spawn["expects"]
+
+        # Copy fork inline (small)
+        if "fork" in spawn:
+            lightweight["fork"] = spawn["fork"]
+
+        # Add response file path
+        response_file = os.path.join(comm_dir, f"{spawn_id}_response.json")
+        lightweight["response_file"] = response_file
+
+        result.append(lightweight)
+    return result
+
+
+def _externalize_ask(envelope: dict, comm_dir: str) -> dict:
+    """Write ask context to a file and return a lightweight envelope."""
+    lightweight: dict[str, object] = {"type": "ask"}
+    lightweight["session"] = os.path.basename(comm_dir)
+
+    prompt = str(envelope.get("prompt", ""))
+    if "context" in envelope:
+        context_file = os.path.join(comm_dir, "ask_context.json")
+        _write_comm_file(context_file, envelope["context"])
+        prompt += f"\n\nContext data: {context_file}"
+        lightweight["context_file"] = context_file
+    lightweight["prompt"] = prompt
+
+    if "expects" in envelope:
+        lightweight["expects"] = envelope["expects"]
+
+    response_file = os.path.join(comm_dir, "ask_response.json")
+    lightweight["response_file"] = response_file
+
+    if "logs" in envelope:
+        lightweight["logs"] = envelope["logs"]
+
+    return lightweight
 
 
 def _persist_blocks(code: str, working_dir: str) -> None:
@@ -252,3 +342,117 @@ def _persist_blocks(code: str, working_dir: str) -> None:
     blocks = extract_blocks(code)
     if blocks:
         save_blocks(working_dir, blocks)
+
+
+def cleanup_comm_dir(comm_dir: str) -> None:
+    """Remove a session's comm directory. Also removes parent if empty."""
+    if os.path.isdir(comm_dir):
+        shutil.rmtree(comm_dir)
+    # Remove parent .lumon_comm if now empty
+    parent = os.path.dirname(comm_dir)
+    if parent and os.path.isdir(parent):
+        try:
+            os.rmdir(parent)  # Only removes if empty
+        except OSError:
+            pass
+
+
+def cleanup_all_comm(base_dir: str = ".lumon_comm") -> None:
+    """Remove the entire .lumon_comm directory (stale sessions)."""
+    if os.path.isdir(base_dir):
+        shutil.rmtree(base_dir)
+
+
+def interpret_with_suspend(
+    code: str,
+    *,
+    io_backend: object = None,
+    git_backend: object = None,
+    working_dir: str | None = None,
+    persist: bool = False,
+    comm_dir: str | None = None,
+    suspend_event: object | None = None,
+) -> dict:
+    """Like interpret(), but uses a SuspendEvent for daemon mode.
+
+    When suspend_event is set, ask expressions block on the event instead of
+    raising AskSignal. Spawn batches also block for responses.
+    """
+    env = Environment()
+    if isinstance(suspend_event, SuspendEvent):
+        env._suspend_callback = suspend_event
+
+    try:
+        ast = parse(code)
+        type_check(ast, io_backend=io_backend, git_backend=git_backend)
+        register_builtins(env, io_backend, git_backend)
+        if working_dir is not None:
+            env._working_dir = working_dir
+            _setup_loader(env, working_dir)
+            _setup_plugins(env, working_dir)
+        result = eval_node(ast, env)
+        pending = env.get_pending_spawns()
+        if pending:
+            batch_envelope = _make_spawn_batch(pending, env._logs, comm_dir=comm_dir)
+            if isinstance(suspend_event, SuspendEvent):
+                # Block for spawn responses
+                responses = suspend_event.suspend_for_spawns(batch_envelope)
+                # Feed responses back and continue (spawns are terminal in current model)
+                # In current Lumon, spawns collect handles and return at program end,
+                # so we just pair responses with handles
+                handle_map: dict[str, object] = {}
+                for i, (handle, _envelope) in enumerate(pending):
+                    if i < len(responses):
+                        handle_map[handle] = responses[i]
+                # Re-run with responses queued? No — spawns are collected at end.
+                # The result is the list of spawn responses.
+                output: dict[str, object] = {"type": "result", "value": serialize(list(responses))}
+                if env._logs:
+                    output["logs"] = list(env._logs)
+                if persist and working_dir is not None:
+                    _persist_blocks(code, working_dir)
+                return output
+            return batch_envelope
+        output = {"type": "result", "value": serialize(result)}
+        if env._logs:
+            output["logs"] = list(env._logs)
+        if persist and working_dir is not None:
+            _persist_blocks(code, working_dir)
+        return output
+    except ReturnSignal as rs:
+        pending = env.get_pending_spawns()
+        if pending:
+            batch_envelope = _make_spawn_batch(pending, env._logs, comm_dir=comm_dir)
+            if isinstance(suspend_event, SuspendEvent):
+                responses = suspend_event.suspend_for_spawns(batch_envelope)
+                output = {"type": "result", "value": serialize(list(responses))}
+                if env._logs:
+                    output["logs"] = list(env._logs)
+                if persist and working_dir is not None:
+                    _persist_blocks(code, working_dir)
+                return output
+            return batch_envelope
+        output = {"type": "result", "value": serialize(rs.value)}
+        if env._logs:
+            output["logs"] = list(env._logs)
+        if persist and working_dir is not None:
+            _persist_blocks(code, working_dir)
+        return output
+    except AskSignal as ask:
+        # Should not happen in daemon mode (asks block instead of raising)
+        envelope = ask.envelope
+        if env._logs:
+            envelope["logs"] = list(env._logs)
+        if comm_dir is not None:
+            envelope = _externalize_ask(envelope, comm_dir)
+        return envelope
+    except LumonError as e:
+        envelope = e.to_envelope()
+        if env._logs:
+            envelope["logs"] = list(env._logs)
+        return envelope
+    except RecursionError:
+        envelope = LumonError("Call depth limit exceeded").to_envelope()
+        if env._logs:
+            envelope["logs"] = list(env._logs)
+        return envelope

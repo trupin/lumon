@@ -419,48 +419,13 @@ implement report.build
 
 A single function orchestrates a multi-turn conversation between code and agent. Code handles the mechanical work (read, parse, format), the agent provides judgment (what to focus on, review the draft).
 
-**Technical implementation:** Python generator-based coroutines. Validated in `scripts/ask_poc.py`.
+When execution hits an `ask`, it suspends and prints a JSON envelope to stdout with the prompt, context file path, expected response shape, and a response file path. The agent writes its answer to the response file and runs `lumon respond` to resume. Execution continues from exactly where it stopped — the response is bound to the variable and the rest of the function runs.
 
-The interpreter is a Python generator. Each `ask` becomes a `yield`:
-
-```python
-# Inside the interpreter — when evaluating an ask node:
-response = yield {
-    "prompt": evaluate(node.prompt, env),
-    "context": evaluate(node.context, env),
-    "expects": evaluate(node.expects, env),
-}
-env[node.binding] = response  # bind response, continue executing
-```
-
-The orchestrator drives the generator loop:
-
-```python
-def orchestrator(lumon_function, agent):
-    gen = interpret(lumon_function)
-    ask_request = next(gen)          # run until first ask
-
-    while True:
-        # Validate, send to LLM, get response
-        response = agent.query(ask_request)
-        if not validate(response, ask_request["expects"]):
-            response = agent.query(re_prompt(ask_request))
-
-        try:
-            ask_request = gen.send(response)  # resume, get next ask
-        except StopIteration as e:
-            return e.value                    # function returned final result
-```
-
-Key properties:
-- `yield` preserves all local state automatically — no serialization needed
-- Multiple `ask`s in one function work naturally (generator suspends/resumes repeatedly)
-- Stateless across sessions: replay from start by feeding previous responses (generators can't be pickled)
-- Validation is a simple type-shape check before `.send()` — reject and re-prompt on mismatch
+Multiple `ask`s in one function work naturally — each one suspends, waits for a response, and resumes in turn.
 
 ### spawn (sub-agent delegation)
 
-Delegates a reasoning task to a sub-agent. Like `ask`, it yields to the orchestrator. The difference: the orchestrator tells the main agent to spawn a sub-agent rather than answering directly.
+Delegates a reasoning task to a sub-agent. Like `ask`, it suspends execution for the orchestrator. The difference: the orchestrator tells the main agent to spawn a sub-agent rather than answering directly.
 
 ```
 let analysis = spawn
@@ -552,31 +517,9 @@ let pages = await_all handles
 - `await`: explicitly resolves a handle to its value
 - `await_all`: resolves a list of handles to a list of values
 
-**Technical implementation:** Python `asyncio` event loop. All function calls are coroutines internally. Auto-await wraps them in `await` at the interpreter level. `async` returns the coroutine as a task without awaiting.
+All function calls auto-await by default — code reads like synchronous pseudocode. `async` suppresses auto-await, returning a handle instead. `await` resolves a single handle, `await_all` resolves a list.
 
-```python
-# Normal call → auto-await
-if node.type == "call":
-    result = await interpret_call(node, env)
-    env[node.binding] = result
-
-# async call → schedule, return handle
-if node.type == "async_call":
-    task = asyncio.create_task(interpret_call(node, env))
-    env[node.binding] = {"__task__": task}
-
-# await → resolve handle
-if node.type == "await":
-    task = env[node.handle]["__task__"]
-    env[node.binding] = await task
-
-# await_all → resolve all handles
-if node.type == "await_all":
-    tasks = [item["__task__"] for item in env[node.handles]]
-    env[node.binding] = await asyncio.gather(*tasks)
-```
-
-**Implementation priority:** spec'd in v0, implemented late. The interpreter starts fully sequential — `async` behaves like a regular call and `await` is a no-op. Event loop parallelism added once the core language works.
+Currently the interpreter is fully sequential — `async`/`await` are no-ops. True parallel execution is a future addition.
 
 ---
 
@@ -910,6 +853,7 @@ Built-in signatures use type variables (`a`, `b`) for generic operations. The ty
 | :---- | :---- | :---- |
 | `io.read` | `(path: text) -> :ok(text) \| :error(text)` | Read a file's contents |
 | `io.write` | `(path: text, content: text) -> :ok \| :error(text)` | Write content to a file |
+| `io.mkdir` | `(path: text) -> :ok \| :error(text)` | Create a directory (and intermediate parents) |
 | `io.list_dir` | `(path: text, recursive: bool = false) -> :ok(list<text>) \| :error(text)` | List files in a directory (recursive returns relative paths) |
 | `io.delete` | `(path: text) -> :ok \| :error(text)` | Delete a file |
 | `io.delete_dir` | `(path: text) -> :ok \| :error(text)` | Delete a directory and all its contents |
@@ -927,8 +871,20 @@ All paths are relative to the **root directory**, which is the working directory
 | :---- | :---- | :---- |
 | `git.status` | `() -> :ok(text) \| :error(text)` | Porcelain git status output |
 | `git.log` | `(n: number) -> :ok(list<text>) \| :error(text)` | Last n commits as `"hash subject"` strings |
+| `git.init` | `() -> :ok \| :error(text)` | Initialize a new git repository |
+| `git.add` | `(path: text) -> :ok \| :error(text)` | Stage a file for the next commit |
+| `git.commit` | `(message: text) -> :ok(text) \| :error(text)` | Create a commit, returns short hash |
+| `git.diff` | `() -> :ok(text) \| :error(text)` | Show unstaged changes |
+| `git.diff_staged` | `() -> :ok(text) \| :error(text)` | Show staged changes (index vs HEAD) |
+| `git.branch` | `(name: text) -> :ok \| :error(text)` | Create a new branch |
+| `git.branch_list` | `() -> :ok(list<text>) \| :error(text)` | List all local branches |
+| `git.checkout` | `(ref: text) -> :ok \| :error(text)` | Switch to a branch or ref |
+| `git.reset` | `(path: text) -> :ok \| :error(text)` | Unstage a file (keeps working tree; no-op if not staged) |
+| `git.show` | `(ref: text) -> :ok(text) \| :error(text)` | Show commit details and stats |
+| `git.tag` | `(name: text) -> :ok \| :error(text)` | Create a lightweight tag at HEAD |
+| `git.tag_list` | `() -> :ok(list<text>) \| :error(text)` | List all tags |
 
-Git functions are only available when a git backend is provided. In the CLI, this is automatic. The git backend runs real git commands via subprocess.
+Git functions are only available when a git backend is provided. In the CLI, this is automatic. The git backend runs real git commands via subprocess. Only local operations are exposed — no remote commands (push, pull, fetch, clone). Destructive operations (reset --hard, clean, branch -D) are excluded by design.
 
 ### text
 
@@ -1265,16 +1221,19 @@ Tag result example:
 ```json
 {
   "type": "ask",
-  "prompt": "Which of these should I handle first?",
-  "context": ["Pay bill", "Schedule dentist"],
-  "expects": {"action": "text", "item": "text"}
+  "session": "a3f2e1b9",
+  "prompt": "Which of these should I handle first?\n\nContext data: .lumon_comm/a3f2e1b9/ask_context.json",
+  "expects": {"action": "text", "item": "text"},
+  "context_file": ".lumon_comm/a3f2e1b9/ask_context.json",
+  "response_file": ".lumon_comm/a3f2e1b9/ask_response.json"
 }
 ```
 
-The agent reads the ask, reasons about it, and responds:
+The agent reads the context file, reasons about it, writes a response to the response file, and resumes:
 
 ```bash
-lumon respond '{"action": "process", "item": "Pay bill"}'
+echo '{"action": "process", "item": "Pay bill"}' > .lumon_comm/a3f2e1b9/ask_response.json
+lumon respond
 ```
 
 This returns the next output — another ask, a spawn batch, or a final result.
@@ -1284,22 +1243,57 @@ This returns the next output — another ask, a spawn batch, or a final result.
 ```json
 {
   "type": "spawn_batch",
-  "instruction": "Spawn 3 sub-agents to analyze articles...",
-  "spawn_count": 3,
-  "contexts": ["article 1...", "article 2...", "article 3..."],
-  "expects_per_spawn": {"bias": "number", "claims": "list", "summary": "text"}
+  "session": "a3f2e1b9",
+  "spawns": [
+    {
+      "spawn_id": "spawn_0",
+      "prompt": "Analyze article for bias\n\nContext data: .lumon_comm/a3f2e1b9/spawn_0_context.json",
+      "expects": {"bias": "number", "summary": "text"},
+      "context_file": ".lumon_comm/a3f2e1b9/spawn_0_context.json",
+      "response_file": ".lumon_comm/a3f2e1b9/spawn_0_response.json"
+    }
+  ]
 }
 ```
 
-The agent spawns sub-agents, collects results, and responds:
+The agent reads context files, spawns sub-agents, and writes responses to the indicated files:
 
 ```bash
-lumon respond '[{"bias": 0.3, ...}, {"bias": 0.7, ...}, {"bias": 0.1, ...}]'
+echo '{"bias": 0.3, "summary": "..."}' > .lumon_comm/a3f2e1b9/spawn_0_response.json
+lumon respond
 ```
 
-### State management
+### File-based communication
 
-The interpreter maintains state between `run` and `respond` calls via a state file. Each `respond` replays the generator from the start, feeding all previous responses, to reach the current suspension point. This is stateless across sessions — no daemon, no long-running process.
+When execution suspends (ask or spawn), Lumon writes large context data to files under `.lumon_comm/<session>/` instead of inlining it in the JSON output. This keeps the stdout output small and readable.
+
+- **Context files** (e.g. `spawn_0_context.json`, `ask_context.json`) — written by Lumon, read by the agent
+- **Response files** (e.g. `spawn_0_response.json`, `ask_response.json`) — written by the agent, read by Lumon on `lumon respond`
+
+The session ID is an 8-character hex string, unique per execution. It's included in the output so the orchestrator knows which directory to use.
+
+### Suspension and resumption
+
+When execution suspends on `ask` or `spawn`, the interpreter prints the suspension envelope to stdout and returns control to the agent immediately. The process stays alive in the background, waiting for responses.
+
+The agent writes response files to the paths indicated in the envelope, then runs `lumon respond`. This prints the next output — another suspension envelope if execution suspends again, or the final result. The comm directory is cleaned up automatically after execution completes.
+
+### Pending session detection
+
+If a Lumon script is run from a file and already has a pending session (an ask or spawn awaiting a response), the interpreter refuses to re-run and returns an error:
+
+```json
+{
+  "type": "error",
+  "message": "Script has pending session a3f2e1b9. Use 'lumon respond' to resume or 'lumon respond --clear' to discard."
+}
+```
+
+This prevents accidental re-execution that would silently discard in-progress work. The agent must explicitly respond (`lumon respond`) or clear the session (`lumon respond --clear`).
+
+- **File-based runs only** — inline code and stdin are not tracked
+- **Script marker file** — `script.txt` in the session directory associates it with the source script
+- **Clear a session** — `lumon respond --clear` discards the session without resuming; auto-detects if only one session exists
 
 ### Concurrency
 
