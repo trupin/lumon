@@ -179,7 +179,7 @@ def cmd_run_code(code: str, *, script: str | None = None) -> int:
     comm_dir = _comm_dir_for_session(session)
 
     io_backend = RealFS(".")
-    git_backend = RealGit(_project_root or ".")
+    git_backend = RealGit(_STATE["project_root"] or ".")
 
     def run_fn(suspend: SuspendEvent) -> dict:
         return interpret_with_suspend(
@@ -725,17 +725,16 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
-_project_root: str = ""
+_STATE: dict[str, str] = {"project_root": ""}
 
 
 def _apply_working_dir() -> None:
     """Extract and apply --working-dir before argparse runs.
 
-    Saves the original directory as *_project_root* so that git commands
-    run from the project root rather than the sandbox.
+    Saves the original directory in ``_STATE["project_root"]`` so that git
+    commands run from the project root rather than the sandbox.
     """
-    global _project_root  # noqa: PLW0603
-    _project_root = os.getcwd()
+    _STATE["project_root"] = os.getcwd()
     for i, arg in enumerate(sys.argv[1:], start=1):
         if arg == "--working-dir" and i + 1 < len(sys.argv):
             wd = sys.argv[i + 1]
