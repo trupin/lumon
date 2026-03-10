@@ -288,12 +288,20 @@ def _make_spawn_batch(
     spawns = list(envelopes)
     if comm_dir is not None:
         spawns = _externalize_spawns(spawns, comm_dir)
-    if len(spawns) == 1:
-        result = {"type": "spawn_batch", **spawns[0]}
+    batch_size = len(spawns)
+    if batch_size == 1:
+        result: dict[str, object] = {"type": "spawn_batch", **spawns[0]}
     else:
         result = {"type": "spawn_batch", "spawns": spawns}
     if comm_dir is not None:
         result["session"] = os.path.basename(comm_dir)
+    result["instruction"] = (
+        f"Run {'this task' if batch_size == 1 else f'each of these {batch_size} tasks'}"
+        " in parallel using the Agent tool (subagent_type: general-purpose)."
+        " Each spawn is an independent task — do NOT run them sequentially."
+        " Write each result as JSON to its response_file, then call:"
+        f" lumon --working-dir sandbox respond {result.get('session', '<session>')}"
+    )
     if logs:
         result["logs"] = list(logs)
     return result
