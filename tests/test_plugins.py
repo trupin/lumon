@@ -1864,6 +1864,29 @@ class TestShutdownIntegration:
             assert r["type"] == "result"
             mock_shutdown.assert_called_once()
 
+    def test_interpret_calls_shutdown_on_error(self) -> None:
+        """_shutdown_plugins is called when interpret() returns a LumonError."""
+        from unittest.mock import patch as mock_patch
+
+        with mock_patch("lumon.interpreter._shutdown_plugins") as mock_shutdown:
+            r = interpret("return undefined_var")
+            assert r["type"] == "error"
+            mock_shutdown.assert_called_once()
+
+    def test_interpret_skips_shutdown_on_spawn_suspension(self) -> None:
+        """_shutdown_plugins is NOT called when interpret() suspends on spawn."""
+        from unittest.mock import patch as mock_patch
+
+        code = (
+            'let h = spawn\n'
+            '  "do something"\n'
+            'return h'
+        )
+        with mock_patch("lumon.interpreter._shutdown_plugins") as mock_shutdown:
+            r = interpret(code)
+            assert r["type"] == "spawn_batch"
+            mock_shutdown.assert_not_called()
+
 
 class TestFindPluginScript:
     def test_extracts_script_from_impl(self, tmp_path: object) -> None:

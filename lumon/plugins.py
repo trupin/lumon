@@ -298,8 +298,9 @@ def notify_plugin_shutdown(
 ) -> None:
     """Send _shutdown signal to each plugin instance used during the session.
 
-    Called by the interpreter on session end (normal completion, error, or
-    SIGTERM). Each plugin script receives a ``_shutdown`` command on stdin
+    Called by the interpreter on session end (normal completion or error).
+    Not called when the daemon is killed by signal. Each plugin script
+    receives a ``_shutdown`` command on stdin
     with ``{}``. Scripts that don't handle ``_shutdown`` return an error tag
     which is silently ignored.
 

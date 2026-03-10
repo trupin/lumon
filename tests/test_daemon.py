@@ -17,6 +17,7 @@ from lumon.daemon import (
     _poll_ask_response,
     _poll_spawn_responses,
     _reap_child,
+    _run_daemon,
     _session_age,
     _unwrap_spawn_response,
     _write_output,
@@ -539,3 +540,72 @@ class TestKillDaemon:
         with patch("lumon.daemon._kill_process_tree") as mock_kill:
             _kill_daemon(comm_dir)
             mock_kill.assert_called_once_with(12345)
+
+
+class TestRunDaemonSpawnHandling:
+    """Tests that _run_daemon correctly handles single- and multi-spawn envelopes."""
+
+    def test_single_spawn_waits_for_response(self, tmp_path: object) -> None:
+        """Single-spawn envelope (no 'spawns' key) polls for spawn_0_response.json."""
+        assert isinstance(tmp_path, os.PathLike)
+        comm_dir = str(tmp_path)
+
+        def run_fn(suspend: SuspendEvent) -> dict:
+            # Simulate single spawn: envelope has no "spawns" key
+            envelope = {"type": "spawn_batch", "spawn_id": "spawn_0", "prompt": "do it"}
+            responses = suspend.suspend_for_spawns(envelope)
+            return {"type": "result", "value": responses[0]}
+
+        # Write the spawn response file after a brief delay
+        def write_response() -> None:
+            time.sleep(0.2)
+            resp_path = os.path.join(comm_dir, "spawn_0_response.json")
+            with open(resp_path, "w", encoding="utf-8") as f:
+                json.dump("the spawn result", f)
+
+        writer = threading.Thread(target=write_response)
+        writer.start()
+
+        _run_daemon(run_fn, comm_dir, "test_session")
+        writer.join()
+
+        # _run_daemon writes final result to output.json
+        output_path = os.path.join(comm_dir, "output.json")
+        assert os.path.isfile(output_path)
+        with open(output_path, encoding="utf-8") as f:
+            data = json.load(f)
+        assert data["type"] == "result"
+        assert data["value"] == "the spawn result"
+
+    def test_multi_spawn_waits_for_all_responses(self, tmp_path: object) -> None:
+        """Multi-spawn envelope ('spawns' list) polls for all response files."""
+        assert isinstance(tmp_path, os.PathLike)
+        comm_dir = str(tmp_path)
+
+        def run_fn(suspend: SuspendEvent) -> dict:
+            envelope = {"type": "spawn_batch", "spawns": [
+                {"spawn_id": "spawn_0", "prompt": "A"},
+                {"spawn_id": "spawn_1", "prompt": "B"},
+            ]}
+            responses = suspend.suspend_for_spawns(envelope)
+            return {"type": "result", "value": responses}
+
+        def write_responses() -> None:
+            time.sleep(0.2)
+            for i, val in enumerate(["resp_A", "resp_B"]):
+                path = os.path.join(comm_dir, f"spawn_{i}_response.json")
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(val, f)
+
+        writer = threading.Thread(target=write_responses)
+        writer.start()
+
+        _run_daemon(run_fn, comm_dir, "test_session")
+        writer.join()
+
+        output_path = os.path.join(comm_dir, "output.json")
+        assert os.path.isfile(output_path)
+        with open(output_path, encoding="utf-8") as f:
+            data = json.load(f)
+        assert data["type"] == "result"
+        assert data["value"] == ["resp_A", "resp_B"]

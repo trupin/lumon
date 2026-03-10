@@ -93,6 +93,38 @@ class TestInterpretWithSuspend:
         assert result_box[0]["type"] == "result"
         assert result_box[0]["value"] == ["resp A", "resp B"]
 
+    def test_single_spawn_with_suspend_event(self, tmp_path: object) -> None:
+        """Single spawn: envelope has no 'spawns' key (fields spread directly)."""
+        assert isinstance(tmp_path, os.PathLike)
+        se = SuspendEvent(str(tmp_path))
+        result_box: list[dict] = []
+
+        def worker() -> None:
+            r = interpret_with_suspend(
+                'let a = spawn\n  "single task"\nreturn a',
+                suspend_event=se,
+            )
+            result_box.append(r)
+
+        t = threading.Thread(target=worker)
+        t.start()
+
+        deadline = time.monotonic() + 5
+        while se.envelope is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert se.envelope is not None
+        assert se.envelope["type"] == "spawn_batch"
+        # Single spawn: fields spread directly, no "spawns" key
+        assert "spawns" not in se.envelope
+
+        se.clear_envelope()
+        se.resume_with_spawns(["the result"])
+        t.join(timeout=5)
+
+        assert len(result_box) == 1
+        assert result_box[0]["type"] == "result"
+        assert result_box[0]["value"] == ["the result"]
+
     def test_recursion_error(self) -> None:
         code = (
             'define ns.rec\n'

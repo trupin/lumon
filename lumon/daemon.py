@@ -22,6 +22,7 @@ from lumon.serializer import deserialize
 _POLL_INTERVAL = 0.2  # seconds
 _MAX_WAIT = 3600  # 1 hour default timeout
 _STALE_AGE = 86400  # 24 hours — sessions older than this are cleaned up
+_STARTUP_TIMEOUT = 30  # seconds — max wait for daemon to write PID file
 
 
 def _unwrap_spawn_response(value: object) -> object:
@@ -247,8 +248,13 @@ def _run_daemon(
             suspend.clear_envelope()
             suspend.resume_with_ask(response)
         elif envelope.get("type") == "spawn_batch":
-            spawns = envelope.get("spawns", [])
-            batch_size = len(spawns) if isinstance(spawns, list) else 0
+            # Single-spawn envelopes spread fields directly (no "spawns" key);
+            # multi-spawn envelopes have a "spawns" list.
+            spawns = envelope.get("spawns")
+            if isinstance(spawns, list):
+                batch_size = len(spawns)
+            else:
+                batch_size = 1  # single spawn spread into envelope
             responses = _poll_spawn_responses(comm_dir, batch_size)
             if responses is None:
                 _write_output(comm_dir, {
@@ -319,7 +325,7 @@ def run_with_daemon(
     first_path = os.path.join(comm_dir, "first_output.json")
     output_path = os.path.join(comm_dir, "output.json")
     pid_path = os.path.join(comm_dir, "pid")
-    startup_deadline = time.monotonic() + 30  # 30s for daemon to start
+    startup_deadline = time.monotonic() + _STARTUP_TIMEOUT
 
     while True:
         # Check for first suspension envelope
