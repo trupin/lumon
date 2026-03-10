@@ -32,6 +32,48 @@ def _unwrap_spawn_response(value: object) -> object:
     return value
 
 
+_EXPECTS_TO_TYPE: dict[str, type | tuple[type, ...]] = {
+    "text": str,
+    "number": (int, float),
+    "bool": bool,
+    "list": list,
+    "map": dict,
+}
+
+
+def _validate_spawn_responses(
+    responses: list[object],
+    envelope: dict,
+) -> str | None:
+    """Validate spawn responses against expects types. Returns error message or None."""
+    spawns = envelope.get("spawns")
+    if isinstance(spawns, list):
+        spawn_list = spawns
+    else:
+        # Single-spawn envelope — fields spread directly
+        spawn_list = [envelope]
+    for i, response in enumerate(responses):
+        if i >= len(spawn_list):
+            break
+        expects = spawn_list[i].get("expects")
+        if not expects or not isinstance(expects, str):
+            continue
+        # Extract the base type name (e.g. "text" from "text", "list<text>" from "list")
+        base_type = expects.split("<")[0].split("|")[0].strip()
+        expected_types = _EXPECTS_TO_TYPE.get(base_type)
+        if expected_types is None:
+            continue
+        actual = type(response).__name__
+        if not isinstance(response, expected_types):
+            spawn_id = f"spawn_{i}"
+            return (
+                f"{spawn_id} response is {actual}, expected {expects}. "
+                f"Check response file format — write a bare JSON {expects}, "
+                f"not a wrapper object."
+            )
+    return None
+
+
 class SuspendEvent:
     """Thread-safe suspension mechanism for ask/spawn.
 
@@ -260,6 +302,14 @@ def _run_daemon(
                 _write_output(comm_dir, {
                     "type": "error",
                     "message": "Daemon timed out waiting for spawn responses",
+                })
+                return
+            # Validate response types against expects before resuming
+            validation_error = _validate_spawn_responses(responses, envelope)
+            if validation_error is not None:
+                _write_output(comm_dir, {
+                    "type": "error",
+                    "message": validation_error,
                 })
                 return
             _cleanup_response_files(comm_dir)

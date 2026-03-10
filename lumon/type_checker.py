@@ -226,6 +226,7 @@ BUILTIN_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
     "list.flatten": ((TList(TList(_A)),), TList(_A)),
     "list.head": ((TList(_A),), TUnion((_A, TNone()))),
     "list.first": ((TList(_A),), TUnion((_A, TNone()))),
+    "list.get": ((TList(_A), TNumber()), TUnion((_A, TNone()))),
     "list.tail": ((TList(_A),), TList(_A)),
     "list.concat": ((TList(_A), TList(_A)), TList(_A)),
     "list.find": ((TList(_A), TFn((_A,), TBool())), TUnion((_A, TNone()))),

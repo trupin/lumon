@@ -345,9 +345,20 @@ def _externalize_spawns(spawns: list[dict], comm_dir: str) -> list[dict]:
         if "fork" in spawn:
             lightweight["fork"] = spawn["fork"]
 
-        # Add response file path
+        # Add response file path and format hint
         response_file = os.path.join(comm_dir, f"{spawn_id}_response.json")
         lightweight["response_file"] = response_file
+        expects = spawn.get("expects")
+        if expects:
+            lightweight["format"] = (
+                f"Write a bare JSON value matching the expected type ({expects})"
+                " — do NOT wrap in an object like {{\"value\": ...}}"
+            )
+        else:
+            lightweight["format"] = (
+                "Write a bare JSON value — do NOT wrap in an object"
+                " like {\"value\": ...}"
+            )
 
         result.append(lightweight)
     return result

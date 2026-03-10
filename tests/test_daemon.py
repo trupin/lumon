@@ -20,6 +20,7 @@ from lumon.daemon import (
     _run_daemon,
     _session_age,
     _unwrap_spawn_response,
+    _validate_spawn_responses,
     _write_output,
     _write_pid,
     cleanup_stale_sessions,
@@ -45,6 +46,52 @@ class TestUnwrapSpawnResponse:
 
     def test_unwraps_none_result(self) -> None:
         assert _unwrap_spawn_response({"result": None, "spawn_id": 0}) is None
+
+
+class TestValidateSpawnResponses:
+    def test_valid_text_response(self) -> None:
+        envelope = {"type": "spawn_batch", "spawns": [{"expects": "text"}]}
+        assert _validate_spawn_responses(["hello"], envelope) is None
+
+    def test_invalid_text_response_is_map(self) -> None:
+        envelope = {"type": "spawn_batch", "spawns": [{"expects": "text"}]}
+        err = _validate_spawn_responses([{"value": "hello"}], envelope)
+        assert err is not None
+        assert "spawn_0" in err
+        assert "expected text" in err
+
+    def test_valid_number_response(self) -> None:
+        envelope = {"type": "spawn_batch", "spawns": [{"expects": "number"}]}
+        assert _validate_spawn_responses([42], envelope) is None
+
+    def test_valid_list_response(self) -> None:
+        envelope = {"type": "spawn_batch", "spawns": [{"expects": "list"}]}
+        assert _validate_spawn_responses([[1, 2]], envelope) is None
+
+    def test_no_expects_skips_validation(self) -> None:
+        envelope = {"type": "spawn_batch", "spawns": [{}]}
+        assert _validate_spawn_responses([{"anything": True}], envelope) is None
+
+    def test_single_spawn_envelope(self) -> None:
+        # Single-spawn envelopes spread fields directly (no "spawns" key)
+        envelope = {"type": "spawn_batch", "expects": "text"}
+        assert _validate_spawn_responses(["hello"], envelope) is None
+
+    def test_single_spawn_envelope_invalid(self) -> None:
+        envelope = {"type": "spawn_batch", "expects": "text"}
+        err = _validate_spawn_responses([42], envelope)
+        assert err is not None
+        assert "expected text" in err
+
+    def test_multi_spawn_validates_each(self) -> None:
+        envelope = {"type": "spawn_batch", "spawns": [
+            {"expects": "text"},
+            {"expects": "number"},
+        ]}
+        # First is wrong
+        err = _validate_spawn_responses([42, 10], envelope)
+        assert err is not None
+        assert "spawn_0" in err
 
 
 class TestSuspendEvent:

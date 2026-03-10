@@ -586,6 +586,36 @@ class TestListFirst:
         assert r.value == "default"
 
 
+class TestListGet:
+    def test_get_valid_index(self, run):
+        r = run('return list.get([10, 20, 30], 1)')
+        assert r.value == 20
+
+    def test_get_first_index(self, run):
+        r = run('return list.get([10, 20, 30], 0)')
+        assert r.value == 10
+
+    def test_get_last_index(self, run):
+        r = run('return list.get([10, 20, 30], 2)')
+        assert r.value == 30
+
+    def test_get_out_of_bounds(self, run):
+        r = run('return list.get([10], 5)')
+        assert r.value is None
+
+    def test_get_empty_list(self, run):
+        r = run('return list.get([], 0)')
+        assert r.value is None
+
+    def test_get_with_fallback(self, run):
+        r = run('return list.get([10], 5) ?? "default"')
+        assert r.value == "default"
+
+    def test_get_negative_index(self, run):
+        r = run('return list.get([10, 20, 30], -1)')
+        assert r.value is None
+
+
 class TestListTail:
     def test_tail(self, run):
         r = run('return list.tail([1, 2, 3])')
