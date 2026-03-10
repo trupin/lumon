@@ -377,6 +377,36 @@ class TestRespondDaemon:
         assert output["value"] == "auto"
 
 
+    def test_respond_reads_output_when_daemon_already_finished(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: object,
+    ) -> None:
+        """respond reads output.json even if the daemon has already exited."""
+        assert isinstance(tmp_path, os.PathLike)
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        session = "deadbeef"
+        comm_dir = os.path.join(comm_base, session)
+        os.makedirs(comm_dir)
+
+        # Simulate daemon that already completed: pid file with dead PID, output.json present
+        with open(os.path.join(comm_dir, "pid"), "w") as f:
+            f.write("999999999")  # dead PID
+        with open(os.path.join(comm_dir, "output.json"), "w") as f:
+            json.dump({"type": "result", "value": ["spawn_result"]}, f)
+
+        with patch("lumon.cli._COMM_BASE", comm_base):
+            capsys.readouterr()
+            args = argparse.Namespace(session=session, clear=False)
+            result = cmd_respond(args)
+
+        assert result == 0
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["type"] == "result"
+        assert output["value"] == ["spawn_result"]
+        # Session should be cleaned up after completion
+        assert not os.path.isdir(comm_dir)
+
+
 class TestCmdBrowse:
     def test_browse_builtin_namespace(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)

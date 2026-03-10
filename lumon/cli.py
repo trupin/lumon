@@ -240,8 +240,19 @@ def cmd_respond(args: argparse.Namespace) -> int:
         )
         return 1
 
-    # Check if daemon is alive
-    if not is_daemon_alive(comm_dir):
+    # Check for output already written by the daemon (daemon may have
+    # finished before respond was called — e.g. it auto-consumed spawn
+    # response files the agent wrote).
+    output_path = os.path.join(comm_dir, "output.json")
+    if os.path.isfile(output_path):
+        with open(output_path, encoding="utf-8") as f:
+            result = json.load(f)
+        try:
+            os.remove(output_path)
+        except OSError:
+            pass
+    elif not is_daemon_alive(comm_dir):
+        # No output and daemon is dead — unrecoverable
         print(
             f"error: daemon for session '{session}' is not running (process died). "
             f"Re-run the script to start a new session.",
@@ -249,9 +260,9 @@ def cmd_respond(args: argparse.Namespace) -> int:
         )
         cleanup_comm_dir(comm_dir)
         return 1
-
-    # Read output from daemon (polls for output.json)
-    result = read_daemon_output(comm_dir, timeout=60)
+    else:
+        # Daemon is alive — wait for it to produce output
+        result = read_daemon_output(comm_dir, timeout=60)
     if result is None:
         print(
             f"error: timed out waiting for daemon output for session '{session}'",
