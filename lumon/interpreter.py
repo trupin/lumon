@@ -403,6 +403,12 @@ def interpret_with_suspend(
     if isinstance(suspend_event, SuspendEvent):
         env._suspend_callback = suspend_event
 
+        def _flush_spawns(pending: list[tuple[str, dict]]) -> list[object]:
+            batch_envelope = _make_spawn_batch(pending, env._logs, comm_dir=comm_dir)
+            return suspend_event.suspend_for_spawns(batch_envelope)
+
+        env._spawn_flush_callback = _flush_spawns
+
     try:
         ast = parse(code)
         type_check(ast, io_backend=io_backend, git_backend=git_backend)
@@ -414,27 +420,9 @@ def interpret_with_suspend(
         result = eval_node(ast, env)
         pending = env.get_pending_spawns()
         if pending:
-            batch_envelope = _make_spawn_batch(pending, env._logs, comm_dir=comm_dir)
-            if isinstance(suspend_event, SuspendEvent):
-                # Block for spawn responses
-                responses = suspend_event.suspend_for_spawns(batch_envelope)
-                # Feed responses back and continue (spawns are terminal in current model)
-                # In current Lumon, spawns collect handles and return at program end,
-                # so we just pair responses with handles
-                handle_map: dict[str, object] = {}
-                for i, (handle, _envelope) in enumerate(pending):
-                    if i < len(responses):
-                        handle_map[handle] = responses[i]
-                # Re-run with responses queued? No — spawns are collected at end.
-                # The result is the list of spawn responses.
-                output: dict[str, object] = {"type": "result", "value": serialize(list(responses))}
-                if env._logs:
-                    output["logs"] = list(env._logs)
-                if persist and working_dir is not None:
-                    _persist_blocks(code, working_dir)
-                return output
-            return batch_envelope
-        output = {"type": "result", "value": serialize(result)}
+            # Non-daemon mode: return spawn_batch envelope
+            return _make_spawn_batch(pending, env._logs, comm_dir=comm_dir)
+        output: dict[str, object] = {"type": "result", "value": serialize(result)}
         if env._logs:
             output["logs"] = list(env._logs)
         if persist and working_dir is not None:
@@ -443,16 +431,7 @@ def interpret_with_suspend(
     except ReturnSignal as rs:
         pending = env.get_pending_spawns()
         if pending:
-            batch_envelope = _make_spawn_batch(pending, env._logs, comm_dir=comm_dir)
-            if isinstance(suspend_event, SuspendEvent):
-                responses = suspend_event.suspend_for_spawns(batch_envelope)
-                output = {"type": "result", "value": serialize(list(responses))}
-                if env._logs:
-                    output["logs"] = list(env._logs)
-                if persist and working_dir is not None:
-                    _persist_blocks(code, working_dir)
-                return output
-            return batch_envelope
+            return _make_spawn_batch(pending, env._logs, comm_dir=comm_dir)
         output = {"type": "result", "value": serialize(rs.value)}
         if env._logs:
             output["logs"] = list(env._logs)

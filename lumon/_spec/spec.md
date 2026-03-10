@@ -425,101 +425,50 @@ Multiple `ask`s in one function work naturally — each one suspends, waits for 
 
 ### spawn (sub-agent delegation)
 
-Delegates a reasoning task to a sub-agent. Like `ask`, it suspends execution for the orchestrator. The difference: the orchestrator tells the main agent to spawn a sub-agent rather than answering directly.
+Delegates reasoning tasks to sub-agents. Unlike `ask` (which the main agent answers directly), `spawn` tells the orchestrator to create sub-agents. Spawn takes a list of task maps and blocks until all responses arrive, returning a list of results.
 
 ```
-let analysis = spawn
-  "Analyze this article for potential bias"
+let [analysis] = spawn [{
+  prompt: "Analyze this article for potential bias",
   context: article_text
-  expects: {bias_score: number, reasoning: text}
+}]
+```
+
+Multiple sub-agents in parallel:
+
+```
+let [bias, tone] = spawn [
+  {prompt: "check bias", context: article1},
+  {prompt: "check tone", context: article2}
+]
 ```
 
 With forked context (sub-agent inherits conversation history):
 
 ```
-let analysis = spawn
-  "Given our earlier discussion, analyze this article"
-  context: article_text
+let [analysis] = spawn [{
+  prompt: "Given our earlier discussion, analyze this article",
+  context: article_text,
   fork: true
-  expects: {bias_score: number, reasoning: text}
+}]
 ```
 
-Components:
-- **Prompt**: the task for the sub-agent
-- **context**: data the sub-agent needs (any Lumon value)
+Each task map has these keys:
+- **prompt** (required): the task for the sub-agent
+- **context** (optional): data the sub-agent needs (any Lumon value)
 - **fork** (optional, default `false`): if `true`, sub-agent inherits the main agent's conversation history
-- **expects**: response shape, validated same as `ask`
+- **expects** (optional): response shape hint
+
+Spawn always returns a **list** of responses, one per task map entry.
 
 **`ask` vs `spawn`:**
 
 | | `ask` | `spawn` |
 | :---- | :---- | :---- |
-| Who responds | The main agent directly | A sub-agent spawned by the main agent |
+| Who responds | The main agent directly | Sub-agents spawned by the main agent |
 | Context | Main agent's full conversation | Fresh (default) or forked |
 | Use case | Judgment calls in a workflow | Independent reasoning tasks |
-
-### async / await
-
-Unified parallelism model. Everything runs in an event loop internally. All calls **auto-await by default** — code reads like synchronous pseudocode. `async` suppresses auto-await and returns a handle. `await` / `await_all` collects handles explicitly.
-
-No colored functions — `ask`, `spawn`, plugin calls, and user-authored functions all behave the same way under the hood.
-
-Safe by construction: since all bindings are immutable, parallel execution cannot produce race conditions.
-
-**Default behavior (auto-await) — reads like synchronous code:**
-
-```
-let page = web.fetch("url")       -- auto-awaited, page is the result
-let items = inbox.read()          -- auto-awaited
-let decision = ask                -- auto-awaited
-  "Which item first?"
-  context: items
-  expects: {action: text}
-```
-
-**Parallel I/O — `async` suppresses auto-await:**
-
-```
-let h1 = async web.fetch("url1")  -- fires, returns handle
-let h2 = async web.fetch("url2")  -- fires, returns handle
-let h3 = async web.fetch("url3")  -- fires, returns handle
-let pages = await_all [h1, h2, h3]
-```
-
-**Parallel spawns:**
-
-```
-let h1 = spawn "check bias" context: article1 expects: {score: number}
-let h2 = spawn "check tone" context: article2 expects: {tone: text}
--- both sub-agents start immediately (spawn never auto-awaits)
-
--- do other deterministic work while they reason...
-let header = "# Analysis Report\n\n"
-
-let bias = await h1
-let tone = await h2
-return header + "Bias: \(bias.score), Tone: \(tone.tone)"
-```
-
-**Batch pattern:**
-
-```
-let handles = urls |> list.map(fn(u) -> async web.fetch(u))
-let pages = await_all handles
--- pages is a list of results, same order as handles
-```
-
-**Auto-await rules:**
-- Regular function calls: auto-awaited (result is the value, not a handle)
-- `async f()`: returns a handle, does not wait
-- `spawn`: always returns a handle (never auto-awaits — it's inherently deferred)
-- `ask`: auto-awaited by default (you almost always want the response immediately)
-- `await`: explicitly resolves a handle to its value
-- `await_all`: resolves a list of handles to a list of values
-
-All function calls auto-await by default — code reads like synchronous pseudocode. `async` suppresses auto-await, returning a handle instead. `await` resolves a single handle, `await_all` resolves a list.
-
-Currently the interpreter is fully sequential — `async`/`await` are no-ops. True parallel execution is a future addition.
+| Returns | Single value | List of values |
 
 ---
 
@@ -1297,9 +1246,7 @@ This prevents accidental re-execution that would silently discard in-progress wo
 
 ### Concurrency
 
-Everything runs in an event loop internally. All calls auto-await by default — code reads like synchronous pseudocode. `async` suppresses auto-await, returning a handle. `await` / `await_all` resolves handles. `spawn` always returns a handle. See section 4 for full details.
-
-**Implementation priority:** starts fully sequential (auto-await is a no-op since everything is already synchronous). Event loop parallelism added late in v0 once the core language is stable.
+All code runs sequentially except `spawn`, which fires parallel sub-agents and blocks until all respond. See section 4 for full details.
 
 ### Error model
 
@@ -1344,7 +1291,7 @@ The agent reads interpreter errors like a developer reads a traceback — functi
 
 ```
 let, define, implement, test, takes, returns, return, match, if, else,
-with, then, ask, spawn, fork, context, expects, async, await, await_all,
+with, then, ask, spawn, fork, context, expects,
 fn, assert, true, false, none, and, or, not
 ```
 
@@ -1371,12 +1318,9 @@ binding      = "let" name "=" expression
 return       = "return" expression
 assert       = "assert" expression
 
-expression   = ask_expr | spawn_expr | async_expr | await_expr | await_all_expr | with_expr | match_expr | if_expr | lambda | pipe | binary | call | access | literal | name
+expression   = ask_expr | spawn_expr | with_expr | match_expr | if_expr | lambda | pipe | binary | call | access | literal | name
 ask_expr     = "ask" text ["context:" expression] ["expects:" type_shape]
-spawn_expr   = "spawn" text ["context:" expression] ["fork:" bool] ["expects:" type_shape]
-async_expr   = "async" call
-await_expr   = "await" expression
-await_all    = "await_all" expression
+spawn_expr   = "spawn" expression  -- expression must evaluate to a list of task maps
 with_expr    = "with" (name "=" expression)+ "then" expression "else" expression
 pipe         = expression "|>" call
 match_expr   = "match" expression (pattern ["if" expression] "->" (expression | NEWLINE INDENT body DEDENT))+
@@ -1656,7 +1600,7 @@ implement inbox.process_and_enrich
 
 ### 9. Parallel sub-agents with spawn and ask
 
-Combines `spawn` for parallel independent reasoning, `await_all` to collect results, and `ask` for a judgment call by the main agent. Shows the full code → agent → code → agent → code flow.
+Combines `spawn` for parallel independent reasoning and `ask` for a judgment call by the main agent. Shows the full code → agent → code → agent → code flow.
 
 ```
 define news.analyze_and_curate
@@ -1674,16 +1618,10 @@ implement news.analyze_and_curate
       let articles = raw |> text.split("\n---\n")
 
       -- Spawn sub-agents to analyze each article (all run in parallel)
-      let handles = articles
-        |> list.map(fn(a) ->
-          spawn
-            "Analyze this article for bias and extract key claims"
-            context: a
-            expects: {bias: number, claims: list, summary: text, source: text}
-        )
-
-      -- Collect all results
-      let analyses = await_all handles
+      let analyses = spawn (articles |> list.map(fn(a) -> {
+        prompt: "Analyze this article for bias and extract key claims",
+        context: a
+      }))
 
       -- Ask main agent to curate (judgment call)
       let curated = ask

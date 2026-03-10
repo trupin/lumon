@@ -60,20 +60,25 @@ class TestInterpretWithSuspend:
 
     def test_spawn_without_suspend_returns_batch(self) -> None:
         """Without suspend_event, spawn returns spawn_batch envelope."""
-        result = interpret_with_suspend('let a = spawn\n  "task"\nreturn a')
+        result = interpret_with_suspend('let a = spawn [{prompt: "task"}]\nreturn a')
         assert result["type"] == "spawn_batch"
 
     def test_spawn_with_suspend_event(self, tmp_path: object) -> None:
-        """With SuspendEvent, spawn batch blocks and resumes with responses."""
+        """With SuspendEvent, spawn blocks in-place and resumes with responses."""
         assert isinstance(tmp_path, os.PathLike)
         se = SuspendEvent(str(tmp_path))
         result_box: list[dict] = []
 
+        code = (
+            'let results = spawn [\n'
+            '  {prompt: "task A"},\n'
+            '  {prompt: "task B"}\n'
+            ']\n'
+            'return results'
+        )
+
         def worker() -> None:
-            r = interpret_with_suspend(
-                'let a = spawn\n  "task A"\nlet b = spawn\n  "task B"\nreturn [a, b]',
-                suspend_event=se,
-            )
+            r = interpret_with_suspend(code, suspend_event=se)
             result_box.append(r)
 
         t = threading.Thread(target=worker)
@@ -101,7 +106,7 @@ class TestInterpretWithSuspend:
 
         def worker() -> None:
             r = interpret_with_suspend(
-                'let a = spawn\n  "single task"\nreturn a',
+                'let a = spawn [{prompt: "single task"}]\nreturn a',
                 suspend_event=se,
             )
             result_box.append(r)
@@ -202,7 +207,7 @@ class TestInterpretWithSuspend:
         assert result_box[0]["value"] == ["answer1", "answer2"]
 
     def test_ask_then_spawn(self, tmp_path: object) -> None:
-        """Ask followed by spawn: ask suspends first, then spawns batch at end."""
+        """Ask followed by spawn: ask blocks first, then spawn blocks in-place."""
         assert isinstance(tmp_path, os.PathLike)
         se = SuspendEvent(str(tmp_path))
         result_box: list[dict] = []
@@ -210,9 +215,8 @@ class TestInterpretWithSuspend:
         code = (
             'let a = ask\n'
             '  "confirm?"\n'
-            'let s = spawn\n'
-            '  "analyze"\n'
-            'return a'
+            'let s = spawn [{prompt: "analyze"}]\n'
+            'return [a, s]'
         )
 
         def worker() -> None:
@@ -232,7 +236,7 @@ class TestInterpretWithSuspend:
         se.clear_envelope()
         se.resume_with_ask("confirmed")
 
-        # Spawns are batched at end — suspend_for_spawns fires
+        # Spawn blocks in-place — suspend_for_spawns fires
         deadline = time.monotonic() + 5
         while se.envelope is None and time.monotonic() < deadline:
             time.sleep(0.01)
@@ -245,5 +249,37 @@ class TestInterpretWithSuspend:
         t.join(timeout=5)
         assert len(result_box) == 1
         assert result_box[0]["type"] == "result"
-        # When pending spawns exist, result value is the spawn responses
-        assert result_box[0]["value"] == ["spawn_result"]
+        assert result_box[0]["value"] == ["confirmed", ["spawn_result"]]
+
+    def test_spawn_post_processing(self, tmp_path: object) -> None:
+        """Spawn result can be used in subsequent computation."""
+        assert isinstance(tmp_path, os.PathLike)
+        se = SuspendEvent(str(tmp_path))
+        result_box: list[dict] = []
+
+        code = (
+            'let results = spawn [{prompt: "analyze"}]\n'
+            'let count = list.length(results)\n'
+            'return count'
+        )
+
+        def worker() -> None:
+            r = interpret_with_suspend(code, suspend_event=se)
+            result_box.append(r)
+
+        t = threading.Thread(target=worker)
+        t.start()
+
+        deadline = time.monotonic() + 5
+        while se.envelope is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert se.envelope is not None
+        assert se.envelope["type"] == "spawn_batch"
+
+        se.clear_envelope()
+        se.resume_with_spawns(["the result"])
+
+        t.join(timeout=5)
+        assert len(result_box) == 1
+        assert result_box[0]["type"] == "result"
+        assert result_box[0]["value"] == 1

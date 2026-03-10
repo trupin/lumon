@@ -43,15 +43,14 @@ Use `spawn` when the reasoning task is **independent** and can be delegated to a
 ```
 implement docs.review
   let files = io.list_dir("docs/") |> unwrap
-  let reviews = files
-    |> list.map(fn(f) ->
-      let content = io.read("docs/" + f) |> unwrap
-      spawn
-        "Review this document for accuracy and completeness"
-        context: {file: f, content: content}
-        expects: {issues: list, score: number, summary: text}
-    )
-    |> await_all
+  let reviews = spawn (files |> list.map(fn(f) ->
+    let content = io.read("docs/" + f) |> unwrap
+    {
+      prompt: "Review this document for accuracy and completeness",
+      context: {file: f, content: content},
+      expects: "{issues: list, score: number, summary: text}"
+    }
+  ))
 
   -- Ask the main agent to make the final call
   let decision = ask
@@ -97,6 +96,6 @@ Context data (which can be large) is written to context files automatically. Rea
 
 - **Hardcoding a choice** when the data is ambiguous — use `ask`
 - **Returning raw data** and expecting the caller to figure it out — use `ask` to decide, then return the decision
-- **Sequential reasoning** on independent items — use `spawn` + `await_all` for parallelism
+- **Sequential reasoning** on independent items — use `spawn` for parallelism
 - **Guessing a format or structure** from partial information — use `ask` to confirm
 - **Swallowing ambiguity with a default** (e.g., `?? "unknown"`) when the agent should decide — use `ask` instead

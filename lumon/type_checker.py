@@ -16,6 +16,7 @@ from lumon.ast_nodes import (
     IfStatement,
     ImplementBlock,
     IndexAccess,
+    InterpolatedText,
     Lambda,
     LambdaCall,
     LetBinding,
@@ -29,11 +30,11 @@ from lumon.ast_nodes import (
     PipeOp,
     Program,
     ReturnStatement,
+    SpawnExpr,
     SpreadEntry,
     TagLiteral,
     TestBlock,
     TextLiteral,
-    InterpolatedText,
     UnaryOp,
     VarRef,
 )
@@ -630,7 +631,11 @@ def check_node(node: object, env: TypeEnv, sigs: dict[str, tuple[tuple[object, .
             result = check_node(stmt, env, sigs)
         return result
 
-    # Everything else (ask, spawn, with, etc.) → permissive
+    if isinstance(node, SpawnExpr):
+        check_node(node.tasks, env, sigs)
+        return TAny()
+
+    # Everything else (ask, with, etc.) → permissive
     return TAny()
 
 

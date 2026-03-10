@@ -68,7 +68,7 @@ Work through each category below. For each issue found, note the file, function,
 ### F. Optimizations
 
 - Sequential `ask` calls that could be batched into a single `ask` with structured context
-- Sequential operations on independent items that could use `spawn` + `await_all`
+- Sequential operations on independent items that could use `spawn` for parallelism
 - Redundant `io.read` calls — reading the same file multiple times when the result could be bound once
 
 ## Phase 3: Produce the improvement list

@@ -258,7 +258,7 @@ class TestRespondDaemon:
         """Full spawn → respond cycle using daemon model."""
         assert isinstance(tmp_path, os.PathLike)
         comm_base = os.path.join(str(tmp_path), ".lumon_comm")
-        code = 'let a = spawn\n  "Task A"\nlet b = spawn\n  "Task B"\nreturn [a, b]'
+        code = 'let results = spawn [{prompt: "Task A"}, {prompt: "Task B"}]\nreturn results'
         with patch("lumon.cli._COMM_BASE", comm_base):
             old_cwd = os.getcwd()
             os.chdir(str(tmp_path))
@@ -292,7 +292,7 @@ class TestRespondDaemon:
         """Spawn responses with {result: ..., spawn_id: N} wrappers are unwrapped."""
         assert isinstance(tmp_path, os.PathLike)
         comm_base = os.path.join(str(tmp_path), ".lumon_comm")
-        code = 'let a = spawn\n  "Task A"\nlet b = spawn\n  "Task B"\nreturn [a, b]'
+        code = 'let results = spawn [{prompt: "Task A"}, {prompt: "Task B"}]\nreturn results'
         with patch("lumon.cli._COMM_BASE", comm_base):
             old_cwd = os.getcwd()
             os.chdir(str(tmp_path))

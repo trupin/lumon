@@ -52,6 +52,11 @@ class Environment:
         # Suspend callback for daemon mode (shared) — when set, ask/spawn
         # block on this instead of raising AskSignal
         self._suspend_callback: object | None = None if parent is None else parent._suspend_callback
+        # Spawn flush callback (shared) — when set, spawn blocks in-place
+        # and returns responses instead of deferring to end-of-script
+        self._spawn_flush_callback: Callable[[list[tuple[str, dict]]], list[object]] | None = (
+            None if parent is None else parent._spawn_flush_callback
+        )
         # Track which plugin instances were used during this session (shared)
         # Each entry is (plugin_dir, instance_name, env_vars_key) for shutdown
         self._used_plugins: set[tuple[str, str]] = (
@@ -99,6 +104,7 @@ class Environment:
         snap._working_dir = self._working_dir
         snap._logs = self._logs
         snap._suspend_callback = self._suspend_callback
+        snap._spawn_flush_callback = self._spawn_flush_callback
         snap._used_plugins = self._used_plugins
         return snap
 

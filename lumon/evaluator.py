@@ -5,9 +5,6 @@ from __future__ import annotations
 from lumon.ast_nodes import (
     AskExpr,
     AssertStatement,
-    AsyncExpr,
-    AwaitAllExpr,
-    AwaitExpr,
     BinaryOp,
     BindPattern,
     Block,
@@ -151,12 +148,6 @@ def eval_node(node: object, env: Environment) -> object:
             return _eval_ask(node, env)
         case SpawnExpr():
             return _eval_spawn(node, env)
-        case AsyncExpr(expr=expr):
-            return eval_node(expr, env)
-        case AwaitExpr(expr=expr):
-            return eval_node(expr, env)
-        case AwaitAllExpr(expr=expr):
-            return eval_node(expr, env)
 
         # --- Program ---
         case Program(statements=stmts):
@@ -732,25 +723,45 @@ def _eval_ask(node: AskExpr, env: Environment) -> object:
 
 
 def _eval_spawn(node: SpawnExpr, env: Environment) -> object:
-    # If a response has been queued (replay mode), return it directly.
-    queued = env.consume_response()
-    if queued is not None:
-        return queued[0]
+    tasks = eval_node(node.tasks, env)
+    if not isinstance(tasks, list):
+        raise LumonError("spawn requires a list of task maps")
 
-    prompt = eval_node(node.prompt, env) if node.prompt else ""
-    context = eval_node(node.context, env) if node.context else None
-    fork = eval_node(node.fork, env) if node.fork else False
-    expects = node.expects
+    # Test/replay mode: consume responses from queue
+    first = env.consume_response()
+    if first is not None:
+        results: list[object] = [first[0]]
+        for _ in range(1, len(tasks)):
+            q = env.consume_response()
+            if q is None:
+                raise LumonError("spawn: not enough mock responses queued")
+            results.append(q[0])
+        return results
 
-    envelope: dict[str, object] = {
-        "prompt": prompt,
-    }
-    if context is not None:
-        envelope["context"] = serialize(context)
-    if fork is not None:
-        envelope["fork"] = fork
-    if expects is not None:
-        envelope["expects"] = expects
+    # Build envelopes and register all spawns
+    for task in tasks:
+        if not isinstance(task, dict):
+            raise LumonError("spawn: each task must be a map with a 'prompt' key")
+        prompt = task.get("prompt", "")
+        context = task.get("context")
+        fork = task.get("fork", False)
+        expects = task.get("expects")
 
-    # Register spawn and return handle — don't halt execution
-    return env.register_spawn(envelope)
+        envelope: dict[str, object] = {"prompt": prompt}
+        if context is not None:
+            envelope["context"] = serialize(context)
+        if fork is not None:
+            envelope["fork"] = fork
+        if expects is not None:
+            envelope["expects"] = expects
+        env.register_spawn(envelope)
+
+    # Daemon mode: flush via callback — blocks until all responses arrive
+    if env._spawn_flush_callback is not None:
+        pending = env.get_pending_spawns()
+        responses = env._spawn_flush_callback(pending)
+        env._pending_spawns.clear()
+        return list(responses)
+
+    # Non-daemon mode: return handles
+    return [h for h, _ in env.get_pending_spawns()]

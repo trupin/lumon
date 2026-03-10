@@ -10,9 +10,6 @@ from lark.indenter import DedentError, Indenter
 from lumon.ast_nodes import (
     AskExpr,
     AssertStatement,
-    AsyncExpr,
-    AwaitAllExpr,
-    AwaitExpr,
     BinaryOp,
     BindPattern,
     Block,
@@ -748,14 +745,8 @@ class LumonTransformer(Transformer):
     def ask_expects(self, type_expr: object) -> tuple[str, object]:
         return ("expects", type_expr)
 
-    def spawn_expr(self, body: object) -> SpawnExpr:
-        return body  # type: ignore[return-value]
-
-    def spawn_body(self, prompt: Token, fields: object) -> SpawnExpr:
-        prompt_node = self._parse_prompt_token(prompt)
-        if isinstance(fields, SpawnExpr):
-            return SpawnExpr(prompt_node, fields.context, fields.fork, fields.expects)
-        return SpawnExpr(prompt_node)
+    def spawn_expr(self, tasks: object) -> SpawnExpr:
+        return SpawnExpr(tasks)
 
     def _parse_prompt_token(self, token: Token) -> TextLiteral | InterpolatedText:
         """Parse a prompt token (ESCAPED_STRING or TRIPLE_STRING) into an AST node."""
@@ -766,40 +757,6 @@ class LumonTransformer(Transformer):
             return _parse_interpolated_string(content)
         prompt_str = _unescape_string(raw[1:-1])
         return TextLiteral(prompt_str)
-
-    def spawn_fields(self, *children: object) -> SpawnExpr:
-        context = None
-        fork = None
-        expects = None
-        for child in children:
-            if isinstance(child, tuple):
-                if child[0] == "context":
-                    context = child[1]
-                elif child[0] == "fork":
-                    fork = child[1]
-                elif child[0] == "expects":
-                    expects = child[1]
-        return SpawnExpr(None, context, fork, expects)
-
-    def spawn_context(self, expr: object) -> tuple[str, object]:
-        return ("context", expr)
-
-    def spawn_fork(self, expr: object) -> tuple[str, object]:
-        return ("fork", expr)
-
-    def spawn_expects(self, type_expr: object) -> tuple[str, object]:
-        return ("expects", type_expr)
-
-    # --- Async / Await ---
-
-    def async_expr(self, expr: object) -> AsyncExpr:
-        return AsyncExpr(expr)
-
-    def await_expr(self, expr: object) -> AwaitExpr:
-        return AwaitExpr(expr)
-
-    def await_all_expr(self, expr: object) -> AwaitAllExpr:
-        return AwaitAllExpr(expr)
 
     # --- Type expressions (stored as strings or dicts for now) ---
 

@@ -1,5 +1,5 @@
 """Tests for Lumon control flow: if/else, match (patterns, guards, exhaustiveness),
-with/then/else, ask, spawn, async/await."""
+with/then/else, ask, spawn."""
 
 import json
 import os
@@ -457,36 +457,24 @@ class TestAsk:
 class TestSpawn:
     def test_spawn_produces_spawn_output(self, run):
         r = run(
-            'let h = spawn\n'
-            '  "Analyze this"\n'
-            '  context: "article text"\n'
-            '  expects: {bias: number, summary: text}'
+            'let h = spawn [{prompt: "Analyze this", context: "article text"}]'
         )
-        # spawn yields control, producing a spawn_batch or similar
-        assert r.type in ("spawn_batch", "ask")
+        assert r.type == "spawn_batch"
 
     def test_spawn_with_fork(self, run):
         r = run(
-            'let h = spawn\n'
-            '  "Analyze with history"\n'
-            '  context: "data"\n'
-            '  fork: true\n'
-            '  expects: {result: text}'
+            'let h = spawn [{prompt: "Analyze with history", context: "data", fork: true}]'
         )
-        assert r.type in ("spawn_batch", "ask")
+        assert r.type == "spawn_batch"
 
-    def test_multiple_spawns_batched(self, run):
-        """Multiple spawn expressions should be batched together."""
+    def test_multi_entry_spawn_batched(self, run):
+        """Multi-entry spawn returns a batch with all entries."""
         r = run(
-            'let a = spawn\n'
-            '  "Task A"\n'
-            '  context: "data a"\n'
-            '  expects: text\n'
-            'let b = spawn\n'
-            '  "Task B"\n'
-            '  context: "data b"\n'
-            '  expects: text\n'
-            'return {a: a, b: b}'
+            'let results = spawn [\n'
+            '  {prompt: "Task A", context: "data a"},\n'
+            '  {prompt: "Task B", context: "data b"}\n'
+            ']\n'
+            'return results'
         )
         assert r.type == "spawn_batch"
         assert "spawns" in r.output
@@ -494,72 +482,39 @@ class TestSpawn:
         assert r.output["spawns"][0]["prompt"] == "Task A"
         assert r.output["spawns"][1]["prompt"] == "Task B"
 
-    def test_multiple_spawns_replay(self):
-        """Responding to multiple spawns should resolve all handles."""
+    def test_separate_spawns_batched(self, run):
+        """Separate spawn expressions each produce their own batch."""
+        r = run(
+            'let a = spawn [{prompt: "Task A", context: "data a"}]\n'
+            'let b = spawn [{prompt: "Task B", context: "data b"}]\n'
+            'return [a, b]'
+        )
+        # Two separate spawns produce two pending spawns total
+        assert r.type == "spawn_batch"
+        assert "spawns" in r.output
+        assert len(r.output["spawns"]) == 2
+
+    def test_multi_entry_spawn_replay(self):
+        """Responding to multi-entry spawn resolves all entries as a list."""
         from lumon.interpreter import interpret
         code = (
-            'let a = spawn\n'
-            '  "Task A"\n'
-            '  context: "data a"\n'
-            '  expects: text\n'
-            'let b = spawn\n'
-            '  "Task B"\n'
-            '  context: "data b"\n'
-            '  expects: text\n'
-            'return {a: a, b: b}'
+            'let results = spawn [\n'
+            '  {prompt: "Task A", context: "data a"},\n'
+            '  {prompt: "Task B", context: "data b"}\n'
+            ']\n'
+            'return results'
         )
         result = interpret(code, responses=["result A", "result B"])
         assert result["type"] == "result"
-        assert result["value"] == {"a": "result A", "b": "result B"}
+        assert result["value"] == ["result A", "result B"]
 
-    def test_spawn_wrapped_response_unwrapped_by_cli(self) -> None:
-        """Spawn responses wrapped in {result: ..., spawn_id: N} are unwrapped at CLI boundary.
-
-        The interpreter itself passes responses through as-is; unwrapping
-        happens in cmd_respond (tested in test_cli_unit.py). This test
-        confirms raw values work correctly through interpret().
-        """
+    def test_single_spawn_replay(self):
+        """Single-entry spawn returns a list with one element."""
         from lumon.interpreter import interpret
-        code = (
-            'let x = spawn\n'
-            '  "Task"\n'
-            '  expects: text\n'
-            'return x'
-        )
+        code = 'let x = spawn [{prompt: "Task"}]\nreturn x'
         result = interpret(code, responses=["raw value"])
         assert result["type"] == "result"
-        assert result["value"] == "raw value"
-
-
-# ===================================================================
-# async / await
-# ===================================================================
-
-class TestAsyncAwait:
-    def test_await_resolves_handle(self, run):
-        """In initial sequential mode, async is a no-op and await returns the value."""
-        io = MockFS({"file.md": "content"})
-        r = run(
-            'let h = async io.read("file.md")\n'
-            'let result = await h\n'
-            'return result',
-            io=io,
-        )
-        assert r.value == {"tag": "ok", "value": "content"}
-
-    def test_await_all_resolves_handles(self, run):
-        io = MockFS({"a.md": "aaa", "b.md": "bbb"})
-        r = run(
-            'let h1 = async io.read("a.md")\n'
-            'let h2 = async io.read("b.md")\n'
-            'let results = await_all [h1, h2]\n'
-            'return results',
-            io=io,
-        )
-        assert r.value == [
-            {"tag": "ok", "value": "aaa"},
-            {"tag": "ok", "value": "bbb"},
-        ]
+        assert result["value"] == ["raw value"]
 
 
 # ===================================================================
@@ -694,11 +649,9 @@ class TestAskSpawnSignals:
 
     def test_spawn_signal(self, run):
         r = run(
-            'let h = spawn\n'
-            '  "Do something"\n'
-            '  context: [1, 2, 3]'
+            'let h = spawn [{prompt: "Do something", context: [1, 2, 3]}]'
         )
-        assert r.type in ("spawn_batch", "ask")
+        assert r.type == "spawn_batch"
 
 
 # ===================================================================
@@ -716,15 +669,11 @@ class TestCommDir:
 
         comm_dir = os.path.join(str(tmp_path), "session1")
         code = (
-            'let a = spawn\n'
-            '  "Task A"\n'
-            '  context: {data: "large payload"}\n'
-            '  expects: text\n'
-            'let b = spawn\n'
-            '  "Task B"\n'
-            '  context: [1, 2, 3]\n'
-            '  expects: text\n'
-            'return [a, b]'
+            'let results = spawn [\n'
+            '  {prompt: "Task A", context: {data: "large payload"}},\n'
+            '  {prompt: "Task B", context: [1, 2, 3]}\n'
+            ']\n'
+            'return results'
         )
         result = interpret(code, comm_dir=comm_dir)
         assert result["type"] == "spawn_batch"
@@ -786,9 +735,7 @@ class TestCommDir:
 
         comm_dir = os.path.join(str(tmp_path), "session3")
         code = (
-            'let x = spawn\n'
-            '  "Simple task"\n'
-            '  expects: text\n'
+            'let x = spawn [{prompt: "Simple task"}]\n'
             'return x'
         )
         result = interpret(code, comm_dir=comm_dir)
@@ -862,10 +809,7 @@ class TestCommDir:
 
         comm_dir = os.path.join(str(tmp_path), "session5")
         code = (
-            'let x = spawn\n'
-            '  "Analyze"\n'
-            '  context: "article"\n'
-            '  expects: text\n'
+            'let x = spawn [{prompt: "Analyze", context: "article"}]\n'
             'return x'
         )
         result = interpret(code, comm_dir=comm_dir)

@@ -1878,8 +1878,7 @@ class TestShutdownIntegration:
         from unittest.mock import patch as mock_patch
 
         code = (
-            'let h = spawn\n'
-            '  "do something"\n'
+            'let h = spawn [{prompt: "do something"}]\n'
             'return h'
         )
         with mock_patch("lumon.interpreter._shutdown_plugins") as mock_shutdown:
