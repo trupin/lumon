@@ -6,7 +6,6 @@ import argparse
 import importlib.resources
 import json
 import os
-import signal
 import sys
 from pathlib import Path
 
@@ -20,6 +19,7 @@ from lumon.errors import AskSignal, LumonError, ReturnSignal
 from lumon.evaluator import eval_node
 from lumon.daemon import (
     SuspendEvent,
+    _kill_daemon,
     cleanup_stale_sessions,
     is_daemon_alive,
     read_daemon_output,
@@ -76,15 +76,7 @@ def _find_session() -> str | None:
 def _clear_state(session: str) -> None:
     """Remove a session directory (kill daemon if alive)."""
     comm_dir = _comm_dir_for_session(session)
-    # Try to kill daemon process
-    pid_file = os.path.join(comm_dir, "pid")
-    if os.path.isfile(pid_file):
-        try:
-            with open(pid_file, encoding="utf-8") as f:
-                pid = int(f.read().strip())
-            os.kill(pid, signal.SIGKILL)
-        except (ValueError, ProcessLookupError, PermissionError, OSError):
-            pass
+    _kill_daemon(comm_dir)
     cleanup_comm_dir(comm_dir)
 
 

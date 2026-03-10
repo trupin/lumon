@@ -528,9 +528,12 @@ def _call_user_function(
         prev_plugin_instance = env._active_plugin["instance"]
         prev_plugin_env = env._active_plugin["env"]
         if plugin_dir is not None:
+            instance = env._plugin_instances.get(name) or ""
             env._active_plugin["dir"] = plugin_dir
-            env._active_plugin["instance"] = env._plugin_instances.get(name)
+            env._active_plugin["instance"] = instance
             env._active_plugin["env"] = env._plugin_env_vars.get(name) or None
+            # Track that this plugin instance was used (for shutdown signaling)
+            env._used_plugins.add((plugin_dir, instance))
 
         try:
             result = None

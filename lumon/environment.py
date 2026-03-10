@@ -52,6 +52,11 @@ class Environment:
         # Suspend callback for daemon mode (shared) — when set, ask/spawn
         # block on this instead of raising AskSignal
         self._suspend_callback: object | None = None if parent is None else parent._suspend_callback
+        # Track which plugin instances were used during this session (shared)
+        # Each entry is (plugin_dir, instance_name, env_vars_key) for shutdown
+        self._used_plugins: set[tuple[str, str]] = (
+            set() if parent is None else parent._used_plugins
+        )
 
     def get(self, name: str) -> object:
         if name in self._bindings:
@@ -94,6 +99,7 @@ class Environment:
         snap._working_dir = self._working_dir
         snap._logs = self._logs
         snap._suspend_callback = self._suspend_callback
+        snap._used_plugins = self._used_plugins
         return snap
 
     def consume_response(self) -> tuple[object] | None:

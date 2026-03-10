@@ -276,7 +276,7 @@ def exec_plugin_script(
     except FileNotFoundError as exc:
         raise LumonError(f"Plugin executable not found: {command}") from exc
     except subprocess.TimeoutExpired as exc:
-        raise LumonError(f"Plugin script timed out after 30 seconds: {command}") from exc
+        raise LumonError(f"Plugin script timed out after 300 seconds: {command}") from exc
 
     if result.returncode != 0:
         stderr_msg = result.stderr[:1024].strip() if result.stderr else "unknown error"
@@ -290,3 +290,76 @@ def exec_plugin_script(
         ) from exc
 
     return deserialize(parsed)
+
+
+def notify_plugin_shutdown(
+    used_plugins: set[tuple[str, str]],
+    env_vars_map: dict[str, dict[str, str]] | None = None,
+) -> None:
+    """Send _shutdown signal to each plugin instance used during the session.
+
+    Called by the interpreter on session end (normal completion, error, or
+    SIGTERM). Each plugin script receives a ``_shutdown`` command on stdin
+    with ``{}``. Scripts that don't handle ``_shutdown`` return an error tag
+    which is silently ignored.
+
+    Args:
+        used_plugins: Set of (plugin_dir, instance_name) pairs.
+        env_vars_map: Optional mapping from instance_name to custom env vars.
+    """
+    for plugin_dir, instance in used_plugins:
+        # Find the plugin's main script by checking impl.lumon for the command pattern
+        # Convention: the first plugin.exec command determines the script
+        impl_path = os.path.join(plugin_dir, "impl.lumon")
+        script_cmd = _find_plugin_script(plugin_dir, impl_path)
+        if not script_cmd:
+            continue
+
+        sub_env = {**os.environ, "LUMON_PLUGIN_INSTANCE": instance}
+        if env_vars_map and instance in env_vars_map:
+            sub_env.update(env_vars_map[instance])
+
+        try:
+            subprocess.run(
+                [*shlex.split(script_cmd), "_shutdown"],
+                input="{}",
+                capture_output=True,
+                text=True,
+                cwd=plugin_dir,
+                timeout=10,
+                env=sub_env,
+                check=False,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            pass  # best-effort, don't block shutdown
+
+
+def _find_plugin_script(_plugin_dir: str, impl_path: str) -> str | None:
+    """Extract the base script command from a plugin's impl.lumon.
+
+    Looks for the first ``plugin.exec("... <command>", ...)`` call and
+    returns the script portion (everything before the last space-separated
+    token, which is the function name).
+
+    Only matches double-quoted strings (Lumon convention for plugin.exec).
+    """
+    if not os.path.isfile(impl_path):
+        return None
+    try:
+        with open(impl_path, encoding="utf-8") as f:
+            for line in f:
+                stripped = line.strip()
+                if "plugin.exec(" in stripped:
+                    # Extract the command string from plugin.exec("command", ...)
+                    start = stripped.index('plugin.exec("') + len('plugin.exec("')
+                    end = stripped.index('"', start)
+                    command = stripped[start:end]
+                    # The command is like "uv run browser_stealth.py navigate"
+                    # We want the script part: "uv run browser_stealth.py"
+                    parts = command.rsplit(" ", 1)
+                    if len(parts) == 2:
+                        return parts[0]
+                    return command
+    except (OSError, ValueError):
+        pass
+    return None

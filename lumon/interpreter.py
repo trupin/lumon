@@ -19,6 +19,7 @@ from lumon.plugins import (
     discover_plugins,
     disk_manifest_namespaces,
     load_config,
+    notify_plugin_shutdown,
     split_contracts,
 )
 from lumon.serializer import serialize
@@ -171,6 +172,19 @@ def _setup_plugins(
         env.trigger_loader(plugin.alias)
 
 
+def _shutdown_plugins(env: Environment) -> None:
+    """Notify used plugins that the session is ending."""
+    if not env._used_plugins:
+        return
+    # Build instance→env_vars mapping from the environment
+    env_vars_map: dict[str, dict[str, str]] = {}
+    for fn_name, env_vars in env._plugin_env_vars.items():
+        instance = env._plugin_instances.get(fn_name, "")
+        if instance and env_vars:
+            env_vars_map[instance] = env_vars
+    notify_plugin_shutdown(env._used_plugins, env_vars_map or None)
+
+
 def interpret(
     code: str,
     *,
@@ -194,6 +208,7 @@ def interpret(
     files under that directory instead of being inlined in the output JSON.
     """
     env = Environment()
+    suspended = False
     try:
         ast = parse(code)
         type_check(ast, io_backend=io_backend, git_backend=git_backend)
@@ -209,6 +224,7 @@ def interpret(
         result = eval_node(ast, env)
         pending = env.get_pending_spawns()
         if pending:
+            suspended = True
             return _make_spawn_batch(pending, env._logs, comm_dir=comm_dir)
         output: dict[str, object] = {"type": "result", "value": serialize(result)}
         if env._logs:
@@ -219,6 +235,7 @@ def interpret(
     except ReturnSignal as rs:
         pending = env.get_pending_spawns()
         if pending:
+            suspended = True
             return _make_spawn_batch(pending, env._logs, comm_dir=comm_dir)
         output = {"type": "result", "value": serialize(rs.value)}
         if env._logs:
@@ -227,6 +244,7 @@ def interpret(
             _persist_blocks(code, working_dir)
         return output
     except AskSignal as ask:
+        suspended = True
         envelope = ask.envelope
         if env._logs:
             envelope["logs"] = list(env._logs)
@@ -243,6 +261,9 @@ def interpret(
         if env._logs:
             envelope["logs"] = list(env._logs)
         return envelope
+    finally:
+        if not suspended:
+            _shutdown_plugins(env)
 
 
 def _make_spawn_batch(
@@ -456,3 +477,5 @@ def interpret_with_suspend(
         if env._logs:
             envelope["logs"] = list(env._logs)
         return envelope
+    finally:
+        _shutdown_plugins(env)

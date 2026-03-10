@@ -13,10 +13,12 @@ from lumon import interpret
 from lumon.ast_nodes import DefineBlock, ParamDef
 from lumon.errors import LumonError
 from lumon.plugins import (
+    _find_plugin_script,
     classify_contract,
     discover_plugins,
     exec_plugin_script,
     load_config,
+    notify_plugin_shutdown,
     split_contracts,
     validate_contracts,
 )
@@ -1810,3 +1812,133 @@ class TestValidateContractsEdgeCases:
         )
         with pytest.raises(LumonError, match="expected text"):
             validate_contracts("test.fn", (42,), define, {"x": ["a", "b", "c"]})
+
+
+# ---------------------------------------------------------------------------
+# Plugin shutdown lifecycle
+# ---------------------------------------------------------------------------
+
+
+class TestShutdownIntegration:
+    """Tests that interpret() and interpret_with_suspend() call _shutdown_plugins."""
+
+    def test_interpret_calls_shutdown_on_completion(self, tmp_path: Path) -> None:
+        """_shutdown_plugins is called when interpret() completes normally."""
+        wd = make_plugin_project(tmp_path, {
+            "greet": {
+                "manifest.lumon": GREET_MANIFEST,
+                "impl.lumon": GREET_IMPL,
+            },
+        })
+        from unittest.mock import patch as mock_patch
+
+        with mock_patch("lumon.interpreter.notify_plugin_shutdown") as mock_notify:
+            r = interpret('return greet.hello("World")', working_dir=wd, plugin_executor=mock_executor)
+            assert r["type"] == "result"
+            mock_notify.assert_called_once()
+
+    def test_interpret_skips_shutdown_on_ask_suspension(self, tmp_path: Path) -> None:
+        """_shutdown_plugins is NOT called when interpret() suspends on ask."""
+        wd = make_plugin_project(tmp_path, {
+            "greet": {
+                "manifest.lumon": GREET_MANIFEST,
+                "impl.lumon": GREET_IMPL,
+            },
+        })
+        from unittest.mock import patch as mock_patch
+
+        code = 'let x = ask\n  "question?"\nreturn x'
+        with mock_patch("lumon.interpreter.notify_plugin_shutdown") as mock_notify:
+            r = interpret(code, working_dir=wd, plugin_executor=mock_executor)
+            assert r["type"] == "ask"
+            mock_notify.assert_not_called()
+
+    def test_interpret_with_suspend_calls_shutdown(self) -> None:
+        """_shutdown_plugins is called when interpret_with_suspend() completes."""
+        from unittest.mock import patch as mock_patch
+
+        from lumon.interpreter import interpret_with_suspend
+
+        with mock_patch("lumon.interpreter._shutdown_plugins") as mock_shutdown:
+            r = interpret_with_suspend("return 42")
+            assert r["type"] == "result"
+            mock_shutdown.assert_called_once()
+
+
+class TestFindPluginScript:
+    def test_extracts_script_from_impl(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        plugin_dir = str(tmp_path)
+        impl_path = os.path.join(plugin_dir, "impl.lumon")
+        with open(impl_path, "w") as f:
+            f.write('implement greet.hello\n  let r = plugin.exec("uv run greet.py hello", {name: name})\n  return r\n')
+        result = _find_plugin_script(plugin_dir, impl_path)
+        assert result == "uv run greet.py"
+
+    def test_returns_none_when_no_impl(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        result = _find_plugin_script(str(tmp_path), os.path.join(str(tmp_path), "impl.lumon"))
+        assert result is None
+
+    def test_returns_none_when_no_plugin_exec(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        impl_path = os.path.join(str(tmp_path), "impl.lumon")
+        with open(impl_path, "w") as f:
+            f.write("implement greet.hello\n  return 42\n")
+        result = _find_plugin_script(str(tmp_path), impl_path)
+        assert result is None
+
+
+class TestNotifyPluginShutdown:
+    def test_calls_shutdown_on_used_plugin(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        plugin_dir = str(tmp_path)
+        # Create impl.lumon with a plugin.exec call
+        impl_path = os.path.join(plugin_dir, "impl.lumon")
+        with open(impl_path, "w") as f:
+            f.write('implement test.fn\n  let r = plugin.exec("python3 test_script.py do_thing", {x: x})\n  return r\n')
+        # Create a script that records _shutdown was called
+        marker = os.path.join(plugin_dir, "shutdown_called")
+        script = os.path.join(plugin_dir, "test_script.py")
+        with open(script, "w") as f:
+            f.write(
+                "import json, sys, os\n"
+                "args = json.load(sys.stdin)\n"
+                f"if len(sys.argv) > 1 and sys.argv[1] == '_shutdown':\n"
+                f"    with open({marker!r}, 'w') as f: f.write('yes')\n"
+                "json.dump({'tag': 'ok', 'value': 'done'}, sys.stdout)\n"
+            )
+        notify_plugin_shutdown({(plugin_dir, "test")})
+        assert os.path.isfile(marker)
+
+    def test_noop_when_no_plugins_used(self) -> None:
+        notify_plugin_shutdown(set())  # should not raise
+
+    def test_ignores_missing_script(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        plugin_dir = str(tmp_path)
+        # No impl.lumon — should silently skip
+        notify_plugin_shutdown({(plugin_dir, "test")})  # should not raise
+
+    def test_passes_env_vars(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        plugin_dir = str(tmp_path)
+        impl_path = os.path.join(plugin_dir, "impl.lumon")
+        with open(impl_path, "w") as f:
+            f.write('implement test.fn\n  let r = plugin.exec("python3 test_script.py do_thing", {})\n  return r\n')
+        marker = os.path.join(plugin_dir, "env_marker")
+        script = os.path.join(plugin_dir, "test_script.py")
+        with open(script, "w") as f:
+            f.write(
+                "import json, sys, os\n"
+                "args = json.load(sys.stdin)\n"
+                f"with open({marker!r}, 'w') as f:\n"
+                "    f.write(os.environ.get('MY_KEY', 'missing'))\n"
+                "json.dump('ok', sys.stdout)\n"
+            )
+        notify_plugin_shutdown(
+            {(plugin_dir, "test")},
+            env_vars_map={"test": {"MY_KEY": "my_value"}},
+        )
+        with open(marker) as f:
+            assert f.read() == "my_value"

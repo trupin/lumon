@@ -56,6 +56,19 @@ class TestSessionHelpers:
             _clear_state("abc12345")
         assert not os.path.isdir(comm_dir)
 
+    def test_clear_state_kills_daemon(self, tmp_path: object) -> None:
+        """_clear_state calls _kill_daemon when PID file exists."""
+        assert isinstance(tmp_path, os.PathLike)
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        comm_dir = os.path.join(comm_base, "abc12345")
+        os.makedirs(comm_dir)
+        with open(os.path.join(comm_dir, "pid"), "w") as f:
+            f.write("99999")
+        with patch("lumon.cli._COMM_BASE", comm_base), \
+             patch("lumon.cli._kill_daemon") as mock_kill:
+            _clear_state("abc12345")
+            mock_kill.assert_called_once_with(comm_dir)
+
     def test_clear_state_noop_if_missing(self, tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
         comm_base = os.path.join(str(tmp_path), ".lumon_comm")
