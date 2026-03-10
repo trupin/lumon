@@ -508,6 +508,7 @@ def register_builtins(
         "list.flatten", lambda items: [x for sub in items for x in sub]
     )
     env.register_builtin("list.head", lambda items: items[0] if items else None)
+    env.register_builtin("list.first", lambda items: items[0] if items else None)
     env.register_builtin("list.tail", lambda items: items[1:] if items else [])
     env.register_builtin("list.concat", lambda a, b: a + b)
     env.register_builtin(
@@ -716,6 +717,9 @@ def register_builtins(
         )
         env.register_builtin(
             "git.add", lambda path: _wrap_tag_result(_git.add(path))  # type: ignore[union-attr]
+        )
+        env.register_builtin(
+            "git.add_all", lambda: _wrap_tag_result(_git.add_all())  # type: ignore[union-attr]
         )
         env.register_builtin(
             "git.commit", lambda msg: _wrap_tag_result(_git.commit(msg))  # type: ignore[union-attr]

@@ -356,7 +356,7 @@ def _eval_field_access(obj_node: object, field: str, env: Environment) -> object
         if field in obj:
             return obj[field]
         raise LumonError(f"Field '{field}' not found on map")
-    raise LumonError(f"Cannot access field '{field}' on {_type_name(obj)}")
+    return None  # Non-map field access returns none (safe for ?? fallback)
 
 
 def _make_user_fn_ref(ns_path: str, env: Environment) -> LumonFunction:

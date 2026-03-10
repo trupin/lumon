@@ -310,6 +310,93 @@ class TestMatchMultiLineArms:
 
 
 # ===================================================================
+# match — inside bracketed contexts (map literals, function calls)
+# ===================================================================
+
+
+class TestMatchInMapLiteral:
+    def test_match_as_map_value_with_comma(self, run):
+        r = run(
+            'let result = {\n'
+            '  label: match true\n'
+            '    true -> "yes"\n'
+            '    false -> "no",\n'
+            '  other: 42\n'
+            '}\n'
+            'return result'
+        )
+        assert r.value == {"label": "yes", "other": 42}
+
+    def test_match_as_last_map_value(self, run):
+        r = run(
+            'let result = {\n'
+            '  other: 42,\n'
+            '  label: match 1 > 0\n'
+            '    true -> "positive"\n'
+            '    false -> "zero"\n'
+            '}\n'
+            'return result'
+        )
+        assert r.value == {"other": 42, "label": "positive"}
+
+    def test_match_in_function_call(self, run):
+        r = run(
+            'let items = [1, 2, 3]\n'
+            'let result = list.map(items, fn(x) -> match x > 1\n'
+            '  true -> "big"\n'
+            '  false -> "small")\n'
+            'return result'
+        )
+        assert r.value == ["small", "big", "big"]
+
+    def test_match_with_block_arm_in_map(self, run):
+        r = run(
+            'let result = {\n'
+            '  label: match :ok("raw")\n'
+            '    :ok(v) ->\n'
+            '      let upper = text.upper(v)\n'
+            '      upper\n'
+            '    :error(_) -> "err",\n'
+            '  other: 42\n'
+            '}\n'
+            'return result'
+        )
+        assert r.value == {"label": "RAW", "other": 42}
+
+    def test_match_in_list_literal(self, run):
+        r = run(
+            'let result = [match true\n'
+            '  true -> 1\n'
+            '  false -> 0, 42]\n'
+            'return result'
+        )
+        assert r.value == [1, 42]
+
+    def test_match_in_function_call_args(self, run):
+        r = run(
+            'let result = list.concat(match true\n'
+            '  true -> [1]\n'
+            '  false -> [2], [3, 4])\n'
+            'return result'
+        )
+        assert r.value == [1, 3, 4]
+
+    def test_multiple_match_in_map(self, run):
+        r = run(
+            'let result = {\n'
+            '  a: match true\n'
+            '    true -> 1\n'
+            '    false -> 0,\n'
+            '  b: match false\n'
+            '    true -> "yes"\n'
+            '    false -> "no"\n'
+            '}\n'
+            'return result'
+        )
+        assert r.value == {"a": 1, "b": "no"}
+
+
+# ===================================================================
 # match — exhaustiveness
 # ===================================================================
 

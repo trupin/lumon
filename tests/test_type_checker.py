@@ -158,7 +158,8 @@ class TestStructuralMapFieldAccess:
 
     def test_access_field_on_non_map(self, run):
         r = run('let x = 42\nreturn x.name')
-        assert r.type == "error"
+        assert r.type == "result"
+        assert r.value is None
 
 
 # ===================================================================

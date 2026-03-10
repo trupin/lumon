@@ -240,13 +240,21 @@ let replaced = old_text |> fn(t) -> text.replace(template, "{name}", t)
 
 ### if / else
 
-Expression-oriented — returns a value.
+Expression-oriented — returns a value. Two forms: block and inline.
+
+**Block form** (multi-line):
 
 ```
 let status = if count > 0
   "has items"
 else
   "empty"
+```
+
+**Inline form** (single-line):
+
+```
+let status = if count > 0 "has items" else "empty"
 ```
 
 `else` is required when used as an expression. When used as a statement (return value ignored), `else` is optional.
@@ -893,6 +901,7 @@ let msg = "total: \(n * 2 + 1)"       -- "total: 7"
 | `list.reverse` | `(items: list<a>) -> list<a>` | Reverse order |
 | `list.flatten` | `(items: list<list<a>>) -> list<a>` | Flatten one level of nesting |
 | `list.head` | `(items: list<a>) -> a \| none` | First item (or none) |
+| `list.first` | `(items: list<a>) -> a \| none` | Alias for `list.head` |
 | `list.tail` | `(items: list<a>) -> list<a>` | All items except first |
 | `list.concat` | `(first: list<a>, second: list<a>) -> list<a>` | Concatenate two lists |
 | `list.find` | `(items: list<a>, f: fn(a) -> bool) -> a \| none` | First item matching predicate |
@@ -1059,7 +1068,7 @@ The checker:
 2. **Infers local types** in `implement` blocks from literals, function return types, and operations — no annotations needed on locals
 3. **Verifies operators** are applied to compatible types (e.g., `+` requires number+number or text+text)
 4. **Checks list homogeneity** — all elements must be the same type
-5. **Checks structural map access** — `.field` must exist and yields the field's type
+5. **Checks structural map access** — `.field` on a structural map must exist and yields the field's type. `.field` on a non-map value returns `none` (safe for `??` fallback)
 6. **Checks tag exhaustiveness** — `match` on a value with a known tag set must cover all tags (or use `_`)
 7. **Propagates type unions** — if `io.read` returns `:ok(text) | :error(text)`, the binding inherits that union, and using it without matching is a type error
 

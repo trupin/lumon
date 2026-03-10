@@ -18,6 +18,10 @@ define git.add
     path: text "File path to stage"
   returns: :ok | :error(text) "Success or error"
 
+define git.add_all
+  "Stage all modified and deleted files for the next commit"
+  returns: :ok | :error(text) "Success or error"
+
 define git.commit
   "Create a new commit with staged changes"
   takes:

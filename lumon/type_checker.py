@@ -225,6 +225,7 @@ BUILTIN_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
     "list.reverse": ((TList(_A),), TList(_A)),
     "list.flatten": ((TList(TList(_A)),), TList(_A)),
     "list.head": ((TList(_A),), TUnion((_A, TNone()))),
+    "list.first": ((TList(_A),), TUnion((_A, TNone()))),
     "list.tail": ((TList(_A),), TList(_A)),
     "list.concat": ((TList(_A), TList(_A)), TList(_A)),
     "list.find": ((TList(_A), TFn((_A,), TBool())), TUnion((_A, TNone()))),
@@ -492,7 +493,7 @@ def check_node(node: object, env: TypeEnv, sigs: dict[str, tuple[tuple[object, .
                 return obj_type.fields[node.field]
             raise LumonError(f"Type error: field '{node.field}' not found on map")
         if isinstance(obj_type, (TNumber, TText, TBool, TNone, TList)):
-            raise LumonError(f"Type error: cannot access field on {type(obj_type).__name__}")
+            return TUnion((TAny(), TNone()))  # safe field access returns none on non-map
         return TAny()
 
     if isinstance(node, IndexAccess):

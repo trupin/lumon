@@ -568,6 +568,24 @@ class TestListHead:
         assert r.value == 42
 
 
+class TestListFirst:
+    def test_first_nonempty(self, run):
+        r = run('return list.first([10, 20, 30])')
+        assert r.value == 10
+
+    def test_first_empty(self, run):
+        r = run('return list.first([])')
+        assert r.value is None
+
+    def test_first_single(self, run):
+        r = run('return list.first([42])')
+        assert r.value == 42
+
+    def test_first_with_fallback(self, run):
+        r = run('return list.first([]) ?? "default"')
+        assert r.value == "default"
+
+
 class TestListTail:
     def test_tail(self, run):
         r = run('return list.tail([1, 2, 3])')

@@ -66,13 +66,16 @@ class LumonIndenter(Indenter):
         super().__init__()
         # True after seeing ARROW while paren_level > 0 — next _NL may start a lambda body
         self._arrow_pending: bool = False
-        # Stack of (base_indent, paren_level_at_entry) for lambda bodies inside parens
+        # True after seeing MATCH while paren_level > 0 — next _NL may start a match body
+        self._match_pending: bool = False
+        # Stack of (base_indent, paren_level_at_entry) for indented bodies inside parens
         self._lambda_body_stack: list[tuple[int, int]] = []
 
     def process(self, stream: Iterator[Token]) -> Generator[Token, None, None]:  # type: ignore[override]
         self.paren_level = 0
         self.indent_level = [0]
         self._arrow_pending = False
+        self._match_pending = False
         self._lambda_body_stack = []
         return self._process(stream)
 
@@ -87,6 +90,15 @@ class LumonIndenter(Indenter):
                 if self._arrow_pending and token.type not in self.OPEN_PAREN_types:
                     self._arrow_pending = False
 
+                # Close indented bodies when hitting a delimiter at their paren level.
+                # This handles match/lambda bodies inside map/list/call contexts:
+                # the comma or closing bracket signals the end of the indented block.
+                if (token.type in ("COMMA", *self.CLOSE_PAREN_types)
+                        and self._lambda_body_stack
+                        and self.paren_level == self._lambda_body_stack[-1][1]):
+                    self._match_pending = False
+                    yield from self._close_bodies_at_paren_level(token)
+
                 yield token
 
                 if token.type in self.OPEN_PAREN_types:
@@ -96,6 +108,9 @@ class LumonIndenter(Indenter):
                     assert self.paren_level >= 0
                 elif token.type == "ARROW" and self.paren_level > 0:
                     self._arrow_pending = True
+                elif (token.type == "MATCH" and self.paren_level > 0
+                      and self._active_lambda_paren_level() != self.paren_level):
+                    self._match_pending = True
 
         # End of stream: close any remaining lambda body indents, then top-level
         while self._lambda_body_stack:
@@ -110,10 +125,25 @@ class LumonIndenter(Indenter):
         assert self.indent_level == [0], self.indent_level
 
     def _active_lambda_paren_level(self) -> int | None:
-        """Return the paren_level of the innermost active lambda body, or None."""
+        """Return the paren_level of the innermost active body, or None."""
         if self._lambda_body_stack:
             return self._lambda_body_stack[-1][1]
         return None
+
+    def _close_bodies_at_paren_level(self, token: Token) -> Iterator[Token]:
+        """Close all indented bodies at the current paren level.
+
+        Called when a COMMA or close-paren signals the end of an indented
+        block inside a bracketed context (e.g. match body inside map literal).
+        """
+        while (self._lambda_body_stack
+               and self.paren_level == self._lambda_body_stack[-1][1]):
+            base = self._lambda_body_stack[-1][0]
+            while len(self.indent_level) > 1 and self.indent_level[-1] > base:
+                self.indent_level.pop()
+                yield Token.new_borrow_pos(self.NL_type, token, token)
+                yield Token.new_borrow_pos(self.DEDENT_type, '', token)
+            self._lambda_body_stack.pop()
 
     def handle_NL(self, token: Token) -> Iterator[Token]:
         indent_str = token.rsplit('\n', 1)[1]
@@ -136,22 +166,39 @@ class LumonIndenter(Indenter):
                 return
             return
 
-        # Case 2: Inside a lambda body at its paren level — track indent normally
+        # Case 1.5: Match pending — check if this NL starts a match body
+        if self._match_pending:
+            self._match_pending = False
+            if indent > self.indent_level[-1]:
+                # Push match body: same mechanism as lambda body
+                self._lambda_body_stack.append((self.indent_level[-1], self.paren_level))
+                self.indent_level.append(indent)
+                yield Token.new_borrow_pos(self.NL_type, token, token)
+                yield Token.new_borrow_pos(self.INDENT_type, indent_str, token)
+            # else: not indented — suppress NL (inside parens)
+            return
+
+        # Case 2: Inside a body at its paren level — track indent normally
         if lam_paren is not None and self.paren_level == lam_paren:
             base_indent = self._lambda_body_stack[-1][0]
 
-            # If we've dedented to or below the base, close the lambda body
+            # If we've dedented to or below the base, close the body
             if indent <= base_indent:
-                # Close all lambda bodies that are at or above this indent
+                # Close all bodies that are at or above this indent
                 while self._lambda_body_stack and indent <= self._lambda_body_stack[-1][0]:
                     self._lambda_body_stack.pop()
                     self.indent_level.pop()
                     yield Token.new_borrow_pos(self.NL_type, token, token)
                     yield Token.new_borrow_pos(self.DEDENT_type, indent_str, token)
-                # After closing lambda body, we're back in parens — suppress this NL
+                # After closing body, check if there's an outer body to continue in
+                outer_paren = self._active_lambda_paren_level()
+                if outer_paren is not None and self.paren_level == outer_paren:
+                    # Re-enter body tracking for the outer body
+                    yield Token.new_borrow_pos(self.NL_type, token, token)
+                # Otherwise back in parens — suppress this NL
                 return
 
-            # Still inside the lambda body — normal indent/dedent tracking
+            # Still inside the body — normal indent/dedent tracking
             yield Token.new_borrow_pos(self.NL_type, token, token)
 
             if indent > self.indent_level[-1]:
@@ -165,15 +212,16 @@ class LumonIndenter(Indenter):
                     dedented = True
 
                 if indent != self.indent_level[-1]:
-                    raise DedentError(
-                        f'Unexpected dedent to column {indent}. Expected dedent to {self.indent_level[-1]}'
-                    )
+                    # Dedented past body's tracked levels but still above base.
+                    # Close the body — we're back inside parens.
+                    self._lambda_body_stack.pop()
+                    return
 
                 if dedented:
                     yield Token.new_borrow_pos(self.NL_type, '', token)
             return
 
-        # Case 3: Inside parens but not in a lambda body (or nested deeper) — suppress
+        # Case 3: Inside parens but not in a body (or nested deeper) — suppress
         if self.paren_level > 0:
             return
 
