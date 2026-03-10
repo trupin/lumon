@@ -902,6 +902,7 @@ let msg = "total: \(n * 2 + 1)"       -- "total: 7"
 | `list.flatten` | `(items: list<list<a>>) -> list<a>` | Flatten one level of nesting |
 | `list.head` | `(items: list<a>) -> a \| none` | First item (or none) |
 | `list.first` | `(items: list<a>) -> a \| none` | Alias for `list.head` |
+| `list.get` | `(items: list<a>, index: number) -> a \| none` | Item at index (or none if out of bounds) |
 | `list.tail` | `(items: list<a>) -> list<a>` | All items except first |
 | `list.concat` | `(first: list<a>, second: list<a>) -> list<a>` | Concatenate two lists |
 | `list.find` | `(items: list<a>, f: fn(a) -> bool) -> a \| none` | First item matching predicate |
