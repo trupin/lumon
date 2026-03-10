@@ -74,12 +74,12 @@ Never collapse steps 2-3 into hardcoded logic. If a human would need to think ab
 
 ### Responding to spawn/ask results
 
-When execution suspends, the output includes `response_file` paths for each ask/spawn. Write your JSON response to the indicated file, then resume:
+When execution suspends, the output includes a `session` ID and `response_file` paths. Write your JSON response to the indicated file, then resume **with the session ID**:
 
 ```bash
-# For ask: write response to the ask_response.json path from the output
+# For ask: write response, then resume with session ID from the output
 echo '"your response"' > .lumon_comm/<session>/ask_response.json
-lumon --working-dir sandbox respond
+lumon --working-dir sandbox respond <session>
 ```
 
 For spawn batches, write each response to its `response_file`:
@@ -87,8 +87,10 @@ For spawn batches, write each response to its `response_file`:
 # Write each spawn's response to its response_file
 echo '"analysis A"' > .lumon_comm/<session>/spawn_0_response.json
 echo '"analysis B"' > .lumon_comm/<session>/spawn_1_response.json
-lumon --working-dir sandbox respond
+lumon --working-dir sandbox respond <session>
 ```
+
+**Always pass the session ID** from the suspension output — respond requires it.
 
 Context data (which can be large) is written to context files automatically. Read the `context_file` from the output to get the full context.
 

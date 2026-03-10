@@ -1182,7 +1182,7 @@ The agent reads the context file, reasons about it, writes a response to the res
 
 ```bash
 echo '{"action": "process", "item": "Pay bill"}' > .lumon_comm/a3f2e1b9/ask_response.json
-lumon respond
+lumon respond a3f2e1b9
 ```
 
 This returns the next output — another ask, a spawn batch, or a final result.
@@ -1209,7 +1209,7 @@ The agent reads context files, spawns sub-agents, and writes responses to the in
 
 ```bash
 echo '{"bias": 0.3, "summary": "..."}' > .lumon_comm/a3f2e1b9/spawn_0_response.json
-lumon respond
+lumon respond a3f2e1b9
 ```
 
 ### File-based communication
@@ -1219,7 +1219,7 @@ When execution suspends (ask or spawn), Lumon writes large context data to files
 - **Context files** (e.g. `spawn_0_context.json`, `ask_context.json`) — written by Lumon, read by the agent
 - **Response files** (e.g. `spawn_0_response.json`, `ask_response.json`) — written by the agent, read by Lumon on `lumon respond`
 
-The session ID is an 8-character hex string, unique per execution. It's included in the output so the orchestrator knows which directory to use.
+The session ID is an 8-character hex string, unique per execution. It's included in the output so the orchestrator knows which directory to use. Pass it to `lumon respond <session>` to resume execution.
 
 ### Suspension and resumption
 

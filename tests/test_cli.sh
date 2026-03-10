@@ -358,7 +358,7 @@ RESP_FILE="$RESPOND_ROOT/.lumon_comm/$SESSION/ask_response.json"
 echo '"pay bill"' > "$RESP_FILE"
 
 # Second run (respond): should produce a result
-SECOND_OUT="$(cd "$RESPOND_ROOT" && run respond)"
+SECOND_OUT="$(cd "$RESPOND_ROOT" && run respond "$SESSION")"
 assert_eq "respond: result after response" \
     '{"type": "result", "value": "pay bill"}' \
     "$SECOND_OUT"

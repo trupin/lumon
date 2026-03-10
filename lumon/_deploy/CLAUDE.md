@@ -82,7 +82,7 @@ At the **start of each task**, clean up any leftover files from previous work:
 | `lumon --working-dir sandbox browse <ns>` | Show function signatures for a namespace |
 | `lumon --working-dir sandbox test` | Run all test files |
 | `lumon --working-dir sandbox test <ns>` | Run tests for a specific namespace |
-| `lumon --working-dir sandbox respond` | Resume a suspended `ask` or `spawn` (reads response files from `.lumon_comm/`) |
+| `lumon --working-dir sandbox respond <session>` | Resume a suspended `ask` or `spawn` (reads response files from `.lumon_comm/<session>/`) |
 
 ## Language quick reference
 

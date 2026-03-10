@@ -19,7 +19,6 @@ from lumon.cli import (
     _deploy_plugin_skills,
     _deploy_skills,
     _find_pending_daemon,
-    _find_session,
     _format_contract,
     _prompt_overwrite,
     _save_script_marker,
@@ -74,16 +73,6 @@ class TestSessionHelpers:
         comm_base = os.path.join(str(tmp_path), ".lumon_comm")
         with patch("lumon.cli._COMM_BASE", comm_base):
             _clear_state("nonexistent")  # should not raise
-
-    def test_find_session(self, tmp_path: object) -> None:
-        assert isinstance(tmp_path, os.PathLike)
-        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
-        with patch("lumon.cli._COMM_BASE", comm_base):
-            assert _find_session() is None
-            comm_dir = os.path.join(comm_base, "abc12345")
-            os.makedirs(comm_dir)
-            assert _find_session() == "abc12345"
-
 
 class TestCmdVersion:
     def test_prints_version(self, capsys: pytest.CaptureFixture[str]) -> None:
@@ -157,15 +146,12 @@ class TestCmdRunCode:
 
 
 class TestCmdRespond:
-    def test_no_state_error(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        assert isinstance(tmp_path, os.PathLike)
-        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
-        with patch("lumon.cli._COMM_BASE", comm_base):
-            args = argparse.Namespace(session=None)
-            result = cmd_respond(args)
+    def test_no_session_error(self, capsys: pytest.CaptureFixture[str]) -> None:
+        args = argparse.Namespace(session=None, clear=False)
+        result = cmd_respond(args)
         assert result == 1
         captured = capsys.readouterr()
-        assert "no suspended execution" in captured.err
+        assert "session ID required" in captured.err
 
     def test_dead_daemon_error(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
         """Respond errors if daemon is dead."""
@@ -347,8 +333,8 @@ class TestRespondDaemon:
         # Session directory should be cleaned up
         assert not os.path.isdir(comm_dir)
 
-    def test_respond_auto_detects_session(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        """When session is not specified, auto-detect the single active session."""
+    def test_respond_with_session_id(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """Respond works when session ID is provided explicitly."""
         assert isinstance(tmp_path, os.PathLike)
         comm_base = os.path.join(str(tmp_path), ".lumon_comm")
         with patch("lumon.cli._COMM_BASE", comm_base):
@@ -367,7 +353,7 @@ class TestRespondDaemon:
                     json.dump("auto", f)
 
                 capsys.readouterr()
-                args = argparse.Namespace(session=None, clear=False)
+                args = argparse.Namespace(session=session, clear=False)
                 result = cmd_respond(args)
             finally:
                 os.chdir(old_cwd)
@@ -976,23 +962,21 @@ class TestCLIMain:
         captured = capsys.readouterr()
         assert "No tests found" in captured.out
 
-    def test_main_respond_subcommand(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+    def test_main_respond_subcommand_no_session(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
-        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
         old_argv = sys.argv
         old_cwd = os.getcwd()
         sys.argv = ["lumon", "respond"]
         os.chdir(str(tmp_path))
         try:
-            with patch("lumon.cli._COMM_BASE", comm_base):
-                main()
+            main()
         except SystemExit:
             pass
         finally:
             sys.argv = old_argv
             os.chdir(old_cwd)
         captured = capsys.readouterr()
-        assert "no suspended execution" in captured.err
+        assert "required: session" in captured.err
 
     def test_main_deploy_subcommand(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
@@ -1154,20 +1138,13 @@ class TestRespondClear:
         assert "cleared" in output["value"]
         assert not os.path.isdir(comm_dir)
 
-    def test_respond_clear_auto_detect(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        """--clear without session ID auto-detects the single active session."""
-        assert isinstance(tmp_path, os.PathLike)
-        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
-        comm_dir = os.path.join(comm_base, "sess1234")
-        os.makedirs(comm_dir)
-        with patch("lumon.cli._COMM_BASE", comm_base):
-            args = argparse.Namespace(session=None, clear=True)
-            exit_code = cmd_respond(args)
-        assert exit_code == 0
+    def test_respond_clear_requires_session(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """--clear without session ID fails."""
+        args = argparse.Namespace(session=None, clear=True)
+        exit_code = cmd_respond(args)
+        assert exit_code == 1
         captured = capsys.readouterr()
-        output = json.loads(captured.out)
-        assert output["type"] == "result"
-        assert "sess1234" in output["value"]
+        assert "session ID required" in captured.err
 
     def test_respond_clear_specific_session_with_multiple(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
         """--clear with explicit session ID only clears that session."""
@@ -1183,16 +1160,14 @@ class TestRespondClear:
         assert not os.path.isdir(os.path.join(comm_base, "sess_a"))
         assert os.path.isdir(os.path.join(comm_base, "sess_b"))
 
-    def test_respond_clear_no_session_error(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        """--clear with no sessions returns an error."""
+    def test_respond_clear_nonexistent_session(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """--clear with nonexistent session ID still succeeds (idempotent)."""
         assert isinstance(tmp_path, os.PathLike)
         comm_base = os.path.join(str(tmp_path), ".lumon_comm")
         with patch("lumon.cli._COMM_BASE", comm_base):
-            args = argparse.Namespace(session=None, clear=True)
+            args = argparse.Namespace(session="nonexistent", clear=True)
             exit_code = cmd_respond(args)
-        assert exit_code == 1
-        captured = capsys.readouterr()
-        assert "no pending session" in captured.err
+        assert exit_code == 0
 
 
 class TestScriptMarker:

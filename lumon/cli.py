@@ -60,19 +60,6 @@ def _save_script_marker(comm_dir: str, script: str) -> None:
         f.write(script)
 
 
-def _find_session() -> str | None:
-    """Find the single active session, if any."""
-    if not os.path.isdir(_COMM_BASE):
-        return None
-    sessions = [
-        d for d in os.listdir(_COMM_BASE)
-        if os.path.isdir(os.path.join(_COMM_BASE, d))
-    ]
-    if len(sessions) == 1:
-        return sessions[0]
-    return None
-
-
 def _clear_state(session: str) -> None:
     """Remove a session directory (kill daemon if alive)."""
     comm_dir = _comm_dir_for_session(session)
@@ -166,7 +153,7 @@ def cmd_run_code(code: str, *, script: str | None = None) -> int:
         if pending:
             msg = (
                 f"Script has pending session {pending}. "
-                f"Use 'lumon respond' to resume or 'lumon respond --clear' to discard."
+                f"Use 'lumon respond {pending}' to resume or 'lumon respond {pending} --clear' to discard."
             )
             result: dict[str, object] = {"type": "error", "message": msg}
             print(json.dumps(result, ensure_ascii=False))
@@ -211,25 +198,18 @@ def cmd_respond(args: argparse.Namespace) -> int:
     """Resume suspended execution by reading output from the daemon process."""
     session: str | None = getattr(args, "session", None)
 
-    # Auto-detect session if not provided
-    if not session:
-        session = _find_session()
-
-    # Handle --clear before checking for daemon
-    if getattr(args, "clear", False):
-        if not session:
-            print("error: no pending session to clear", file=sys.stderr)
-            return 1
-        _clear_state(session)
-        print(json.dumps({"type": "result", "value": f"Session {session} cleared."}))
-        return 0
-
     if not session:
         print(
-            "error: no suspended execution — run some Lumon code first",
+            "error: session ID required — pass the session ID from the suspension output",
             file=sys.stderr,
         )
         return 1
+
+    # Handle --clear before checking for daemon
+    if getattr(args, "clear", False):
+        _clear_state(session)
+        print(json.dumps({"type": "result", "value": f"Session {session} cleared."}))
+        return 0
 
     comm_dir = _comm_dir_for_session(session)
 
@@ -808,7 +788,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "From stdin:  echo 'return 42' | lumon\n"
             "Browse:      lumon browse [<namespace>]\n"
             "Test:        lumon test [<namespace>]\n"
-            "Respond:     lumon respond [<session>]\n"
+            "Respond:     lumon respond <session>\n"
             "Deploy:      lumon deploy <target>\n"
             "Spec:        lumon spec"
         ),
@@ -851,15 +831,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Resume suspended execution (after ask/spawn).",
         description=(
             "Resume a suspended Lumon execution by reading response files\n"
-            "from .lumon_comm/<session>/. The session ID is auto-detected\n"
-            "if there is exactly one active session."
+            "from .lumon_comm/<session>/. The session ID comes from the\n"
+            "suspension output (ask or spawn_batch)."
         ),
     )
     p_respond.add_argument(
         "session",
-        nargs="?",
-        default=None,
-        help="Session ID to respond to (auto-detected if omitted).",
+        help="Session ID from the suspension output.",
     )
     p_respond.add_argument(
         "--clear",
