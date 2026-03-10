@@ -1820,7 +1820,7 @@ class TestValidateContractsEdgeCases:
 
 
 class TestShutdownIntegration:
-    """Tests that interpret() and interpret_with_suspend() call _shutdown_plugins."""
+    """Tests that interpret() calls _shutdown_plugins."""
 
     def test_interpret_calls_shutdown_on_completion(self, tmp_path: Path) -> None:
         """_shutdown_plugins is called when interpret() completes normally."""
@@ -1852,17 +1852,6 @@ class TestShutdownIntegration:
             r = interpret(code, working_dir=wd, plugin_executor=mock_executor)
             assert r["type"] == "ask"
             mock_notify.assert_not_called()
-
-    def test_interpret_with_suspend_calls_shutdown(self) -> None:
-        """_shutdown_plugins is called when interpret_with_suspend() completes."""
-        from unittest.mock import patch as mock_patch
-
-        from lumon.interpreter import interpret_with_suspend
-
-        with mock_patch("lumon.interpreter._shutdown_plugins") as mock_shutdown:
-            r = interpret_with_suspend("return 42")
-            assert r["type"] == "result"
-            mock_shutdown.assert_called_once()
 
     def test_interpret_calls_shutdown_on_error(self) -> None:
         """_shutdown_plugins is called when interpret() returns a LumonError."""

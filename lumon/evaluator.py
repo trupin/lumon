@@ -46,7 +46,7 @@ from lumon.ast_nodes import (
     WithExpr,
 )
 from lumon.environment import Environment
-from lumon.errors import AskSignal, LumonError, ReturnSignal
+from lumon.errors import AskSignal, LumonError, ReturnSignal, SpawnBatchSignal
 from lumon.plugins import validate_contracts
 from lumon.serializer import serialize
 from lumon.values import LumonFunction, LumonTag, is_truthy
@@ -727,6 +727,9 @@ def _eval_spawn(node: SpawnExpr, env: Environment) -> object:
     if not isinstance(tasks, list):
         raise LumonError("spawn requires a list of task maps")
 
+    if not tasks:
+        return []
+
     # Test/replay mode: consume responses from queue
     first = env.consume_response()
     if first is not None:
@@ -738,30 +741,31 @@ def _eval_spawn(node: SpawnExpr, env: Environment) -> object:
             results.append(q[0])
         return results
 
-    # Build envelopes and register all spawns
+    # Build envelopes
+    envelopes: list[dict] = []
     for task in tasks:
         if not isinstance(task, dict):
             raise LumonError("spawn: each task must be a map with a 'prompt' key")
-        prompt = task.get("prompt", "")
+        if "prompt" not in task:
+            raise LumonError("spawn: each task must have a 'prompt' key")
+        prompt = task["prompt"]
         context = task.get("context")
-        fork = task.get("fork", False)
+        fork = task.get("fork")
         expects = task.get("expects")
 
         envelope: dict[str, object] = {"prompt": prompt}
         if context is not None:
             envelope["context"] = serialize(context)
-        if fork is not None:
+        if fork:
             envelope["fork"] = fork
         if expects is not None:
             envelope["expects"] = expects
-        env.register_spawn(envelope)
+        envelopes.append(envelope)
 
     # Daemon mode: flush via callback — blocks until all responses arrive
     if env._spawn_flush_callback is not None:
-        pending = env.get_pending_spawns()
-        responses = env._spawn_flush_callback(pending)
-        env._pending_spawns.clear()
+        responses = env._spawn_flush_callback(envelopes)
         return list(responses)
 
-    # Non-daemon mode: return handles
-    return [h for h, _ in env.get_pending_spawns()]
+    # Non-daemon mode: signal suspension
+    raise SpawnBatchSignal(envelopes)

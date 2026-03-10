@@ -460,12 +460,46 @@ class TestSpawn:
             'let h = spawn [{prompt: "Analyze this", context: "article text"}]'
         )
         assert r.type == "spawn_batch"
+        assert r.output["prompt"] == "Analyze this"
 
     def test_spawn_with_fork(self, run):
         r = run(
             'let h = spawn [{prompt: "Analyze with history", context: "data", fork: true}]'
         )
         assert r.type == "spawn_batch"
+        assert r.output.get("fork") is True
+
+    def test_spawn_fork_false_omitted(self, run):
+        """fork defaults to false and is omitted from the envelope."""
+        r = run(
+            'let h = spawn [{prompt: "task"}]'
+        )
+        assert r.type == "spawn_batch"
+        assert "fork" not in r.output
+
+    def test_spawn_empty_list(self, run):
+        """spawn with empty list returns empty list, no suspension."""
+        r = run('return spawn []')
+        assert r.type == "result"
+        assert r.value == []
+
+    def test_spawn_non_list_error(self, run):
+        """spawn with non-list argument produces an error."""
+        r = run('return spawn "not a list"')
+        assert r.type == "error"
+        assert "list" in r.output.get("message", "").lower()
+
+    def test_spawn_non_map_entry_error(self, run):
+        """spawn with non-map entry produces an error."""
+        r = run('return spawn ["not a map"]')
+        assert r.type == "error"
+        assert "map" in r.output.get("message", "").lower()
+
+    def test_spawn_missing_prompt_error(self, run):
+        """spawn task without prompt key produces an error."""
+        r = run('return spawn [{context: "data"}]')
+        assert r.type == "error"
+        assert "prompt" in r.output.get("message", "").lower()
 
     def test_multi_entry_spawn_batched(self, run):
         """Multi-entry spawn returns a batch with all entries."""
@@ -482,17 +516,16 @@ class TestSpawn:
         assert r.output["spawns"][0]["prompt"] == "Task A"
         assert r.output["spawns"][1]["prompt"] == "Task B"
 
-    def test_separate_spawns_batched(self, run):
-        """Separate spawn expressions each produce their own batch."""
+    def test_separate_spawns_suspend_on_first(self, run):
+        """Separate spawn calls suspend on the first one."""
         r = run(
             'let a = spawn [{prompt: "Task A", context: "data a"}]\n'
             'let b = spawn [{prompt: "Task B", context: "data b"}]\n'
             'return [a, b]'
         )
-        # Two separate spawns produce two pending spawns total
+        # First spawn suspends — only its entry in the batch
         assert r.type == "spawn_batch"
-        assert "spawns" in r.output
-        assert len(r.output["spawns"]) == 2
+        assert r.output["prompt"] == "Task A"
 
     def test_multi_entry_spawn_replay(self):
         """Responding to multi-entry spawn resolves all entries as a list."""

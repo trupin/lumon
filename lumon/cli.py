@@ -15,7 +15,7 @@ from lumon.ast_nodes import TestBlock
 from lumon.backends import MemoryFS, MemoryGit, RealFS, RealGit
 from lumon.builtins import register_builtins
 from lumon.environment import Environment
-from lumon.errors import AskSignal, LumonError, ReturnSignal
+from lumon.errors import AskSignal, LumonError, ReturnSignal, SpawnBatchSignal
 from lumon.evaluator import eval_node
 from lumon.daemon import (
     SuspendEvent,
@@ -30,7 +30,7 @@ from lumon.interpreter import (
     _setup_plugins,
     cleanup_comm_dir,
     generate_session_id,
-    interpret_with_suspend,
+    interpret,
 )
 from lumon.parser import parse
 from lumon.plugins import disk_manifest_namespaces, load_config, split_contracts
@@ -182,7 +182,7 @@ def cmd_run_code(code: str, *, script: str | None = None) -> int:
     git_backend = RealGit(_STATE["project_root"] or ".")
 
     def run_fn(suspend: SuspendEvent) -> dict:
-        return interpret_with_suspend(
+        return interpret(
             code,
             io_backend=io_backend,
             git_backend=git_backend,
@@ -559,15 +559,13 @@ def cmd_test(args: argparse.Namespace) -> int:
                         test_fs.clear()
                         plugin_mocks.clear()
                         env._response_queue.clear()
-                        env._pending_spawns.clear()
-                        env._spawn_counter[0] = 0
                         test_env = env.child_scope()
                         for stmt in test.body:
                             eval_node(stmt, test_env)
                         print(f"  PASS  {test.name}")
                         passed += 1
-                    except AskSignal:
-                        print(f"  FAIL  {test.name}: ask expression reached without mock_ask")
+                    except (AskSignal, SpawnBatchSignal):
+                        print(f"  FAIL  {test.name}: ask/spawn reached without mock")
                         failed += 1
                     except (LumonError, ReturnSignal) as e:
                         msg = str(e) if isinstance(e, LumonError) else "unexpected return"

@@ -42,9 +42,6 @@ class Environment:
         self._active_plugin: dict[str, object] = (
             {"dir": None, "instance": None, "env": None} if parent is None else parent._active_plugin
         )
-        # Pending spawns: list of (handle_id, envelope) — collected, yielded as batch
-        self._pending_spawns: list[tuple[str, dict]] = [] if parent is None else parent._pending_spawns
-        self._spawn_counter: list[int] = [0] if parent is None else parent._spawn_counter
         # Working directory (shared)
         self._working_dir: str | None = None if parent is None else parent._working_dir
         # Log entries (shared)
@@ -53,8 +50,7 @@ class Environment:
         # block on this instead of raising AskSignal
         self._suspend_callback: object | None = None if parent is None else parent._suspend_callback
         # Spawn flush callback (shared) — when set, spawn blocks in-place
-        # and returns responses instead of deferring to end-of-script
-        self._spawn_flush_callback: Callable[[list[tuple[str, dict]]], list[object]] | None = (
+        self._spawn_flush_callback: Callable[[list[dict]], list[object]] | None = (
             None if parent is None else parent._spawn_flush_callback
         )
         # Track which plugin instances were used during this session (shared)
@@ -86,8 +82,6 @@ class Environment:
         snap._builtins = self._builtins
         snap._namespace_prefixes = self._namespace_prefixes
         snap._tests = self._tests
-        snap._pending_spawns = self._pending_spawns
-        snap._spawn_counter = self._spawn_counter
         snap._call_depth = self._call_depth
         snap._max_call_depth = self._max_call_depth
         snap._call_stack = list(self._call_stack)
@@ -143,16 +137,6 @@ class Environment:
 
     def get_tests(self) -> list[object]:
         return list(self._tests)
-
-    def register_spawn(self, envelope: dict) -> str:
-        """Register a pending spawn and return its handle ID."""
-        handle_id = f"__spawn_{self._spawn_counter[0]}"
-        self._spawn_counter[0] += 1
-        self._pending_spawns.append((handle_id, envelope))
-        return handle_id
-
-    def get_pending_spawns(self) -> list[tuple[str, dict]]:
-        return list(self._pending_spawns)
 
     def set_loader(self, loader: Callable[[str], None]) -> None:
         """Set the lazy loader callback for auto-loading namespaces from disk."""

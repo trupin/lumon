@@ -253,7 +253,7 @@ test mock.ask_after_no_mock
         rc, out = self._run_test(tmp_path, code)
         assert rc == 1, out
         assert "FAIL" in out
-        assert "mock_ask" in out
+        assert "without mock" in out
         # Second test should still run and pass
         assert "PASS  mock.ask_after_no_mock" in out
         assert "1/2 passed" in out
