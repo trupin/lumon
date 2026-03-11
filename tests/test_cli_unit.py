@@ -147,7 +147,7 @@ class TestCmdRunCode:
 
 class TestCmdRespond:
     def test_no_session_error(self, capsys: pytest.CaptureFixture[str]) -> None:
-        args = argparse.Namespace(session=None, clear=False)
+        args = argparse.Namespace(session=None, cancel=False, timeout=3600)
         result = cmd_respond(args)
         assert result == 1
         captured = capsys.readouterr()
@@ -163,7 +163,7 @@ class TestCmdRespond:
         with open(os.path.join(comm_dir, "pid"), "w") as f:
             f.write("999999999")
         with patch("lumon.cli._COMM_BASE", comm_base):
-            args = argparse.Namespace(session="abc12345", clear=False)
+            args = argparse.Namespace(session="abc12345", cancel=False, timeout=3600)
             result = cmd_respond(args)
         assert result == 1
         captured = capsys.readouterr()
@@ -194,7 +194,7 @@ class TestCmdRespond:
 
                 # Step 3: Respond — daemon should pick up response
                 capsys.readouterr()
-                args = argparse.Namespace(session=session, clear=False)
+                args = argparse.Namespace(session=session, cancel=False, timeout=3600)
                 result = cmd_respond(args)
             finally:
                 os.chdir(old_cwd)
@@ -230,7 +230,7 @@ class TestRespondDaemon:
 
                 # Step 3: Respond
                 capsys.readouterr()
-                args = argparse.Namespace(session=session, clear=False)
+                args = argparse.Namespace(session=session, cancel=False, timeout=3600)
                 result = cmd_respond(args)
             finally:
                 os.chdir(old_cwd)
@@ -264,7 +264,7 @@ class TestRespondDaemon:
                         json.dump(resp, f)
 
                 capsys.readouterr()
-                args = argparse.Namespace(session=session, clear=False)
+                args = argparse.Namespace(session=session, cancel=False, timeout=3600)
                 result = cmd_respond(args)
             finally:
                 os.chdir(old_cwd)
@@ -296,7 +296,7 @@ class TestRespondDaemon:
                         json.dump(resp, f)
 
                 capsys.readouterr()
-                args = argparse.Namespace(session=session, clear=False)
+                args = argparse.Namespace(session=session, cancel=False, timeout=3600)
                 result = cmd_respond(args)
             finally:
                 os.chdir(old_cwd)
@@ -326,7 +326,7 @@ class TestRespondDaemon:
                     json.dump("done", f)
 
                 capsys.readouterr()
-                args = argparse.Namespace(session=session, clear=False)
+                args = argparse.Namespace(session=session, cancel=False, timeout=3600)
                 cmd_respond(args)
             finally:
                 os.chdir(old_cwd)
@@ -353,7 +353,7 @@ class TestRespondDaemon:
                     json.dump("auto", f)
 
                 capsys.readouterr()
-                args = argparse.Namespace(session=session, clear=False)
+                args = argparse.Namespace(session=session, cancel=False, timeout=3600)
                 result = cmd_respond(args)
             finally:
                 os.chdir(old_cwd)
@@ -381,7 +381,7 @@ class TestRespondDaemon:
 
         with patch("lumon.cli._COMM_BASE", comm_base):
             capsys.readouterr()
-            args = argparse.Namespace(session=session, clear=False)
+            args = argparse.Namespace(session=session, cancel=False, timeout=3600)
             result = cmd_respond(args)
 
         assert result == 0
@@ -391,6 +391,23 @@ class TestRespondDaemon:
         assert output["value"] == ["spawn_result"]
         # Session should be cleaned up after completion
         assert not os.path.isdir(comm_dir)
+
+    def test_respond_custom_timeout(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """--timeout flag is passed through to read_daemon_output."""
+        assert isinstance(tmp_path, os.PathLike)
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        session = "timeout_test"
+        comm_dir = os.path.join(comm_base, session)
+        os.makedirs(comm_dir)
+        with open(os.path.join(comm_dir, "pid"), "w") as f:
+            f.write(str(os.getpid()))
+
+        with patch("lumon.cli._COMM_BASE", comm_base), \
+             patch("lumon.cli.read_daemon_output", return_value=None) as mock_read:
+            capsys.readouterr()
+            args = argparse.Namespace(session=session, cancel=False, timeout=120)
+            cmd_respond(args)
+            mock_read.assert_called_once_with(comm_dir, timeout=120)
 
 
 class TestCmdBrowse:
@@ -1120,8 +1137,8 @@ class TestPendingSessionDetection:
 
 
 class TestRespondClear:
-    def test_respond_clear_removes_session(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        """--clear removes a pending session."""
+    def test_respond_cancel_removes_session(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """--cancel removes a pending session."""
         assert isinstance(tmp_path, os.PathLike)
         comm_base = os.path.join(str(tmp_path), ".lumon_comm")
         comm_dir = os.path.join(comm_base, "sess1234")
@@ -1129,43 +1146,43 @@ class TestRespondClear:
         with open(os.path.join(comm_dir, "pid"), "w") as f:
             f.write("999999999")  # non-existent PID
         with patch("lumon.cli._COMM_BASE", comm_base):
-            args = argparse.Namespace(session="sess1234", clear=True)
+            args = argparse.Namespace(session="sess1234", cancel=True, timeout=3600)
             exit_code = cmd_respond(args)
         assert exit_code == 0
         captured = capsys.readouterr()
         output = json.loads(captured.out)
         assert output["type"] == "result"
-        assert "cleared" in output["value"]
+        assert "cancelled" in output["value"]
         assert not os.path.isdir(comm_dir)
 
-    def test_respond_clear_requires_session(self, capsys: pytest.CaptureFixture[str]) -> None:
-        """--clear without session ID fails."""
-        args = argparse.Namespace(session=None, clear=True)
+    def test_respond_cancel_requires_session(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """--cancel without session ID fails."""
+        args = argparse.Namespace(session=None, cancel=True, timeout=3600)
         exit_code = cmd_respond(args)
         assert exit_code == 1
         captured = capsys.readouterr()
         assert "session ID required" in captured.err
 
-    def test_respond_clear_specific_session_with_multiple(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        """--clear with explicit session ID only clears that session."""
+    def test_respond_cancel_specific_session_with_multiple(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """--cancel with explicit session ID only cancels that session."""
         assert isinstance(tmp_path, os.PathLike)
         comm_base = os.path.join(str(tmp_path), ".lumon_comm")
         for sess in ("sess_a", "sess_b"):
             d = os.path.join(comm_base, sess)
             os.makedirs(d)
         with patch("lumon.cli._COMM_BASE", comm_base):
-            args = argparse.Namespace(session="sess_a", clear=True)
+            args = argparse.Namespace(session="sess_a", cancel=True, timeout=3600)
             exit_code = cmd_respond(args)
         assert exit_code == 0
         assert not os.path.isdir(os.path.join(comm_base, "sess_a"))
         assert os.path.isdir(os.path.join(comm_base, "sess_b"))
 
-    def test_respond_clear_nonexistent_session(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        """--clear with nonexistent session ID still succeeds (idempotent)."""
+    def test_respond_cancel_nonexistent_session(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """--cancel with nonexistent session ID still succeeds (idempotent)."""
         assert isinstance(tmp_path, os.PathLike)
         comm_base = os.path.join(str(tmp_path), ".lumon_comm")
         with patch("lumon.cli._COMM_BASE", comm_base):
-            args = argparse.Namespace(session="nonexistent", clear=True)
+            args = argparse.Namespace(session="nonexistent", cancel=True, timeout=3600)
             exit_code = cmd_respond(args)
         assert exit_code == 0
 

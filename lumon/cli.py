@@ -153,7 +153,7 @@ def cmd_run_code(code: str, *, script: str | None = None) -> int:
         if pending:
             msg = (
                 f"Script has pending session {pending}. "
-                f"Use 'lumon respond {pending}' to resume or 'lumon respond {pending} --clear' to discard."
+                f"Use 'lumon respond {pending}' to resume or 'lumon respond {pending} --cancel' to discard."
             )
             result: dict[str, object] = {"type": "error", "message": msg}
             print(json.dumps(result, ensure_ascii=False))
@@ -205,10 +205,10 @@ def cmd_respond(args: argparse.Namespace) -> int:
         )
         return 1
 
-    # Handle --clear before checking for daemon
-    if getattr(args, "clear", False):
+    # Handle --cancel before checking for daemon
+    if getattr(args, "cancel", False):
         _clear_state(session)
-        print(json.dumps({"type": "result", "value": f"Session {session} cleared."}))
+        print(json.dumps({"type": "result", "value": f"Session {session} cancelled."}))
         return 0
 
     comm_dir = _comm_dir_for_session(session)
@@ -242,7 +242,7 @@ def cmd_respond(args: argparse.Namespace) -> int:
         return 1
     else:
         # Daemon is alive — wait for it to produce output
-        result = read_daemon_output(comm_dir, timeout=60)
+        result = read_daemon_output(comm_dir, timeout=args.timeout)
     if result is None:
         print(
             f"error: timed out waiting for daemon output for session '{session}'",
@@ -840,9 +840,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Session ID from the suspension output.",
     )
     p_respond.add_argument(
-        "--clear",
+        "--cancel",
         action="store_true",
         help="Discard a pending session instead of resuming it.",
+    )
+    p_respond.add_argument(
+        "--timeout",
+        type=int,
+        default=3600,
+        help="Seconds to wait for daemon output (default: 3600).",
     )
 
     # deploy
