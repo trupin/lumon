@@ -144,7 +144,15 @@ def _poll_ask_response(comm_dir: str, timeout: float = _MAX_WAIT) -> object | No
     while time.monotonic() < deadline:
         if os.path.isfile(path):
             with open(path, encoding="utf-8") as f:
-                return deserialize(json.load(f))
+                try:
+                    return deserialize(json.load(f))
+                except json.JSONDecodeError as exc:
+                    raise LumonError(
+                        f"ask_response.json contains invalid JSON. "
+                        f"Response files must contain a valid JSON value "
+                        f'(e.g. "quoted text", [1,2,3], {{"key": "val"}}). '
+                        f"Raw error: {exc}"
+                    ) from None
         time.sleep(_POLL_INTERVAL)
     return None
 
@@ -161,7 +169,15 @@ def _poll_spawn_responses(
             path = os.path.join(comm_dir, f"spawn_{i}_response.json")
             if os.path.isfile(path):
                 with open(path, encoding="utf-8") as f:
-                    raw = json.load(f)
+                    try:
+                        raw = json.load(f)
+                    except json.JSONDecodeError as exc:
+                        raise LumonError(
+                            f"spawn_{i}_response.json contains invalid JSON. "
+                            f"Response files must contain a valid JSON value "
+                            f'(e.g. "quoted text", [1,2,3], {{"key": "val"}}). '
+                            f"Raw error: {exc}"
+                        ) from None
                 responses.append(_unwrap_spawn_response(deserialize(raw)))
             else:
                 all_found = False

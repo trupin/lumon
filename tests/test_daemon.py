@@ -8,6 +8,9 @@ import threading
 import time
 from unittest.mock import patch
 
+import pytest
+
+from lumon.errors import LumonError
 from lumon.daemon import (
     _STALE_AGE,
     SuspendEvent,
@@ -170,6 +173,16 @@ class TestPollAskResponse:
         assert result is None
 
 
+    def test_invalid_json_raises_helpful_error(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        comm_dir = str(tmp_path)
+        resp_path = os.path.join(comm_dir, "ask_response.json")
+        with open(resp_path, "w", encoding="utf-8") as f:
+            f.write("not valid json")
+        with pytest.raises(LumonError, match="ask_response.json contains invalid JSON"):
+            _poll_ask_response(comm_dir, timeout=1)
+
+
 class TestPollSpawnResponses:
     def test_returns_all_responses(self, tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
@@ -203,6 +216,14 @@ class TestPollSpawnResponses:
         assert isinstance(tmp_path, os.PathLike)
         result = _poll_spawn_responses(str(tmp_path), 2, timeout=0.1)
         assert result is None
+
+    def test_invalid_json_raises_helpful_error(self, tmp_path: object) -> None:
+        assert isinstance(tmp_path, os.PathLike)
+        comm_dir = str(tmp_path)
+        with open(os.path.join(comm_dir, "spawn_0_response.json"), "w") as f:
+            f.write("raw text not json")
+        with pytest.raises(LumonError, match="spawn_0_response.json contains invalid JSON"):
+            _poll_spawn_responses(comm_dir, 1, timeout=1)
 
     def test_unwraps_spawn_wrapper(self, tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
