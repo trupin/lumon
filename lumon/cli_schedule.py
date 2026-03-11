@@ -52,11 +52,18 @@ def cmd_schedule(args: argparse.Namespace) -> int:
         if not schedules:
             print("No scheduled jobs.")
             return 0
-        print(f"{'ID':<12} {'Type':<6} {'Schedule':<20} {'Start':<22} {'File'}")
-        print("-" * 90)
+        print(f"{'ID':<12} {'Type':<6} {'Schedule':<20} {'Last Run':<22} {'Status':<10} {'File'}")
+        print("-" * 110)
         for s in schedules:
-            start = s.start_at if s.start_at else "-"
-            print(f"{s.id:<12} {s.schedule_type:<6} {s.schedule_value:<20} {start:<22} {s.file}")
+            logs = get_logs(working_dir, s.id, limit=1)
+            if logs:
+                last_run = logs[0].get("timestamp", "-")
+                result_type = logs[0].get("result", {}).get("type", "?")
+                status = "ok" if result_type == "result" else result_type
+            else:
+                last_run = "-"
+                status = "-"
+            print(f"{s.id:<12} {s.schedule_type:<6} {s.schedule_value:<20} {last_run:<22} {status:<10} {s.file}")
         return 0
 
     if sub == "edit":

@@ -876,3 +876,82 @@ class TestScheduleInteractive:
     def test_prompt_eof_during_value_input(self, _mock_input: MagicMock) -> None:
         stype, _svalue, _start = _prompt_schedule_type()
         assert stype is None
+
+
+class TestScheduleListOutput:
+    def test_list_shows_last_run_and_status(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: Path,
+    ) -> None:
+        """schedule list shows Last Run timestamp and Status columns."""
+        sched = Schedule(
+            id="sched_01",
+            file="/tmp/test.lumon",
+            schedule_type="cron",
+            schedule_value="0 9 * * *",
+            working_dir=str(tmp_path),
+            created_at="2026-03-10T09:00:00",
+        )
+        save_schedules(str(tmp_path), [sched])
+        # Write a log entry
+        _log_result(str(tmp_path), "sched_01", sched, {"type": "result", "value": "done"})
+
+        with patch("lumon.cli_schedule.list_schedules", return_value=[sched]), \
+             patch("lumon.cli_schedule.get_logs") as mock_logs:
+            mock_logs.return_value = [{"timestamp": "2026-03-10T09:00:01", "result": {"type": "result"}}]
+            args = argparse.Namespace(command="schedule", schedule_command="list")
+            cmd_schedule(args)
+
+        out = capsys.readouterr().out
+        assert "Last Run" in out
+        assert "Status" in out
+        assert "2026-03-10T09:00:01" in out
+        assert "ok" in out
+
+    def test_list_no_runs_shows_dashes(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: Path,
+    ) -> None:
+        """schedule list shows dashes when no logs exist."""
+        sched = Schedule(
+            id="sched_01",
+            file="/tmp/test.lumon",
+            schedule_type="cron",
+            schedule_value="0 9 * * *",
+            working_dir=str(tmp_path),
+            created_at="2026-03-10T09:00:00",
+        )
+
+        with patch("lumon.cli_schedule.list_schedules", return_value=[sched]), \
+             patch("lumon.cli_schedule.get_logs", return_value=[]):
+            args = argparse.Namespace(command="schedule", schedule_command="list")
+            cmd_schedule(args)
+
+        out = capsys.readouterr().out
+        # The dash should appear in the Last Run and Status columns
+        lines = out.strip().split("\n")
+        data_line = lines[-1]
+        assert "sched_01" in data_line
+        # Both Last Run and Status should be "-"
+        parts = data_line.split()
+        assert parts.count("-") >= 2
+
+    def test_list_shows_error_status(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: Path,
+    ) -> None:
+        """schedule list shows 'error' status for failed runs."""
+        sched = Schedule(
+            id="sched_01",
+            file="/tmp/test.lumon",
+            schedule_type="every",
+            schedule_value="1h",
+            working_dir=str(tmp_path),
+            created_at="2026-03-10T09:00:00",
+        )
+
+        with patch("lumon.cli_schedule.list_schedules", return_value=[sched]), \
+             patch("lumon.cli_schedule.get_logs") as mock_logs:
+            mock_logs.return_value = [{"timestamp": "2026-03-10T10:00:01", "result": {"type": "error", "message": "fail"}}]
+            args = argparse.Namespace(command="schedule", schedule_command="list")
+            cmd_schedule(args)
+
+        out = capsys.readouterr().out
+        assert "error" in out
