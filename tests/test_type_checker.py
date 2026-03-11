@@ -149,12 +149,13 @@ class TestWrongArgCount:
 # ===================================================================
 
 class TestStructuralMapFieldAccess:
-    def test_access_nonexistent_field(self, run):
+    def test_access_nonexistent_field_returns_none(self, run):
         r = run(
             'let m = {name: "Theo"}\n'
             'return m.age'
         )
-        assert r.type == "error"
+        assert r.type == "result"
+        assert r.value is None
 
     def test_access_field_on_non_map(self, run):
         r = run('let x = 42\nreturn x.name')
