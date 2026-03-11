@@ -279,10 +279,11 @@ BUILTIN_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
     # time.*
     "time.now": ((), TNumber()),
     "time.wait": ((TNumber(),), TNone()),
-    "time.format": ((TNumber(), TText()), TText()),
+    "time.format": ((TNumber(), TText(), None), TText()),
     "time.parse": ((TText(), TText()), TUnion((TNumber(), TNone()))),
     "time.since": ((TNumber(),), TNumber()),
     "time.date": ((), TMap()),
+    "time.date_local": ((TText(),), TMap()),
     "time.add": ((TNumber(), TNumber()), TNumber()),
     "time.diff": ((TNumber(), TNumber()), TNumber()),
     "time.timeout": ((TNumber(), TFn((), _A)), TUnion((TTag("ok", _A), TTag("timeout")))),

@@ -96,6 +96,21 @@ class TestTimeFormat:
         assert r.error is not None
         assert "time.format" in r.error["message"]
 
+    def test_format_with_timezone(self, run):
+        # 2024-01-15 00:00:00 UTC = 1705276800000 ms
+        # In US/Eastern (UTC-5) this is 2024-01-14 19:00:00
+        r = run('return time.format(1705276800000, "%Y-%m-%d %H:%M", "America/New_York")')
+        assert r.value == "2024-01-14 19:00"
+
+    def test_format_with_timezone_utc(self, run):
+        r = run('return time.format(1705276800000, "%Y-%m-%d", "UTC")')
+        assert r.value == "2024-01-15"
+
+    def test_format_invalid_timezone_errors(self, run):
+        r = run('return time.format(1705276800000, "%Y-%m-%d", "Not/A/Zone")')
+        assert r.error is not None
+        assert "unknown timezone" in r.error["message"]
+
 
 # ===================================================================
 # time.parse
@@ -175,6 +190,39 @@ class TestTimeDate:
             'let d = time.date()\n'
             'return d.year'
         )
+        assert 2020 <= r.value <= 2100
+
+
+# ===================================================================
+# time.date_local
+# ===================================================================
+
+
+class TestTimeDateLocal:
+    def test_returns_map(self, run):
+        r = run('return time.date_local("UTC")')
+        assert isinstance(r.value, dict)
+
+    def test_has_all_fields(self, run):
+        r = run('return time.date_local("UTC")')
+        for key in ("year", "month", "day", "hour", "minute", "second"):
+            assert key in r.value, f"missing field: {key}"
+
+    def test_utc_matches_time_date(self, run):
+        r = run(
+            'let utc = time.date()\n'
+            'let local = time.date_local("UTC")\n'
+            'return utc.year == local.year and utc.day == local.day'
+        )
+        assert r.value is True
+
+    def test_invalid_timezone_errors(self, run):
+        r = run('return time.date_local("Not/A/Timezone")')
+        assert r.error is not None
+        assert "unknown timezone" in r.error["message"]
+
+    def test_field_access_works(self, run):
+        r = run('return time.date_local("America/New_York").year')
         assert 2020 <= r.value <= 2100
 
 

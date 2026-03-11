@@ -205,10 +205,18 @@ def _time_wait(ms: float) -> None:
     _time.sleep(ms / 1000)
 
 
-def _time_format(timestamp: float, pattern: str) -> str:
+def _time_format(timestamp: float, pattern: str, tz_name: str | None = None) -> str:
     try:
         dt = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
+        if tz_name is not None:
+            from zoneinfo import ZoneInfo
+            try:
+                dt = dt.astimezone(ZoneInfo(tz_name))
+            except (KeyError, Exception) as exc:
+                raise LumonError(f"time.format: unknown timezone '{tz_name}'") from exc
         return dt.strftime(pattern)
+    except LumonError:
+        raise
     except (ValueError, OSError) as exc:
         raise LumonError(f"time.format: {exc}") from None
 
@@ -223,6 +231,23 @@ def _time_parse(text: str, pattern: str) -> object:
 
 def _time_date() -> dict:
     now = datetime.now(tz=timezone.utc)
+    return {
+        "year": now.year,
+        "month": now.month,
+        "day": now.day,
+        "hour": now.hour,
+        "minute": now.minute,
+        "second": now.second,
+    }
+
+
+def _time_date_local(tz_name: str) -> dict:
+    from zoneinfo import ZoneInfo
+    try:
+        tz = ZoneInfo(tz_name)
+    except (KeyError, Exception) as exc:
+        raise LumonError(f"time.date_local: unknown timezone '{tz_name}'") from exc
+    now = datetime.now(tz=tz)
     return {
         "year": now.year,
         "month": now.month,
@@ -602,6 +627,7 @@ def register_builtins(
     env.register_builtin("time.parse", _time_parse)
     env.register_builtin("time.since", lambda ts: _time.time() * 1000 - ts)
     env.register_builtin("time.date", _time_date)
+    env.register_builtin("time.date_local", _time_date_local)
     env.register_builtin("time.add", lambda ts, ms: ts + ms)
     env.register_builtin("time.diff", lambda a, b: a - b)
     env.register_builtin("time.timeout", _time_timeout)

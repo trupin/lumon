@@ -981,10 +981,11 @@ All timestamps are Unix epoch milliseconds (UTC).
 | :---- | :---- | :---- |
 | `time.now` | `() -> number` | Current UTC timestamp in milliseconds |
 | `time.wait` | `(ms: number) -> none` | Sleep for ms; error if ms < 0 or > 60000 |
-| `time.format` | `(timestamp: number, pattern: text) -> text` | Format timestamp with strftime pattern |
+| `time.format` | `(timestamp: number, pattern: text, timezone?: text) -> text` | Format timestamp with strftime pattern; optional IANA timezone (e.g. "America/Los_Angeles") |
 | `time.parse` | `(text: text, pattern: text) -> number \| none` | Parse date string to timestamp (none on failure) |
 | `time.since` | `(timestamp: number) -> number` | Milliseconds elapsed since timestamp |
 | `time.date` | `() -> map` | Current UTC date as {year, month, day, hour, minute, second} |
+| `time.date_local` | `(timezone: text) -> map` | Current date in IANA timezone as {year, month, day, hour, minute, second} |
 | `time.add` | `(timestamp: number, ms: number) -> number` | Add ms to timestamp |
 | `time.diff` | `(a: number, b: number) -> number` | Difference a - b in milliseconds |
 | `time.timeout` | `(ms: number, fn() -> a) -> :ok(a) \| :timeout` | Run fn with timeout; error if ms < 0 or > 60000 |
@@ -1244,15 +1245,15 @@ If a Lumon script is run from a file and already has a pending session (an ask o
 ```json
 {
   "type": "error",
-  "message": "Script has pending session a3f2e1b9. Use 'lumon respond' to resume or 'lumon respond --clear' to discard."
+  "message": "Script has pending session a3f2e1b9. Use 'lumon respond' to resume or 'lumon respond --cancel' to discard."
 }
 ```
 
-This prevents accidental re-execution that would silently discard in-progress work. The agent must explicitly respond (`lumon respond`) or clear the session (`lumon respond --clear`).
+This prevents accidental re-execution that would silently discard in-progress work. The agent must explicitly respond (`lumon respond`) or cancel the session (`lumon respond --cancel`).
 
 - **File-based runs only** — inline code and stdin are not tracked
 - **Script marker file** — `script.txt` in the session directory associates it with the source script
-- **Clear a session** — `lumon respond --clear` discards the session without resuming; auto-detects if only one session exists
+- **Cancel a session** — `lumon respond --cancel` discards the session without resuming; auto-detects if only one session exists
 
 ### Concurrency
 
