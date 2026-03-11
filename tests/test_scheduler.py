@@ -16,6 +16,7 @@ from lumon.cli_schedule import _prompt_schedule_type, _schedule_opts_from_args, 
 from lumon.scheduler import (
     Schedule,
     _build_plist,
+    _build_summary,
     _find_schedule,
     _log_result,
     _next_id,
@@ -664,17 +665,38 @@ class TestRunJob:
 class TestRunWithClaude:
     @patch("lumon.scheduler._resolve_claude", return_value="/usr/local/bin/claude")
     @patch("lumon.scheduler.subprocess.run")
-    def test_success(self, mock_run: MagicMock, _mock_resolve: MagicMock, tmp_path: Path) -> None:
+    def test_success_with_json_output(self, mock_run: MagicMock, _mock_resolve: MagicMock, tmp_path: Path) -> None:
         sched = Schedule(
             id="sched_01", file="/tmp/test.lumon", schedule_type="every",
             schedule_value="1h", working_dir=str(tmp_path), created_at="2026-01-01",
         )
-        mock_run.return_value = MagicMock(returncode=0, stdout="done")
+        claude_output = json.dumps({
+            "result": "done",
+            "num_turns": 5,
+            "duration_ms": 45000,
+            "cost_usd": 0.123,
+        })
+        mock_run.return_value = MagicMock(returncode=0, stdout=claude_output)
         result = _run_with_claude(sched)
-        assert result == {"type": "result", "value": "done"}
+        assert result["type"] == "result"
+        assert result["value"] == "done"
+        assert result["summary"] == "5 turns, 45s, $0.123"
         cmd = mock_run.call_args[0][0]
         assert cmd[0] == "/usr/local/bin/claude"
         assert "--verbose" in cmd
+        assert "--output-format" in cmd
+
+    @patch("lumon.scheduler._resolve_claude", return_value="/usr/local/bin/claude")
+    @patch("lumon.scheduler.subprocess.run")
+    def test_success_plain_text_fallback(self, mock_run: MagicMock, _mock_resolve: MagicMock, tmp_path: Path) -> None:
+        """Falls back to plain text when Claude doesn't return JSON."""
+        sched = Schedule(
+            id="sched_01", file="/tmp/test.lumon", schedule_type="every",
+            schedule_value="1h", working_dir=str(tmp_path), created_at="2026-01-01",
+        )
+        mock_run.return_value = MagicMock(returncode=0, stdout="plain text result")
+        result = _run_with_claude(sched)
+        assert result == {"type": "result", "value": "plain text result"}
 
     @patch("lumon.scheduler.subprocess.run")
     def test_error_exit_code(self, mock_run: MagicMock, tmp_path: Path) -> None:
@@ -695,6 +717,27 @@ class TestRunWithClaude:
         result = _run_with_claude(sched)
         assert result["type"] == "error"
         assert "claude CLI not found" in result["message"]
+
+
+class TestBuildSummary:
+    def test_full_metadata(self) -> None:
+        data = {"num_turns": 5, "duration_ms": 45000, "cost_usd": 0.123}
+        assert _build_summary(data) == "5 turns, 45s, $0.123"
+
+    def test_long_duration_shows_minutes(self) -> None:
+        data = {"num_turns": 12, "duration_ms": 180000, "cost_usd": 0.5}
+        assert _build_summary(data) == "12 turns, 3.0min, $0.500"
+
+    def test_single_turn(self) -> None:
+        data = {"num_turns": 1, "duration_ms": 2000}
+        assert _build_summary(data) == "1 turn, 2s"
+
+    def test_empty_data(self) -> None:
+        assert _build_summary({}) == ""
+
+    def test_partial_metadata(self) -> None:
+        data = {"duration_ms": 10000}
+        assert _build_summary(data) == "10s"
 
 
 # ---------------------------------------------------------------------------
@@ -955,3 +998,54 @@ class TestScheduleListOutput:
 
         out = capsys.readouterr().out
         assert "error" in out
+
+
+class TestScheduleLogsOutput:
+    def test_logs_shows_summary(
+        self, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """schedule logs shows summary when present in result."""
+        with patch("lumon.cli_schedule.get_logs") as mock_logs:
+            mock_logs.return_value = [{
+                "timestamp": "2026-03-10T09:00:01",
+                "result": {"type": "result", "value": "done", "summary": "5 turns, 45s, $0.123"},
+            }]
+            args = argparse.Namespace(command="schedule", schedule_command="logs", id="sched_01", limit=10)
+            cmd_schedule(args)
+
+        out = capsys.readouterr().out
+        assert "2026-03-10T09:00:01" in out
+        assert "ok" in out
+        assert "5 turns, 45s, $0.123" in out
+
+    def test_logs_shows_error_message(
+        self, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """schedule logs shows error message for failed runs."""
+        with patch("lumon.cli_schedule.get_logs") as mock_logs:
+            mock_logs.return_value = [{
+                "timestamp": "2026-03-10T10:00:01",
+                "result": {"type": "error", "message": "claude exited with code 1"},
+            }]
+            args = argparse.Namespace(command="schedule", schedule_command="logs", id="sched_01", limit=10)
+            cmd_schedule(args)
+
+        out = capsys.readouterr().out
+        assert "error" in out
+        assert "claude exited with code 1" in out
+
+    def test_logs_no_summary(
+        self, capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """schedule logs works without summary field."""
+        with patch("lumon.cli_schedule.get_logs") as mock_logs:
+            mock_logs.return_value = [{
+                "timestamp": "2026-03-10T09:00:01",
+                "result": {"type": "result", "value": "done"},
+            }]
+            args = argparse.Namespace(command="schedule", schedule_command="logs", id="sched_01", limit=10)
+            cmd_schedule(args)
+
+        out = capsys.readouterr().out
+        assert "ok" in out
+        assert "(" not in out  # no summary parentheses

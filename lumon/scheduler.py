@@ -375,8 +375,9 @@ def _resolve_claude() -> str:
 def _run_with_claude(schedule: Schedule) -> dict:
     """Run a Lumon script via the claude CLI subprocess.
 
-    Streams stderr to the job's stderr.log for live debugging.
-    No timeout — Claude runs until completion.
+    Uses ``--output-format json`` to get structured metadata (turns,
+    duration, cost) alongside the result.  Falls back to plain text
+    if JSON parsing fails.
     """
     stderr_path = _logs_path(schedule.working_dir) / schedule.id / "stderr.log"
     stderr_path.parent.mkdir(parents=True, exist_ok=True)
@@ -385,6 +386,7 @@ def _run_with_claude(schedule: Schedule) -> dict:
             result = subprocess.run(
                 [
                     _resolve_claude(), "--print", "--verbose",
+                    "--output-format", "json",
                     f"Run this Lumon script and handle all ask/spawn prompts: {schedule.file}",
                 ],
                 stdout=subprocess.PIPE,
@@ -395,9 +397,39 @@ def _run_with_claude(schedule: Schedule) -> dict:
             )
         if result.returncode != 0:
             return {"type": "error", "message": f"claude exited with code {result.returncode}"}
-        return {"type": "result", "value": result.stdout.strip()}
+
+        # Try to parse structured JSON output from --output-format json
+        try:
+            data = json.loads(result.stdout)
+            summary = _build_summary(data)
+            value = data.get("result", result.stdout.strip())
+            out: dict = {"type": "result", "value": value}
+            if summary:
+                out["summary"] = summary
+            return out
+        except (json.JSONDecodeError, KeyError):
+            return {"type": "result", "value": result.stdout.strip()}
     except FileNotFoundError:
         return {"type": "error", "message": "claude CLI not found — install it to run scheduled scripts"}
+
+
+def _build_summary(data: dict) -> str:
+    """Build a human-readable summary from Claude's JSON output metadata."""
+    parts: list[str] = []
+    num_turns = data.get("num_turns")
+    if num_turns is not None:
+        parts.append(f"{num_turns} turn{'s' if num_turns != 1 else ''}")
+    duration_ms = data.get("duration_ms")
+    if duration_ms is not None:
+        secs = duration_ms / 1000
+        if secs >= 60:
+            parts.append(f"{secs / 60:.1f}min")
+        else:
+            parts.append(f"{secs:.0f}s")
+    cost = data.get("cost_usd")
+    if cost is not None:
+        parts.append(f"${cost:.3f}")
+    return ", ".join(parts)
 
 
 # ---------------------------------------------------------------------------

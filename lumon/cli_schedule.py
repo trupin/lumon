@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 
 from lumon.scheduler import (
@@ -102,7 +101,14 @@ def cmd_schedule(args: argparse.Namespace) -> int:
             ts = entry.get("timestamp", "?")
             result = entry.get("result", {})
             rtype = result.get("type", "?")
-            print(f"[{ts}] {rtype}: {json.dumps(result, ensure_ascii=False)}")
+            status = "ok" if rtype == "result" else rtype
+            summary = result.get("summary", "")
+            header = f"[{ts}] {status}"
+            if summary:
+                header += f"  ({summary})"
+            print(header)
+            if rtype == "error":
+                print(f"  error: {result.get('message', '?')}")
         return 0
 
     if sub == "_run":
