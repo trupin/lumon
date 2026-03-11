@@ -14,6 +14,7 @@ import time as _time
 from base64 import b64decode, b64encode
 from datetime import datetime, timezone
 from urllib.parse import quote, unquote
+from zoneinfo import ZoneInfo
 
 from lumon.environment import Environment
 from lumon.errors import AskSignal, LumonError, ReturnSignal
@@ -206,17 +207,18 @@ def _time_wait(ms: float) -> None:
 
 
 def _time_format(timestamp: float, pattern: str, tz_name: str | None = None) -> str:
+    if tz_name is not None:
+        try:
+            tz_info = ZoneInfo(tz_name)
+        except (KeyError, Exception) as exc:
+            raise LumonError(f"time.format: unknown timezone '{tz_name}'") from exc
+    else:
+        tz_info = None
     try:
         dt = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
-        if tz_name is not None:
-            from zoneinfo import ZoneInfo
-            try:
-                dt = dt.astimezone(ZoneInfo(tz_name))
-            except (KeyError, Exception) as exc:
-                raise LumonError(f"time.format: unknown timezone '{tz_name}'") from exc
+        if tz_info is not None:
+            dt = dt.astimezone(tz_info)
         return dt.strftime(pattern)
-    except LumonError:
-        raise
     except (ValueError, OSError) as exc:
         raise LumonError(f"time.format: {exc}") from None
 
@@ -242,7 +244,6 @@ def _time_date() -> dict:
 
 
 def _time_date_local(tz_name: str) -> dict:
-    from zoneinfo import ZoneInfo
     try:
         tz = ZoneInfo(tz_name)
     except (KeyError, Exception) as exc:
