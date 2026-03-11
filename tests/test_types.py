@@ -440,7 +440,12 @@ class TestFieldAccessErrors:
 
     def test_field_access_missing_key(self, run):
         r = run("return {a: 1}.b")
-        assert r.type == "error"
+        assert r.type == "result"
+        assert r.value is None
+
+    def test_field_access_missing_key_with_fallback(self, run):
+        r = run("return {a: 1}.b ?? 42")
+        assert r.value == 42
 
 
 # ===================================================================

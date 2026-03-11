@@ -355,7 +355,7 @@ def _eval_field_access(obj_node: object, field: str, env: Environment) -> object
     if isinstance(obj, dict):
         if field in obj:
             return obj[field]
-        raise LumonError(f"Field '{field}' not found on map")
+        return None
     return None  # Non-map field access returns none (safe for ?? fallback)
 
 

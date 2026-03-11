@@ -492,7 +492,7 @@ def check_node(node: object, env: TypeEnv, sigs: dict[str, tuple[tuple[object, .
         if isinstance(obj_type, TMap) and obj_type.fields is not None:
             if node.field in obj_type.fields:
                 return obj_type.fields[node.field]
-            raise LumonError(f"Type error: field '{node.field}' not found on map")
+            return TUnion((TAny(), TNone()))  # missing field returns none
         if isinstance(obj_type, (TNumber, TText, TBool, TNone, TList)):
             return TUnion((TAny(), TNone()))  # safe field access returns none on non-map
         return TAny()
