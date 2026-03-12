@@ -688,6 +688,23 @@ class TestRunWithClaude:
 
     @patch("lumon.scheduler._resolve_claude", return_value="/usr/local/bin/claude")
     @patch("lumon.scheduler.subprocess.run")
+    def test_success_with_message_list(self, mock_run: MagicMock, _mock_resolve: MagicMock, tmp_path: Path) -> None:
+        """Handles Claude returning a list of conversation messages."""
+        sched = Schedule(
+            id="sched_01", file="/tmp/test.lumon", schedule_type="every",
+            schedule_value="1h", working_dir=str(tmp_path), created_at="2026-01-01",
+        )
+        messages = [
+            {"role": "user", "content": "run the script"},
+            {"role": "assistant", "content": "Script completed successfully."},
+        ]
+        mock_run.return_value = MagicMock(returncode=0, stdout=json.dumps(messages))
+        result = _run_with_claude(sched)
+        assert result["type"] == "result"
+        assert result["value"] == "Script completed successfully."
+
+    @patch("lumon.scheduler._resolve_claude", return_value="/usr/local/bin/claude")
+    @patch("lumon.scheduler.subprocess.run")
     def test_success_plain_text_fallback(self, mock_run: MagicMock, _mock_resolve: MagicMock, tmp_path: Path) -> None:
         """Falls back to plain text when Claude doesn't return JSON."""
         sched = Schedule(

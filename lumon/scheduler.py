@@ -401,16 +401,38 @@ def _run_with_claude(schedule: Schedule) -> dict:
         # Try to parse structured JSON output from --output-format json
         try:
             data = json.loads(result.stdout)
-            summary = _build_summary(data)
-            value = data.get("result", result.stdout.strip())
-            out: dict = {"type": "result", "value": value}
-            if summary:
-                out["summary"] = summary
-            return out
+            if isinstance(data, dict):
+                summary = _build_summary(data)
+                value = data.get("result", result.stdout.strip())
+                out: dict = {"type": "result", "value": value}
+                if summary:
+                    out["summary"] = summary
+                return out
+            # Claude may return a list of messages — extract last assistant text
+            if isinstance(data, list):
+                value = _extract_result_from_messages(data)
+                return {"type": "result", "value": value}
+            return {"type": "result", "value": result.stdout.strip()}
         except (json.JSONDecodeError, KeyError):
             return {"type": "result", "value": result.stdout.strip()}
     except FileNotFoundError:
         return {"type": "error", "message": "claude CLI not found — install it to run scheduled scripts"}
+
+
+def _extract_result_from_messages(messages: list) -> str:
+    """Extract the final assistant text from a list of conversation messages."""
+    for msg in reversed(messages):
+        if isinstance(msg, dict) and msg.get("role") == "assistant":
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                return content
+            # content may be a list of blocks
+            if isinstance(content, list):
+                texts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+                if texts:
+                    return "\n".join(texts)
+    # Fallback: join all string items
+    return "\n".join(str(m) for m in messages)
 
 
 def _build_summary(data: dict) -> str:
