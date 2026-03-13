@@ -43,3 +43,10 @@ class AskSignal(Exception):
 
     def __init__(self, envelope: dict):
         self.envelope = envelope
+
+
+class SpawnBatchSignal(Exception):
+    """Control flow signal when `spawn` is encountered without daemon mode."""
+
+    def __init__(self, envelopes: list[dict]):
+        self.envelopes = envelopes

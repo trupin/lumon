@@ -14,6 +14,7 @@ import time as _time
 from base64 import b64decode, b64encode
 from datetime import datetime, timezone
 from urllib.parse import quote, unquote
+from zoneinfo import ZoneInfo
 
 from lumon.environment import Environment
 from lumon.errors import AskSignal, LumonError, ReturnSignal
@@ -205,9 +206,18 @@ def _time_wait(ms: float) -> None:
     _time.sleep(ms / 1000)
 
 
-def _time_format(timestamp: float, pattern: str) -> str:
+def _time_format(timestamp: float, pattern: str, tz_name: str | None = None) -> str:
+    if tz_name is not None:
+        try:
+            tz_info = ZoneInfo(tz_name)
+        except (KeyError, Exception) as exc:
+            raise LumonError(f"time.format: unknown timezone '{tz_name}'") from exc
+    else:
+        tz_info = None
     try:
         dt = datetime.fromtimestamp(timestamp / 1000, tz=timezone.utc)
+        if tz_info is not None:
+            dt = dt.astimezone(tz_info)
         return dt.strftime(pattern)
     except (ValueError, OSError) as exc:
         raise LumonError(f"time.format: {exc}") from None
@@ -223,6 +233,22 @@ def _time_parse(text: str, pattern: str) -> object:
 
 def _time_date() -> dict:
     now = datetime.now(tz=timezone.utc)
+    return {
+        "year": now.year,
+        "month": now.month,
+        "day": now.day,
+        "hour": now.hour,
+        "minute": now.minute,
+        "second": now.second,
+    }
+
+
+def _time_date_local(tz_name: str) -> dict:
+    try:
+        tz = ZoneInfo(tz_name)
+    except (KeyError, Exception) as exc:
+        raise LumonError(f"time.date_local: unknown timezone '{tz_name}'") from exc
+    now = datetime.now(tz=tz)
     return {
         "year": now.year,
         "month": now.month,
@@ -508,6 +534,11 @@ def register_builtins(
         "list.flatten", lambda items: [x for sub in items for x in sub]
     )
     env.register_builtin("list.head", lambda items: items[0] if items else None)
+    env.register_builtin("list.first", lambda items: items[0] if items else None)
+    env.register_builtin(
+        "list.get",
+        lambda items, index: items[int(index)] if 0 <= int(index) < len(items) else None,
+    )
     env.register_builtin("list.tail", lambda items: items[1:] if items else [])
     env.register_builtin("list.concat", lambda a, b: a + b)
     env.register_builtin(
@@ -597,6 +628,7 @@ def register_builtins(
     env.register_builtin("time.parse", _time_parse)
     env.register_builtin("time.since", lambda ts: _time.time() * 1000 - ts)
     env.register_builtin("time.date", _time_date)
+    env.register_builtin("time.date_local", _time_date_local)
     env.register_builtin("time.add", lambda ts, ms: ts + ms)
     env.register_builtin("time.diff", lambda a, b: a - b)
     env.register_builtin("time.timeout", _time_timeout)
@@ -716,6 +748,9 @@ def register_builtins(
         )
         env.register_builtin(
             "git.add", lambda path: _wrap_tag_result(_git.add(path))  # type: ignore[union-attr]
+        )
+        env.register_builtin(
+            "git.add_all", lambda: _wrap_tag_result(_git.add_all())  # type: ignore[union-attr]
         )
         env.register_builtin(
             "git.commit", lambda msg: _wrap_tag_result(_git.commit(msg))  # type: ignore[union-attr]

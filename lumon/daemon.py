@@ -22,6 +22,7 @@ from lumon.serializer import deserialize
 _POLL_INTERVAL = 0.2  # seconds
 _MAX_WAIT = 3600  # 1 hour default timeout
 _STALE_AGE = 86400  # 24 hours — sessions older than this are cleaned up
+_STARTUP_TIMEOUT = 30  # seconds — max wait for daemon to write PID file
 
 
 def _unwrap_spawn_response(value: object) -> object:
@@ -29,6 +30,48 @@ def _unwrap_spawn_response(value: object) -> object:
     if isinstance(value, dict) and "result" in value and "spawn_id" in value:
         return value["result"]
     return value
+
+
+_EXPECTS_TO_TYPE: dict[str, type | tuple[type, ...]] = {
+    "text": str,
+    "number": (int, float),
+    "bool": bool,
+    "list": list,
+    "map": dict,
+}
+
+
+def _validate_spawn_responses(
+    responses: list[object],
+    envelope: dict,
+) -> str | None:
+    """Validate spawn responses against expects types. Returns error message or None."""
+    spawns = envelope.get("spawns")
+    if isinstance(spawns, list):
+        spawn_list = spawns
+    else:
+        # Single-spawn envelope — fields spread directly
+        spawn_list = [envelope]
+    for i, response in enumerate(responses):
+        if i >= len(spawn_list):
+            break
+        expects = spawn_list[i].get("expects")
+        if not expects or not isinstance(expects, str):
+            continue
+        # Extract the base type name (e.g. "text" from "text", "list<text>" from "list")
+        base_type = expects.split("<")[0].split("|")[0].strip()
+        expected_types = _EXPECTS_TO_TYPE.get(base_type)
+        if expected_types is None:
+            continue
+        actual = type(response).__name__
+        if not isinstance(response, expected_types):
+            spawn_id = f"spawn_{i}"
+            return (
+                f"{spawn_id} response is {actual}, expected {expects}. "
+                f"Check response file format — write a bare JSON {expects}, "
+                f"not a wrapper object."
+            )
+    return None
 
 
 class SuspendEvent:
@@ -101,7 +144,15 @@ def _poll_ask_response(comm_dir: str, timeout: float = _MAX_WAIT) -> object | No
     while time.monotonic() < deadline:
         if os.path.isfile(path):
             with open(path, encoding="utf-8") as f:
-                return deserialize(json.load(f))
+                try:
+                    return deserialize(json.load(f))
+                except json.JSONDecodeError as exc:
+                    raise LumonError(
+                        f"ask_response.json contains invalid JSON. "
+                        f"Response files must contain a valid JSON value "
+                        f'(e.g. "quoted text", [1,2,3], {{"key": "val"}}). '
+                        f"Raw error: {exc}"
+                    ) from None
         time.sleep(_POLL_INTERVAL)
     return None
 
@@ -118,7 +169,15 @@ def _poll_spawn_responses(
             path = os.path.join(comm_dir, f"spawn_{i}_response.json")
             if os.path.isfile(path):
                 with open(path, encoding="utf-8") as f:
-                    raw = json.load(f)
+                    try:
+                        raw = json.load(f)
+                    except json.JSONDecodeError as exc:
+                        raise LumonError(
+                            f"spawn_{i}_response.json contains invalid JSON. "
+                            f"Response files must contain a valid JSON value "
+                            f'(e.g. "quoted text", [1,2,3], {{"key": "val"}}). '
+                            f"Raw error: {exc}"
+                        ) from None
                 responses.append(_unwrap_spawn_response(deserialize(raw)))
             else:
                 all_found = False
@@ -147,7 +206,7 @@ def _run_daemon(
     """Daemon process: runs interpreter, polls for responses, writes output.
 
     This function runs in the forked child process. It:
-    1. Writes PID file
+    1. Writes PID file and installs SIGTERM handler
     2. Starts worker thread running the interpreter
     3. When worker suspends (ask/spawn), writes output.json with the envelope
     4. Polls for response files
@@ -155,6 +214,15 @@ def _run_daemon(
     6. Repeats until completion or error
     """
     _write_pid(comm_dir)
+
+    # Install SIGTERM handler for graceful shutdown
+    shutdown = threading.Event()
+
+    def _sigterm_handler(_signum: int, _frame: object) -> None:
+        shutdown.set()
+
+    signal.signal(signal.SIGTERM, _sigterm_handler)
+
     suspend = SuspendEvent(comm_dir)
     worker_result: list[dict] = []
     worker_error: list[Exception] = []
@@ -164,7 +232,7 @@ def _run_daemon(
         try:
             result = run_fn(suspend)
             worker_result.append(result)
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             worker_error.append(e)
         finally:
             worker_done.set()
@@ -175,13 +243,22 @@ def _run_daemon(
     first_output_written = False
 
     while True:
-        # Wait for either suspension or completion
+        # Wait for either suspension, completion, or shutdown
         while True:
             if worker_done.is_set():
                 break
             if suspend.envelope is not None:
                 break
+            if shutdown.is_set():
+                break
             time.sleep(0.01)
+
+        if shutdown.is_set():
+            _write_output(comm_dir, {
+                "type": "error",
+                "message": "Daemon terminated by signal",
+            })
+            return
 
         if worker_done.is_set():
             # Execution completed
@@ -229,13 +306,26 @@ def _run_daemon(
             suspend.clear_envelope()
             suspend.resume_with_ask(response)
         elif envelope.get("type") == "spawn_batch":
-            spawns = envelope.get("spawns", [])
-            batch_size = len(spawns) if isinstance(spawns, list) else 0
+            # Single-spawn envelopes spread fields directly (no "spawns" key);
+            # multi-spawn envelopes have a "spawns" list.
+            spawns = envelope.get("spawns")
+            if isinstance(spawns, list):
+                batch_size = len(spawns)
+            else:
+                batch_size = 1  # single spawn spread into envelope
             responses = _poll_spawn_responses(comm_dir, batch_size)
             if responses is None:
                 _write_output(comm_dir, {
                     "type": "error",
                     "message": "Daemon timed out waiting for spawn responses",
+                })
+                return
+            # Validate response types against expects before resuming
+            validation_error = _validate_spawn_responses(responses, envelope)
+            if validation_error is not None:
+                _write_output(comm_dir, {
+                    "type": "error",
+                    "message": validation_error,
                 })
                 return
             _cleanup_response_files(comm_dir)
@@ -286,20 +376,24 @@ def run_with_daemon(
 
         try:
             _run_daemon(run_fn, comm_dir, session)
-        except Exception as exc:
+        except Exception as exc:  # pylint: disable=broad-exception-caught
             # Write error to output.json so parent/respond can detect it
             try:
                 _write_output(comm_dir, {"type": "error", "message": str(exc)})
-            except Exception:
+            except Exception:  # pylint: disable=broad-exception-caught
                 pass
         os._exit(0)
 
-    # Parent: wait for first_output.json or completion
+    # Parent: wait for first_output.json or completion.
+    # Phase 1: wait up to 30s for the daemon to start (PID file appears).
+    # Phase 2: once started, keep polling as long as the daemon is alive —
+    #          no fixed deadline, so slow plugin.exec calls don't get killed.
     first_path = os.path.join(comm_dir, "first_output.json")
     output_path = os.path.join(comm_dir, "output.json")
-    deadline = time.monotonic() + 30  # 30s timeout for initial execution
+    pid_path = os.path.join(comm_dir, "pid")
+    startup_deadline = time.monotonic() + _STARTUP_TIMEOUT
 
-    while time.monotonic() < deadline:
+    while True:
         # Check for first suspension envelope
         if os.path.isfile(first_path):
             with open(first_path, encoding="utf-8") as f:
@@ -317,16 +411,26 @@ def run_with_daemon(
                 os.remove(output_path)
             except OSError:
                 pass
-            # Child completed without suspension — wait for it
-            try:
-                os.waitpid(pid, os.WNOHANG)
-            except ChildProcessError:
-                pass
+            # Child completed without suspension — reap it
+            _reap_child(pid)
             return data
-        time.sleep(0.05)
 
-    # Timeout waiting for child
-    return {"type": "error", "message": "Timed out waiting for interpreter to start"}
+        # Decide whether to keep waiting
+        daemon_started = os.path.isfile(pid_path)
+        if daemon_started:
+            # Daemon is running — keep waiting as long as it's alive
+            if not is_daemon_alive(comm_dir):
+                # Daemon died without producing output
+                _reap_child(pid)
+                return {"type": "error", "message": "Daemon exited without producing output"}
+        else:
+            # Daemon hasn't started yet — enforce startup deadline
+            if time.monotonic() > startup_deadline:
+                _kill_process_tree(pid)
+                _reap_child(pid)
+                return {"type": "error", "message": "Timed out waiting for interpreter to start"}
+
+        time.sleep(0.05)
 
 
 def is_daemon_alive(comm_dir: str) -> bool:
@@ -369,16 +473,66 @@ def _session_age(session_dir: str) -> float:
     return 0.0
 
 
+def _reap_child(pid: int) -> None:
+    """Wait for a child process to exit, with a bounded non-blocking retry.
+
+    Tries up to 10 times (0.5s total) then gives up — the process will be
+    reparented to init and cleaned up by the OS.
+    """
+    try:
+        for _ in range(10):
+            cpid, _ = os.waitpid(pid, os.WNOHANG)
+            if cpid != 0:
+                return
+            time.sleep(0.05)
+    except ChildProcessError:
+        pass  # already reaped or not our child
+
+
+def _kill_process_tree(pid: int) -> None:
+    """Kill a daemon process and its children using process group signals.
+
+    The daemon calls os.setsid() so its PID doubles as its PGID.
+    Sends SIGTERM first for graceful shutdown, then SIGKILL after a brief wait.
+    Falls back to single-process kill if process group kill fails.
+    """
+    # Try SIGTERM via process group first
+    try:
+        os.killpg(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return  # already dead
+    except OSError:
+        # Process group doesn't exist or insufficient permissions — try single PID
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            return
+        except (PermissionError, OSError):
+            pass  # SIGTERM failed, still try SIGKILL
+
+    # Brief grace period for graceful shutdown
+    time.sleep(0.5)
+
+    # SIGKILL to ensure termination
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+
+
 def _kill_daemon(session_dir: str) -> None:
-    """Send SIGKILL to the daemon process if it's still alive."""
+    """Kill the daemon process and its children if still alive."""
     pid_file = os.path.join(session_dir, "pid")
     if not os.path.isfile(pid_file):
         return
     try:
         with open(pid_file, encoding="utf-8") as f:
             pid = int(f.read().strip())
-        os.kill(pid, signal.SIGKILL)
-    except (ValueError, ProcessLookupError, PermissionError, OSError):
+        _kill_process_tree(pid)
+    except (ValueError, OSError):
         pass
 
 

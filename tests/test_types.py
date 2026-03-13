@@ -415,11 +415,37 @@ class TestSpreadError:
 class TestFieldAccessErrors:
     def test_field_access_non_map(self, run):
         r = run("let s = 42\nreturn s.length")
-        assert r.type == "error"
+        assert r.type == "result"
+        assert r.value is None
+
+    def test_field_access_non_map_with_fallback(self, run):
+        r = run('let x = "hello"\nreturn x.value ?? "fallback"')
+        assert r.type == "result"
+        assert r.value == "fallback"
+
+    def test_field_access_on_tag_with_payload(self, run):
+        r = run('let t = :ok("data")\nreturn t.value ?? "fallback"')
+        assert r.type == "result"
+        assert r.value == "fallback"
+
+    def test_field_access_on_bool(self, run):
+        r = run("let b = true\nreturn b.x")
+        assert r.type == "result"
+        assert r.value is None
+
+    def test_field_access_on_none(self, run):
+        r = run("let n = none\nreturn n.x")
+        assert r.type == "result"
+        assert r.value is None
 
     def test_field_access_missing_key(self, run):
         r = run("return {a: 1}.b")
-        assert r.type == "error"
+        assert r.type == "result"
+        assert r.value is None
+
+    def test_field_access_missing_key_with_fallback(self, run):
+        r = run("return {a: 1}.b ?? 42")
+        assert r.value == 42
 
 
 # ===================================================================

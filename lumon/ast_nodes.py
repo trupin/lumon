@@ -249,25 +249,7 @@ class AskExpr:
 
 @dataclass(frozen=True)
 class SpawnExpr:
-    prompt: object
-    context: object | None = None
-    fork: object | None = None
-    expects: object | None = None
-
-
-@dataclass(frozen=True)
-class AsyncExpr:
-    expr: object
-
-
-@dataclass(frozen=True)
-class AwaitExpr:
-    expr: object
-
-
-@dataclass(frozen=True)
-class AwaitAllExpr:
-    expr: object
+    tasks: object  # expression evaluating to a list of maps
 
 
 # --- Testing ---

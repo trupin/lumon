@@ -16,6 +16,7 @@ from lumon.ast_nodes import (
     IfStatement,
     ImplementBlock,
     IndexAccess,
+    InterpolatedText,
     Lambda,
     LambdaCall,
     LetBinding,
@@ -29,11 +30,11 @@ from lumon.ast_nodes import (
     PipeOp,
     Program,
     ReturnStatement,
+    SpawnExpr,
     SpreadEntry,
     TagLiteral,
     TestBlock,
     TextLiteral,
-    InterpolatedText,
     UnaryOp,
     VarRef,
 )
@@ -224,6 +225,8 @@ BUILTIN_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
     "list.reverse": ((TList(_A),), TList(_A)),
     "list.flatten": ((TList(TList(_A)),), TList(_A)),
     "list.head": ((TList(_A),), TUnion((_A, TNone()))),
+    "list.first": ((TList(_A),), TUnion((_A, TNone()))),
+    "list.get": ((TList(_A), TNumber()), TUnion((_A, TNone()))),
     "list.tail": ((TList(_A),), TList(_A)),
     "list.concat": ((TList(_A), TList(_A)), TList(_A)),
     "list.find": ((TList(_A), TFn((_A,), TBool())), TUnion((_A, TNone()))),
@@ -276,10 +279,11 @@ BUILTIN_SIGS: dict[str, tuple[tuple[object, ...], object]] = {
     # time.*
     "time.now": ((), TNumber()),
     "time.wait": ((TNumber(),), TNone()),
-    "time.format": ((TNumber(), TText()), TText()),
+    "time.format": ((TNumber(), TText(), None), TText()),
     "time.parse": ((TText(), TText()), TUnion((TNumber(), TNone()))),
     "time.since": ((TNumber(),), TNumber()),
     "time.date": ((), TMap()),
+    "time.date_local": ((TText(),), TMap()),
     "time.add": ((TNumber(), TNumber()), TNumber()),
     "time.diff": ((TNumber(), TNumber()), TNumber()),
     "time.timeout": ((TNumber(), TFn((), _A)), TUnion((TTag("ok", _A), TTag("timeout")))),
@@ -489,9 +493,9 @@ def check_node(node: object, env: TypeEnv, sigs: dict[str, tuple[tuple[object, .
         if isinstance(obj_type, TMap) and obj_type.fields is not None:
             if node.field in obj_type.fields:
                 return obj_type.fields[node.field]
-            raise LumonError(f"Type error: field '{node.field}' not found on map")
+            return TUnion((TAny(), TNone()))  # missing field returns none
         if isinstance(obj_type, (TNumber, TText, TBool, TNone, TList)):
-            raise LumonError(f"Type error: cannot access field on {type(obj_type).__name__}")
+            return TUnion((TAny(), TNone()))  # safe field access returns none on non-map
         return TAny()
 
     if isinstance(node, IndexAccess):
@@ -630,7 +634,11 @@ def check_node(node: object, env: TypeEnv, sigs: dict[str, tuple[tuple[object, .
             result = check_node(stmt, env, sigs)
         return result
 
-    # Everything else (ask, spawn, with, etc.) → permissive
+    if isinstance(node, SpawnExpr):
+        check_node(node.tasks, env, sigs)
+        return TAny()
+
+    # Everything else (ask, with, etc.) → permissive
     return TAny()
 
 

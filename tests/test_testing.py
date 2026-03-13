@@ -253,7 +253,7 @@ test mock.ask_after_no_mock
         rc, out = self._run_test(tmp_path, code)
         assert rc == 1, out
         assert "FAIL" in out
-        assert "mock_ask" in out
+        assert "without mock" in out
         # Second test should still run and pass
         assert "PASS  mock.ask_after_no_mock" in out
         assert "1/2 passed" in out
@@ -267,40 +267,37 @@ define helper.gather
   returns: list "results"
 
 implement helper.gather
-  let a = spawn
-    "fetch A"
-  let b = spawn
-    "fetch B"
+  let a = spawn [{prompt: "fetch A"}]
+  let b = spawn [{prompt: "fetch B"}]
   return [a, b]
 
 test mock.spawn_basic
   mock_spawn(["ra", "rb"])
   let r = helper.gather()
-  assert r == ["ra", "rb"]
+  assert r == [["ra"], ["rb"]]
 """
         rc, out = self._run_test(tmp_path, code)
         assert rc == 0, out
         assert "PASS" in out
 
     def test_mock_spawn_empty_list(self, tmp_path: Path) -> None:
-        """mock_spawn([]) queues nothing — spawn returns a handle string."""
+        """mock_spawn([]) queues nothing — spawn returns a list of handles."""
         code = """\
 define helper.one_spawn
   "spawns once"
-  returns: text "result"
+  returns: list "result"
 
 implement helper.one_spawn
-  let a = spawn
-    "fetch"
+  let a = spawn [{prompt: "fetch"}]
   return a
 
 test mock.spawn_empty
   mock_spawn([])
   let r = helper.one_spawn()
-  assert r == "should not match handle"
+  assert r == "should not match handle list"
 """
         rc, out = self._run_test(tmp_path, code)
-        # spawn without queued response returns a handle string, assertion fails
+        # spawn without queued response returns a list of handles, assertion fails
         assert rc == 1, out
         assert "FAIL" in out
 

@@ -240,13 +240,21 @@ let replaced = old_text |> fn(t) -> text.replace(template, "{name}", t)
 
 ### if / else
 
-Expression-oriented — returns a value.
+Expression-oriented — returns a value. Two forms: block and inline.
+
+**Block form** (multi-line):
 
 ```
 let status = if count > 0
   "has items"
 else
   "empty"
+```
+
+**Inline form** (single-line):
+
+```
+let status = if count > 0 "has items" else "empty"
 ```
 
 `else` is required when used as an expression. When used as a statement (return value ignored), `else` is optional.
@@ -425,101 +433,50 @@ Multiple `ask`s in one function work naturally — each one suspends, waits for 
 
 ### spawn (sub-agent delegation)
 
-Delegates a reasoning task to a sub-agent. Like `ask`, it suspends execution for the orchestrator. The difference: the orchestrator tells the main agent to spawn a sub-agent rather than answering directly.
+Delegates reasoning tasks to sub-agents. Unlike `ask` (which the main agent answers directly), `spawn` tells the orchestrator to create sub-agents. Spawn takes a list of task maps and blocks until all responses arrive, returning a list of results.
 
 ```
-let analysis = spawn
-  "Analyze this article for potential bias"
+let [analysis] = spawn [{
+  prompt: "Analyze this article for potential bias",
   context: article_text
-  expects: {bias_score: number, reasoning: text}
+}]
+```
+
+Multiple sub-agents in parallel:
+
+```
+let [bias, tone] = spawn [
+  {prompt: "check bias", context: article1},
+  {prompt: "check tone", context: article2}
+]
 ```
 
 With forked context (sub-agent inherits conversation history):
 
 ```
-let analysis = spawn
-  "Given our earlier discussion, analyze this article"
-  context: article_text
+let [analysis] = spawn [{
+  prompt: "Given our earlier discussion, analyze this article",
+  context: article_text,
   fork: true
-  expects: {bias_score: number, reasoning: text}
+}]
 ```
 
-Components:
-- **Prompt**: the task for the sub-agent
-- **context**: data the sub-agent needs (any Lumon value)
+Each task map has these keys:
+- **prompt** (required): the task for the sub-agent
+- **context** (optional): data the sub-agent needs (any Lumon value)
 - **fork** (optional, default `false`): if `true`, sub-agent inherits the main agent's conversation history
-- **expects**: response shape, validated same as `ask`
+- **expects** (optional): response shape hint
+
+Spawn always returns a **list** of responses, one per task map entry.
 
 **`ask` vs `spawn`:**
 
 | | `ask` | `spawn` |
 | :---- | :---- | :---- |
-| Who responds | The main agent directly | A sub-agent spawned by the main agent |
+| Who responds | The main agent directly | Sub-agents spawned by the main agent |
 | Context | Main agent's full conversation | Fresh (default) or forked |
 | Use case | Judgment calls in a workflow | Independent reasoning tasks |
-
-### async / await
-
-Unified parallelism model. Everything runs in an event loop internally. All calls **auto-await by default** — code reads like synchronous pseudocode. `async` suppresses auto-await and returns a handle. `await` / `await_all` collects handles explicitly.
-
-No colored functions — `ask`, `spawn`, plugin calls, and user-authored functions all behave the same way under the hood.
-
-Safe by construction: since all bindings are immutable, parallel execution cannot produce race conditions.
-
-**Default behavior (auto-await) — reads like synchronous code:**
-
-```
-let page = web.fetch("url")       -- auto-awaited, page is the result
-let items = inbox.read()          -- auto-awaited
-let decision = ask                -- auto-awaited
-  "Which item first?"
-  context: items
-  expects: {action: text}
-```
-
-**Parallel I/O — `async` suppresses auto-await:**
-
-```
-let h1 = async web.fetch("url1")  -- fires, returns handle
-let h2 = async web.fetch("url2")  -- fires, returns handle
-let h3 = async web.fetch("url3")  -- fires, returns handle
-let pages = await_all [h1, h2, h3]
-```
-
-**Parallel spawns:**
-
-```
-let h1 = spawn "check bias" context: article1 expects: {score: number}
-let h2 = spawn "check tone" context: article2 expects: {tone: text}
--- both sub-agents start immediately (spawn never auto-awaits)
-
--- do other deterministic work while they reason...
-let header = "# Analysis Report\n\n"
-
-let bias = await h1
-let tone = await h2
-return header + "Bias: \(bias.score), Tone: \(tone.tone)"
-```
-
-**Batch pattern:**
-
-```
-let handles = urls |> list.map(fn(u) -> async web.fetch(u))
-let pages = await_all handles
--- pages is a list of results, same order as handles
-```
-
-**Auto-await rules:**
-- Regular function calls: auto-awaited (result is the value, not a handle)
-- `async f()`: returns a handle, does not wait
-- `spawn`: always returns a handle (never auto-awaits — it's inherently deferred)
-- `ask`: auto-awaited by default (you almost always want the response immediately)
-- `await`: explicitly resolves a handle to its value
-- `await_all`: resolves a list of handles to a list of values
-
-All function calls auto-await by default — code reads like synchronous pseudocode. `async` suppresses auto-await, returning a handle instead. `await` resolves a single handle, `await_all` resolves a list.
-
-Currently the interpreter is fully sequential — `async`/`await` are no-ops. True parallel execution is a future addition.
+| Returns | Single value | List of values |
 
 ---
 
@@ -944,6 +901,8 @@ let msg = "total: \(n * 2 + 1)"       -- "total: 7"
 | `list.reverse` | `(items: list<a>) -> list<a>` | Reverse order |
 | `list.flatten` | `(items: list<list<a>>) -> list<a>` | Flatten one level of nesting |
 | `list.head` | `(items: list<a>) -> a \| none` | First item (or none) |
+| `list.first` | `(items: list<a>) -> a \| none` | Alias for `list.head` |
+| `list.get` | `(items: list<a>, index: number) -> a \| none` | Item at index (or none if out of bounds) |
 | `list.tail` | `(items: list<a>) -> list<a>` | All items except first |
 | `list.concat` | `(first: list<a>, second: list<a>) -> list<a>` | Concatenate two lists |
 | `list.find` | `(items: list<a>, f: fn(a) -> bool) -> a \| none` | First item matching predicate |
@@ -1022,10 +981,11 @@ All timestamps are Unix epoch milliseconds (UTC).
 | :---- | :---- | :---- |
 | `time.now` | `() -> number` | Current UTC timestamp in milliseconds |
 | `time.wait` | `(ms: number) -> none` | Sleep for ms; error if ms < 0 or > 60000 |
-| `time.format` | `(timestamp: number, pattern: text) -> text` | Format timestamp with strftime pattern |
+| `time.format` | `(timestamp: number, pattern: text, timezone?: text) -> text` | Format timestamp with strftime pattern; optional IANA timezone (e.g. "America/Los_Angeles") |
 | `time.parse` | `(text: text, pattern: text) -> number \| none` | Parse date string to timestamp (none on failure) |
 | `time.since` | `(timestamp: number) -> number` | Milliseconds elapsed since timestamp |
 | `time.date` | `() -> map` | Current UTC date as {year, month, day, hour, minute, second} |
+| `time.date_local` | `(timezone: text) -> map` | Current date in IANA timezone as {year, month, day, hour, minute, second} |
 | `time.add` | `(timestamp: number, ms: number) -> number` | Add ms to timestamp |
 | `time.diff` | `(a: number, b: number) -> number` | Difference a - b in milliseconds |
 | `time.timeout` | `(ms: number, fn() -> a) -> :ok(a) \| :timeout` | Run fn with timeout; error if ms < 0 or > 60000 |
@@ -1110,7 +1070,7 @@ The checker:
 2. **Infers local types** in `implement` blocks from literals, function return types, and operations — no annotations needed on locals
 3. **Verifies operators** are applied to compatible types (e.g., `+` requires number+number or text+text)
 4. **Checks list homogeneity** — all elements must be the same type
-5. **Checks structural map access** — `.field` must exist and yields the field's type
+5. **Checks structural map access** — `.field` on a structural map must exist and yields the field's type. `.field` on a non-map value returns `none` (safe for `??` fallback)
 6. **Checks tag exhaustiveness** — `match` on a value with a known tag set must cover all tags (or use `_`)
 7. **Propagates type unions** — if `io.read` returns `:ok(text) | :error(text)`, the binding inherits that union, and using it without matching is a type error
 
@@ -1233,7 +1193,7 @@ The agent reads the context file, reasons about it, writes a response to the res
 
 ```bash
 echo '{"action": "process", "item": "Pay bill"}' > .lumon_comm/a3f2e1b9/ask_response.json
-lumon respond
+lumon respond a3f2e1b9
 ```
 
 This returns the next output — another ask, a spawn batch, or a final result.
@@ -1260,7 +1220,7 @@ The agent reads context files, spawns sub-agents, and writes responses to the in
 
 ```bash
 echo '{"bias": 0.3, "summary": "..."}' > .lumon_comm/a3f2e1b9/spawn_0_response.json
-lumon respond
+lumon respond a3f2e1b9
 ```
 
 ### File-based communication
@@ -1270,7 +1230,7 @@ When execution suspends (ask or spawn), Lumon writes large context data to files
 - **Context files** (e.g. `spawn_0_context.json`, `ask_context.json`) — written by Lumon, read by the agent
 - **Response files** (e.g. `spawn_0_response.json`, `ask_response.json`) — written by the agent, read by Lumon on `lumon respond`
 
-The session ID is an 8-character hex string, unique per execution. It's included in the output so the orchestrator knows which directory to use.
+The session ID is an 8-character hex string, unique per execution. It's included in the output so the orchestrator knows which directory to use. Pass it to `lumon respond <session>` to resume execution.
 
 ### Suspension and resumption
 
@@ -1285,21 +1245,19 @@ If a Lumon script is run from a file and already has a pending session (an ask o
 ```json
 {
   "type": "error",
-  "message": "Script has pending session a3f2e1b9. Use 'lumon respond' to resume or 'lumon respond --clear' to discard."
+  "message": "Script has pending session a3f2e1b9. Use 'lumon respond' to resume or 'lumon respond --cancel' to discard."
 }
 ```
 
-This prevents accidental re-execution that would silently discard in-progress work. The agent must explicitly respond (`lumon respond`) or clear the session (`lumon respond --clear`).
+This prevents accidental re-execution that would silently discard in-progress work. The agent must explicitly respond (`lumon respond`) or cancel the session (`lumon respond --cancel`).
 
 - **File-based runs only** — inline code and stdin are not tracked
 - **Script marker file** — `script.txt` in the session directory associates it with the source script
-- **Clear a session** — `lumon respond --clear` discards the session without resuming; auto-detects if only one session exists
+- **Cancel a session** — `lumon respond --cancel` discards the session without resuming; auto-detects if only one session exists
 
 ### Concurrency
 
-Everything runs in an event loop internally. All calls auto-await by default — code reads like synchronous pseudocode. `async` suppresses auto-await, returning a handle. `await` / `await_all` resolves handles. `spawn` always returns a handle. See section 4 for full details.
-
-**Implementation priority:** starts fully sequential (auto-await is a no-op since everything is already synchronous). Event loop parallelism added late in v0 once the core language is stable.
+All code runs sequentially except `spawn`, which fires parallel sub-agents and blocks until all respond. See section 4 for full details.
 
 ### Error model
 
@@ -1344,7 +1302,7 @@ The agent reads interpreter errors like a developer reads a traceback — functi
 
 ```
 let, define, implement, test, takes, returns, return, match, if, else,
-with, then, ask, spawn, fork, context, expects, async, await, await_all,
+with, then, ask, spawn, fork, context, expects,
 fn, assert, true, false, none, and, or, not
 ```
 
@@ -1371,12 +1329,9 @@ binding      = "let" name "=" expression
 return       = "return" expression
 assert       = "assert" expression
 
-expression   = ask_expr | spawn_expr | async_expr | await_expr | await_all_expr | with_expr | match_expr | if_expr | lambda | pipe | binary | call | access | literal | name
+expression   = ask_expr | spawn_expr | with_expr | match_expr | if_expr | lambda | pipe | binary | call | access | literal | name
 ask_expr     = "ask" text ["context:" expression] ["expects:" type_shape]
-spawn_expr   = "spawn" text ["context:" expression] ["fork:" bool] ["expects:" type_shape]
-async_expr   = "async" call
-await_expr   = "await" expression
-await_all    = "await_all" expression
+spawn_expr   = "spawn" expression  -- expression must evaluate to a list of task maps
 with_expr    = "with" (name "=" expression)+ "then" expression "else" expression
 pipe         = expression "|>" call
 match_expr   = "match" expression (pattern ["if" expression] "->" (expression | NEWLINE INDENT body DEDENT))+
@@ -1656,7 +1611,7 @@ implement inbox.process_and_enrich
 
 ### 9. Parallel sub-agents with spawn and ask
 
-Combines `spawn` for parallel independent reasoning, `await_all` to collect results, and `ask` for a judgment call by the main agent. Shows the full code → agent → code → agent → code flow.
+Combines `spawn` for parallel independent reasoning and `ask` for a judgment call by the main agent. Shows the full code → agent → code → agent → code flow.
 
 ```
 define news.analyze_and_curate
@@ -1674,16 +1629,10 @@ implement news.analyze_and_curate
       let articles = raw |> text.split("\n---\n")
 
       -- Spawn sub-agents to analyze each article (all run in parallel)
-      let handles = articles
-        |> list.map(fn(a) ->
-          spawn
-            "Analyze this article for bias and extract key claims"
-            context: a
-            expects: {bias: number, claims: list, summary: text, source: text}
-        )
-
-      -- Collect all results
-      let analyses = await_all handles
+      let analyses = spawn (articles |> list.map(fn(a) -> {
+        prompt: "Analyze this article for bias and extract key claims",
+        context: a
+      }))
 
       -- Ask main agent to curate (judgment call)
       let curated = ask

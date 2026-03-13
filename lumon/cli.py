@@ -6,7 +6,6 @@ import argparse
 import importlib.resources
 import json
 import os
-import signal
 import sys
 from pathlib import Path
 
@@ -16,10 +15,11 @@ from lumon.ast_nodes import TestBlock
 from lumon.backends import MemoryFS, MemoryGit, RealFS, RealGit
 from lumon.builtins import register_builtins
 from lumon.environment import Environment
-from lumon.errors import AskSignal, LumonError, ReturnSignal
+from lumon.errors import AskSignal, LumonError, ReturnSignal, SpawnBatchSignal
 from lumon.evaluator import eval_node
 from lumon.daemon import (
     SuspendEvent,
+    _kill_daemon,
     cleanup_stale_sessions,
     is_daemon_alive,
     read_daemon_output,
@@ -30,7 +30,7 @@ from lumon.interpreter import (
     _setup_plugins,
     cleanup_comm_dir,
     generate_session_id,
-    interpret_with_suspend,
+    interpret,
 )
 from lumon.parser import parse
 from lumon.plugins import disk_manifest_namespaces, load_config, split_contracts
@@ -60,31 +60,10 @@ def _save_script_marker(comm_dir: str, script: str) -> None:
         f.write(script)
 
 
-def _find_session() -> str | None:
-    """Find the single active session, if any."""
-    if not os.path.isdir(_COMM_BASE):
-        return None
-    sessions = [
-        d for d in os.listdir(_COMM_BASE)
-        if os.path.isdir(os.path.join(_COMM_BASE, d))
-    ]
-    if len(sessions) == 1:
-        return sessions[0]
-    return None
-
-
 def _clear_state(session: str) -> None:
     """Remove a session directory (kill daemon if alive)."""
     comm_dir = _comm_dir_for_session(session)
-    # Try to kill daemon process
-    pid_file = os.path.join(comm_dir, "pid")
-    if os.path.isfile(pid_file):
-        try:
-            with open(pid_file, encoding="utf-8") as f:
-                pid = int(f.read().strip())
-            os.kill(pid, signal.SIGKILL)
-        except (ValueError, ProcessLookupError, PermissionError, OSError):
-            pass
+    _kill_daemon(comm_dir)
     cleanup_comm_dir(comm_dir)
 
 
@@ -174,7 +153,7 @@ def cmd_run_code(code: str, *, script: str | None = None) -> int:
         if pending:
             msg = (
                 f"Script has pending session {pending}. "
-                f"Use 'lumon respond' to resume or 'lumon respond --clear' to discard."
+                f"Use 'lumon respond {pending}' to resume or 'lumon respond {pending} --cancel' to discard."
             )
             result: dict[str, object] = {"type": "error", "message": msg}
             print(json.dumps(result, ensure_ascii=False))
@@ -187,10 +166,10 @@ def cmd_run_code(code: str, *, script: str | None = None) -> int:
     comm_dir = _comm_dir_for_session(session)
 
     io_backend = RealFS(".")
-    git_backend = RealGit(_project_root or ".")
+    git_backend = RealGit(_STATE["project_root"] or ".")
 
     def run_fn(suspend: SuspendEvent) -> dict:
-        return interpret_with_suspend(
+        return interpret(
             code,
             io_backend=io_backend,
             git_backend=git_backend,
@@ -219,25 +198,18 @@ def cmd_respond(args: argparse.Namespace) -> int:
     """Resume suspended execution by reading output from the daemon process."""
     session: str | None = getattr(args, "session", None)
 
-    # Auto-detect session if not provided
-    if not session:
-        session = _find_session()
-
-    # Handle --clear before checking for daemon
-    if getattr(args, "clear", False):
-        if not session:
-            print("error: no pending session to clear", file=sys.stderr)
-            return 1
-        _clear_state(session)
-        print(json.dumps({"type": "result", "value": f"Session {session} cleared."}))
-        return 0
-
     if not session:
         print(
-            "error: no suspended execution — run some Lumon code first",
+            "error: session ID required — pass the session ID from the suspension output",
             file=sys.stderr,
         )
         return 1
+
+    # Handle --cancel before checking for daemon
+    if getattr(args, "cancel", False):
+        _clear_state(session)
+        print(json.dumps({"type": "result", "value": f"Session {session} cancelled."}))
+        return 0
 
     comm_dir = _comm_dir_for_session(session)
 
@@ -248,8 +220,19 @@ def cmd_respond(args: argparse.Namespace) -> int:
         )
         return 1
 
-    # Check if daemon is alive
-    if not is_daemon_alive(comm_dir):
+    # Check for output already written by the daemon (daemon may have
+    # finished before respond was called — e.g. it auto-consumed spawn
+    # response files the agent wrote).
+    output_path = os.path.join(comm_dir, "output.json")
+    if os.path.isfile(output_path):
+        with open(output_path, encoding="utf-8") as f:
+            result = json.load(f)
+        try:
+            os.remove(output_path)
+        except OSError:
+            pass
+    elif not is_daemon_alive(comm_dir):
+        # No output and daemon is dead — unrecoverable
         print(
             f"error: daemon for session '{session}' is not running (process died). "
             f"Re-run the script to start a new session.",
@@ -257,9 +240,9 @@ def cmd_respond(args: argparse.Namespace) -> int:
         )
         cleanup_comm_dir(comm_dir)
         return 1
-
-    # Read output from daemon (polls for output.json)
-    result = read_daemon_output(comm_dir, timeout=60)
+    else:
+        # Daemon is alive — wait for it to produce output
+        result = read_daemon_output(comm_dir, timeout=args.timeout)
     if result is None:
         print(
             f"error: timed out waiting for daemon output for session '{session}'",
@@ -556,15 +539,13 @@ def cmd_test(args: argparse.Namespace) -> int:
                         test_fs.clear()
                         plugin_mocks.clear()
                         env._response_queue.clear()
-                        env._pending_spawns.clear()
-                        env._spawn_counter[0] = 0
                         test_env = env.child_scope()
                         for stmt in test.body:
                             eval_node(stmt, test_env)
                         print(f"  PASS  {test.name}")
                         passed += 1
-                    except AskSignal:
-                        print(f"  FAIL  {test.name}: ask expression reached without mock_ask")
+                    except (AskSignal, SpawnBatchSignal):
+                        print(f"  FAIL  {test.name}: ask/spawn reached without mock")
                         failed += 1
                     except (LumonError, ReturnSignal) as e:
                         msg = str(e) if isinstance(e, LumonError) else "unexpected return"
@@ -722,17 +703,16 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
-_project_root: str = ""
+_STATE: dict[str, str] = {"project_root": ""}
 
 
 def _apply_working_dir() -> None:
     """Extract and apply --working-dir before argparse runs.
 
-    Saves the original directory as *_project_root* so that git commands
-    run from the project root rather than the sandbox.
+    Saves the original directory in ``_STATE["project_root"]`` so that git
+    commands run from the project root rather than the sandbox.
     """
-    global _project_root  # noqa: PLW0603
-    _project_root = os.getcwd()
+    _STATE["project_root"] = os.getcwd()
     for i, arg in enumerate(sys.argv[1:], start=1):
         if arg == "--working-dir" and i + 1 < len(sys.argv):
             wd = sys.argv[i + 1]
@@ -808,7 +788,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "From stdin:  echo 'return 42' | lumon\n"
             "Browse:      lumon browse [<namespace>]\n"
             "Test:        lumon test [<namespace>]\n"
-            "Respond:     lumon respond [<session>]\n"
+            "Respond:     lumon respond <session>\n"
             "Deploy:      lumon deploy <target>\n"
             "Spec:        lumon spec"
         ),
@@ -851,20 +831,24 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Resume suspended execution (after ask/spawn).",
         description=(
             "Resume a suspended Lumon execution by reading response files\n"
-            "from .lumon_comm/<session>/. The session ID is auto-detected\n"
-            "if there is exactly one active session."
+            "from .lumon_comm/<session>/. The session ID comes from the\n"
+            "suspension output (ask or spawn_batch)."
         ),
     )
     p_respond.add_argument(
         "session",
-        nargs="?",
-        default=None,
-        help="Session ID to respond to (auto-detected if omitted).",
+        help="Session ID from the suspension output.",
     )
     p_respond.add_argument(
-        "--clear",
+        "--cancel",
         action="store_true",
         help="Discard a pending session instead of resuming it.",
+    )
+    p_respond.add_argument(
+        "--timeout",
+        type=int,
+        default=3600,
+        help="Seconds to wait for daemon output (default: 3600).",
     )
 
     # deploy

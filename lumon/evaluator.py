@@ -5,9 +5,6 @@ from __future__ import annotations
 from lumon.ast_nodes import (
     AskExpr,
     AssertStatement,
-    AsyncExpr,
-    AwaitAllExpr,
-    AwaitExpr,
     BinaryOp,
     BindPattern,
     Block,
@@ -49,7 +46,7 @@ from lumon.ast_nodes import (
     WithExpr,
 )
 from lumon.environment import Environment
-from lumon.errors import AskSignal, LumonError, ReturnSignal
+from lumon.errors import AskSignal, LumonError, ReturnSignal, SpawnBatchSignal
 from lumon.plugins import validate_contracts
 from lumon.serializer import serialize
 from lumon.values import LumonFunction, LumonTag, is_truthy
@@ -151,12 +148,6 @@ def eval_node(node: object, env: Environment) -> object:
             return _eval_ask(node, env)
         case SpawnExpr():
             return _eval_spawn(node, env)
-        case AsyncExpr(expr=expr):
-            return eval_node(expr, env)
-        case AwaitExpr(expr=expr):
-            return eval_node(expr, env)
-        case AwaitAllExpr(expr=expr):
-            return eval_node(expr, env)
 
         # --- Program ---
         case Program(statements=stmts):
@@ -364,8 +355,8 @@ def _eval_field_access(obj_node: object, field: str, env: Environment) -> object
     if isinstance(obj, dict):
         if field in obj:
             return obj[field]
-        raise LumonError(f"Field '{field}' not found on map")
-    raise LumonError(f"Cannot access field '{field}' on {_type_name(obj)}")
+        return None
+    return None  # Non-map field access returns none (safe for ?? fallback)
 
 
 def _make_user_fn_ref(ns_path: str, env: Environment) -> LumonFunction:
@@ -528,9 +519,12 @@ def _call_user_function(
         prev_plugin_instance = env._active_plugin["instance"]
         prev_plugin_env = env._active_plugin["env"]
         if plugin_dir is not None:
+            instance = env._plugin_instances.get(name) or ""
             env._active_plugin["dir"] = plugin_dir
-            env._active_plugin["instance"] = env._plugin_instances.get(name)
+            env._active_plugin["instance"] = instance
             env._active_plugin["env"] = env._plugin_env_vars.get(name) or None
+            # Track that this plugin instance was used (for shutdown signaling)
+            env._used_plugins.add((plugin_dir, instance))
 
         try:
             result = None
@@ -729,25 +723,49 @@ def _eval_ask(node: AskExpr, env: Environment) -> object:
 
 
 def _eval_spawn(node: SpawnExpr, env: Environment) -> object:
-    # If a response has been queued (replay mode), return it directly.
-    queued = env.consume_response()
-    if queued is not None:
-        return queued[0]
+    tasks = eval_node(node.tasks, env)
+    if not isinstance(tasks, list):
+        raise LumonError("spawn requires a list of task maps")
 
-    prompt = eval_node(node.prompt, env) if node.prompt else ""
-    context = eval_node(node.context, env) if node.context else None
-    fork = eval_node(node.fork, env) if node.fork else False
-    expects = node.expects
+    if not tasks:
+        return []
 
-    envelope: dict[str, object] = {
-        "prompt": prompt,
-    }
-    if context is not None:
-        envelope["context"] = serialize(context)
-    if fork is not None:
-        envelope["fork"] = fork
-    if expects is not None:
-        envelope["expects"] = expects
+    # Test/replay mode: consume responses from queue
+    first = env.consume_response()
+    if first is not None:
+        results: list[object] = [first[0]]
+        for _ in range(1, len(tasks)):
+            q = env.consume_response()
+            if q is None:
+                raise LumonError("spawn: not enough mock responses queued")
+            results.append(q[0])
+        return results
 
-    # Register spawn and return handle — don't halt execution
-    return env.register_spawn(envelope)
+    # Build envelopes
+    envelopes: list[dict] = []
+    for task in tasks:
+        if not isinstance(task, dict):
+            raise LumonError("spawn: each task must be a map with a 'prompt' key")
+        if "prompt" not in task:
+            raise LumonError("spawn: each task must have a 'prompt' key")
+        prompt = task["prompt"]
+        context = task.get("context")
+        fork = task.get("fork")
+        expects = task.get("expects")
+
+        envelope: dict[str, object] = {"prompt": prompt}
+        if context is not None:
+            envelope["context"] = serialize(context)
+        if fork:
+            envelope["fork"] = fork
+        if expects is not None:
+            envelope["expects"] = expects
+        envelopes.append(envelope)
+
+    # Daemon mode: flush via callback — blocks until all responses arrive
+    if env._spawn_flush_callback is not None:
+        responses = env._spawn_flush_callback(envelopes)
+        return list(responses)
+
+    # Non-daemon mode: signal suspension
+    raise SpawnBatchSignal(envelopes)

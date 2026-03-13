@@ -35,7 +35,15 @@ Review the changes. Make sure only intentional changes are present.
 
 ### 2. Stage files
 
-Stage specific files — never stage everything blindly. Paths are relative to the **project root**:
+**Preferred: stage all tracked changes at once:**
+
+```bash
+lumon --working-dir sandbox 'return git.add_all()'
+```
+
+This stages all modified and deleted tracked files. Use this for the common case where you've reviewed `git.diff()` and want to commit everything.
+
+**Selective staging** — when you need to commit only some changes, stage individual files (paths relative to the **project root**):
 
 ```bash
 lumon --working-dir sandbox 'return git.add("sandbox/lumon/manifests/inbox.lumon")'
@@ -149,7 +157,7 @@ This unstages the file but keeps your changes in the working tree.
 1. Write code (manifests, impls, tests)
 2. Test:   lumon --working-dir sandbox test <ns>
 3. Review: git.status() → git.diff()
-4. Stage:  git.add("sandbox/path/to/file") for each file
+4. Stage:  git.add_all() or git.add("sandbox/path/to/file") per file
 5. Commit: git.commit("Clear message")
 6. Repeat
 ```

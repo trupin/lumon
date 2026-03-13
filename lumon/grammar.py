@@ -20,10 +20,10 @@ return_stmt: "return" expression
 // === Define / Implement ===
 define_block: "define" namespace_path _NL _INDENT description _NL takes_clause? _NL? returns_clause _NL _DEDENT
 description: ESCAPED_STRING | TRIPLE_STRING
-takes_clause: "takes:" _NL _INDENT param_def+ _DEDENT
-            | "takes:" _NL
+takes_clause: "takes" ":" _NL _INDENT param_def+ _DEDENT
+            | "takes" ":" _NL
 param_def: IDENT ":" type_expr ESCAPED_STRING ("=" expression)? _NL
-returns_clause: "returns:" type_expr ESCAPED_STRING
+returns_clause: "returns" ":" type_expr ESCAPED_STRING
 
 implement_block: "implement" namespace_path _NL _INDENT impl_body _DEDENT
 impl_body: (impl_statement _NL)* impl_statement?
@@ -77,9 +77,6 @@ assert_stmt: "assert" expression
         | with_expr
         | ask_expr
         | spawn_expr
-        | "async" expression -> async_expr
-        | "await_all" expression -> await_all_expr
-        | "await" expression -> await_expr
         | function_call
         | tag_literal
         | list_literal
@@ -101,7 +98,7 @@ namespace_ref: namespace_path
 
 !_ident_or_kw: IDENT | FN_KW | "let" | "define" | "implement" | "test" | "return"
              | "match" | "if" | "else" | "with" | "then" | "ask" | "spawn"
-             | "async" | "await" | "await_all" | "not" | "and" | "or"
+             | "not" | "and" | "or"
              | "true" | "false" | "none"
              | "takes" | "returns" | "fork" | "context" | "expects" | "assert"
 
@@ -110,7 +107,7 @@ tag_literal: ":" IDENT ("(" expression ")")?
 list_literal: "[" (expression ("," expression)*)? "]"
 map_literal: "{" (map_entry ("," map_entry)*)? "}"
 ?map_entry: "..." expression -> spread_entry
-          | IDENT ":" expression -> kv_entry
+          | _ident_or_kw ":" expression -> kv_entry
 
 // === Control flow ===
 inline_if_expr: "if" expression expression "else" expression
@@ -169,15 +166,10 @@ with_binding: IDENT "=" expression _NL
 ask_expr: "ask" _NL _INDENT ask_body _DEDENT
 ask_body: (ESCAPED_STRING | TRIPLE_STRING) _NL ask_fields
 ask_fields: (ask_context _NL)? (ask_expects _NL)?
-ask_context: "context:" expression
-ask_expects: "expects:" type_expr
+ask_context: "context" ":" expression
+ask_expects: "expects" ":" type_expr
 
-spawn_expr: "spawn" _NL _INDENT spawn_body _DEDENT
-spawn_body: (ESCAPED_STRING | TRIPLE_STRING) _NL spawn_fields
-spawn_fields: (spawn_context _NL)? (spawn_fork _NL)? (spawn_expects _NL)?
-spawn_context: "context:" expression
-spawn_fork: "fork:" expression
-spawn_expects: "expects:" type_expr
+spawn_expr: "spawn" expression
 
 // === Type expressions ===
 ?type_expr: type_union
@@ -213,7 +205,7 @@ FN_KW: "fn"
 %declare _INDENT _DEDENT
 _NL: /(\r?\n[\t ]*)+/
 
-IDENT: /(?!(?:let|define|implement|test|takes|returns|return|match|if|else|with|then|ask|spawn|fork|context|expects|async|await|await_all|assert|true|false|none|and|or|not)\b)[a-zA-Z_][a-zA-Z0-9_]*/
+IDENT: /(?!(?:let|define|implement|test|takes|returns|return|match|if|else|with|then|ask|spawn|fork|context|expects|assert|true|false|none|and|or|not)\b)[a-zA-Z_][a-zA-Z0-9_]*/
 NUMBER: /\d+(\.\d+)?/
 TRIPLE_STRING.2: /\"{3}[\s\S]*?\"{3}/
 ESCAPED_STRING: "\"" /([^\"\\]|\\[\\\"nrt]|\\\([^)]*\))*/ "\""

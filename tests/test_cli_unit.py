@@ -19,7 +19,6 @@ from lumon.cli import (
     _deploy_plugin_skills,
     _deploy_skills,
     _find_pending_daemon,
-    _find_session,
     _format_contract,
     _prompt_overwrite,
     _save_script_marker,
@@ -56,21 +55,24 @@ class TestSessionHelpers:
             _clear_state("abc12345")
         assert not os.path.isdir(comm_dir)
 
+    def test_clear_state_kills_daemon(self, tmp_path: object) -> None:
+        """_clear_state calls _kill_daemon when PID file exists."""
+        assert isinstance(tmp_path, os.PathLike)
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        comm_dir = os.path.join(comm_base, "abc12345")
+        os.makedirs(comm_dir)
+        with open(os.path.join(comm_dir, "pid"), "w") as f:
+            f.write("99999")
+        with patch("lumon.cli._COMM_BASE", comm_base), \
+             patch("lumon.cli._kill_daemon") as mock_kill:
+            _clear_state("abc12345")
+            mock_kill.assert_called_once_with(comm_dir)
+
     def test_clear_state_noop_if_missing(self, tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
         comm_base = os.path.join(str(tmp_path), ".lumon_comm")
         with patch("lumon.cli._COMM_BASE", comm_base):
             _clear_state("nonexistent")  # should not raise
-
-    def test_find_session(self, tmp_path: object) -> None:
-        assert isinstance(tmp_path, os.PathLike)
-        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
-        with patch("lumon.cli._COMM_BASE", comm_base):
-            assert _find_session() is None
-            comm_dir = os.path.join(comm_base, "abc12345")
-            os.makedirs(comm_dir)
-            assert _find_session() == "abc12345"
-
 
 class TestCmdVersion:
     def test_prints_version(self, capsys: pytest.CaptureFixture[str]) -> None:
@@ -144,15 +146,12 @@ class TestCmdRunCode:
 
 
 class TestCmdRespond:
-    def test_no_state_error(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        assert isinstance(tmp_path, os.PathLike)
-        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
-        with patch("lumon.cli._COMM_BASE", comm_base):
-            args = argparse.Namespace(session=None)
-            result = cmd_respond(args)
+    def test_no_session_error(self, capsys: pytest.CaptureFixture[str]) -> None:
+        args = argparse.Namespace(session=None, cancel=False, timeout=3600)
+        result = cmd_respond(args)
         assert result == 1
         captured = capsys.readouterr()
-        assert "no suspended execution" in captured.err
+        assert "session ID required" in captured.err
 
     def test_dead_daemon_error(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
         """Respond errors if daemon is dead."""
@@ -164,7 +163,7 @@ class TestCmdRespond:
         with open(os.path.join(comm_dir, "pid"), "w") as f:
             f.write("999999999")
         with patch("lumon.cli._COMM_BASE", comm_base):
-            args = argparse.Namespace(session="abc12345", clear=False)
+            args = argparse.Namespace(session="abc12345", cancel=False, timeout=3600)
             result = cmd_respond(args)
         assert result == 1
         captured = capsys.readouterr()
@@ -195,7 +194,7 @@ class TestCmdRespond:
 
                 # Step 3: Respond — daemon should pick up response
                 capsys.readouterr()
-                args = argparse.Namespace(session=session, clear=False)
+                args = argparse.Namespace(session=session, cancel=False, timeout=3600)
                 result = cmd_respond(args)
             finally:
                 os.chdir(old_cwd)
@@ -231,7 +230,7 @@ class TestRespondDaemon:
 
                 # Step 3: Respond
                 capsys.readouterr()
-                args = argparse.Namespace(session=session, clear=False)
+                args = argparse.Namespace(session=session, cancel=False, timeout=3600)
                 result = cmd_respond(args)
             finally:
                 os.chdir(old_cwd)
@@ -245,7 +244,7 @@ class TestRespondDaemon:
         """Full spawn → respond cycle using daemon model."""
         assert isinstance(tmp_path, os.PathLike)
         comm_base = os.path.join(str(tmp_path), ".lumon_comm")
-        code = 'let a = spawn\n  "Task A"\nlet b = spawn\n  "Task B"\nreturn [a, b]'
+        code = 'let results = spawn [{prompt: "Task A"}, {prompt: "Task B"}]\nreturn results'
         with patch("lumon.cli._COMM_BASE", comm_base):
             old_cwd = os.getcwd()
             os.chdir(str(tmp_path))
@@ -265,7 +264,7 @@ class TestRespondDaemon:
                         json.dump(resp, f)
 
                 capsys.readouterr()
-                args = argparse.Namespace(session=session, clear=False)
+                args = argparse.Namespace(session=session, cancel=False, timeout=3600)
                 result = cmd_respond(args)
             finally:
                 os.chdir(old_cwd)
@@ -279,7 +278,7 @@ class TestRespondDaemon:
         """Spawn responses with {result: ..., spawn_id: N} wrappers are unwrapped."""
         assert isinstance(tmp_path, os.PathLike)
         comm_base = os.path.join(str(tmp_path), ".lumon_comm")
-        code = 'let a = spawn\n  "Task A"\nlet b = spawn\n  "Task B"\nreturn [a, b]'
+        code = 'let results = spawn [{prompt: "Task A"}, {prompt: "Task B"}]\nreturn results'
         with patch("lumon.cli._COMM_BASE", comm_base):
             old_cwd = os.getcwd()
             os.chdir(str(tmp_path))
@@ -297,7 +296,7 @@ class TestRespondDaemon:
                         json.dump(resp, f)
 
                 capsys.readouterr()
-                args = argparse.Namespace(session=session, clear=False)
+                args = argparse.Namespace(session=session, cancel=False, timeout=3600)
                 result = cmd_respond(args)
             finally:
                 os.chdir(old_cwd)
@@ -327,15 +326,15 @@ class TestRespondDaemon:
                     json.dump("done", f)
 
                 capsys.readouterr()
-                args = argparse.Namespace(session=session, clear=False)
+                args = argparse.Namespace(session=session, cancel=False, timeout=3600)
                 cmd_respond(args)
             finally:
                 os.chdir(old_cwd)
         # Session directory should be cleaned up
         assert not os.path.isdir(comm_dir)
 
-    def test_respond_auto_detects_session(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        """When session is not specified, auto-detect the single active session."""
+    def test_respond_with_session_id(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """Respond works when session ID is provided explicitly."""
         assert isinstance(tmp_path, os.PathLike)
         comm_base = os.path.join(str(tmp_path), ".lumon_comm")
         with patch("lumon.cli._COMM_BASE", comm_base):
@@ -354,7 +353,7 @@ class TestRespondDaemon:
                     json.dump("auto", f)
 
                 capsys.readouterr()
-                args = argparse.Namespace(session=None, clear=False)
+                args = argparse.Namespace(session=session, cancel=False, timeout=3600)
                 result = cmd_respond(args)
             finally:
                 os.chdir(old_cwd)
@@ -362,6 +361,53 @@ class TestRespondDaemon:
         captured = capsys.readouterr()
         output = json.loads(captured.out)
         assert output["value"] == "auto"
+
+
+    def test_respond_reads_output_when_daemon_already_finished(
+        self, capsys: pytest.CaptureFixture[str], tmp_path: object,
+    ) -> None:
+        """respond reads output.json even if the daemon has already exited."""
+        assert isinstance(tmp_path, os.PathLike)
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        session = "deadbeef"
+        comm_dir = os.path.join(comm_base, session)
+        os.makedirs(comm_dir)
+
+        # Simulate daemon that already completed: pid file with dead PID, output.json present
+        with open(os.path.join(comm_dir, "pid"), "w") as f:
+            f.write("999999999")  # dead PID
+        with open(os.path.join(comm_dir, "output.json"), "w") as f:
+            json.dump({"type": "result", "value": ["spawn_result"]}, f)
+
+        with patch("lumon.cli._COMM_BASE", comm_base):
+            capsys.readouterr()
+            args = argparse.Namespace(session=session, cancel=False, timeout=3600)
+            result = cmd_respond(args)
+
+        assert result == 0
+        captured = capsys.readouterr()
+        output = json.loads(captured.out)
+        assert output["type"] == "result"
+        assert output["value"] == ["spawn_result"]
+        # Session should be cleaned up after completion
+        assert not os.path.isdir(comm_dir)
+
+    def test_respond_custom_timeout(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """--timeout flag is passed through to read_daemon_output."""
+        assert isinstance(tmp_path, os.PathLike)
+        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
+        session = "timeout_test"
+        comm_dir = os.path.join(comm_base, session)
+        os.makedirs(comm_dir)
+        with open(os.path.join(comm_dir, "pid"), "w") as f:
+            f.write(str(os.getpid()))
+
+        with patch("lumon.cli._COMM_BASE", comm_base), \
+             patch("lumon.cli.read_daemon_output", return_value=None) as mock_read:
+            capsys.readouterr()
+            args = argparse.Namespace(session=session, cancel=False, timeout=120)
+            cmd_respond(args)
+            mock_read.assert_called_once_with(comm_dir, timeout=120)
 
 
 class TestCmdBrowse:
@@ -933,23 +979,21 @@ class TestCLIMain:
         captured = capsys.readouterr()
         assert "No tests found" in captured.out
 
-    def test_main_respond_subcommand(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+    def test_main_respond_subcommand_no_session(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
-        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
         old_argv = sys.argv
         old_cwd = os.getcwd()
         sys.argv = ["lumon", "respond"]
         os.chdir(str(tmp_path))
         try:
-            with patch("lumon.cli._COMM_BASE", comm_base):
-                main()
+            main()
         except SystemExit:
             pass
         finally:
             sys.argv = old_argv
             os.chdir(old_cwd)
         captured = capsys.readouterr()
-        assert "no suspended execution" in captured.err
+        assert "required: session" in captured.err
 
     def test_main_deploy_subcommand(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
         assert isinstance(tmp_path, os.PathLike)
@@ -1093,8 +1137,8 @@ class TestPendingSessionDetection:
 
 
 class TestRespondClear:
-    def test_respond_clear_removes_session(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        """--clear removes a pending session."""
+    def test_respond_cancel_removes_session(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """--cancel removes a pending session."""
         assert isinstance(tmp_path, os.PathLike)
         comm_base = os.path.join(str(tmp_path), ".lumon_comm")
         comm_dir = os.path.join(comm_base, "sess1234")
@@ -1102,54 +1146,45 @@ class TestRespondClear:
         with open(os.path.join(comm_dir, "pid"), "w") as f:
             f.write("999999999")  # non-existent PID
         with patch("lumon.cli._COMM_BASE", comm_base):
-            args = argparse.Namespace(session="sess1234", clear=True)
+            args = argparse.Namespace(session="sess1234", cancel=True, timeout=3600)
             exit_code = cmd_respond(args)
         assert exit_code == 0
         captured = capsys.readouterr()
         output = json.loads(captured.out)
         assert output["type"] == "result"
-        assert "cleared" in output["value"]
+        assert "cancelled" in output["value"]
         assert not os.path.isdir(comm_dir)
 
-    def test_respond_clear_auto_detect(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        """--clear without session ID auto-detects the single active session."""
-        assert isinstance(tmp_path, os.PathLike)
-        comm_base = os.path.join(str(tmp_path), ".lumon_comm")
-        comm_dir = os.path.join(comm_base, "sess1234")
-        os.makedirs(comm_dir)
-        with patch("lumon.cli._COMM_BASE", comm_base):
-            args = argparse.Namespace(session=None, clear=True)
-            exit_code = cmd_respond(args)
-        assert exit_code == 0
+    def test_respond_cancel_requires_session(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """--cancel without session ID fails."""
+        args = argparse.Namespace(session=None, cancel=True, timeout=3600)
+        exit_code = cmd_respond(args)
+        assert exit_code == 1
         captured = capsys.readouterr()
-        output = json.loads(captured.out)
-        assert output["type"] == "result"
-        assert "sess1234" in output["value"]
+        assert "session ID required" in captured.err
 
-    def test_respond_clear_specific_session_with_multiple(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        """--clear with explicit session ID only clears that session."""
+    def test_respond_cancel_specific_session_with_multiple(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """--cancel with explicit session ID only cancels that session."""
         assert isinstance(tmp_path, os.PathLike)
         comm_base = os.path.join(str(tmp_path), ".lumon_comm")
         for sess in ("sess_a", "sess_b"):
             d = os.path.join(comm_base, sess)
             os.makedirs(d)
         with patch("lumon.cli._COMM_BASE", comm_base):
-            args = argparse.Namespace(session="sess_a", clear=True)
+            args = argparse.Namespace(session="sess_a", cancel=True, timeout=3600)
             exit_code = cmd_respond(args)
         assert exit_code == 0
         assert not os.path.isdir(os.path.join(comm_base, "sess_a"))
         assert os.path.isdir(os.path.join(comm_base, "sess_b"))
 
-    def test_respond_clear_no_session_error(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
-        """--clear with no sessions returns an error."""
+    def test_respond_cancel_nonexistent_session(self, capsys: pytest.CaptureFixture[str], tmp_path: object) -> None:
+        """--cancel with nonexistent session ID still succeeds (idempotent)."""
         assert isinstance(tmp_path, os.PathLike)
         comm_base = os.path.join(str(tmp_path), ".lumon_comm")
         with patch("lumon.cli._COMM_BASE", comm_base):
-            args = argparse.Namespace(session=None, clear=True)
+            args = argparse.Namespace(session="nonexistent", cancel=True, timeout=3600)
             exit_code = cmd_respond(args)
-        assert exit_code == 1
-        captured = capsys.readouterr()
-        assert "no pending session" in captured.err
+        assert exit_code == 0
 
 
 class TestScriptMarker:

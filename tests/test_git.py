@@ -73,6 +73,29 @@ class TestGitAdd:
 
 
 # ===================================================================
+# git.add_all
+# ===================================================================
+
+
+class TestGitAddAll:
+    def test_stages_all(self, run):
+        git = MockGit()
+        r = run("return git.add_all()", git=git)
+        assert r.tag_name == "ok"
+        assert len(git._staged) > 0
+
+    def test_add_all_then_commit(self, run):
+        git = MockGit()
+        code = """
+let a = git.add_all()
+let c = git.commit("stage everything")
+return c
+"""
+        r = run(code, git=git)
+        assert r.tag_name == "ok"
+
+
+# ===================================================================
 # git.commit
 # ===================================================================
 
@@ -297,6 +320,18 @@ return git.log(1)
         assert r.tag_name == "ok"
         assert len(r.tag_value) == 1
         assert "initial setup" in r.tag_value[0]
+
+    def test_add_all_commit_workflow(self, run):
+        """Agent can stage all files at once and commit."""
+        git = MockGit()
+        code = """
+let a = git.add_all()
+let c = git.commit("bulk commit")
+return git.log(1)
+"""
+        r = run(code, git=git)
+        assert r.tag_name == "ok"
+        assert "bulk commit" in r.tag_value[0]
 
     def test_branch_checkout_workflow(self, run):
         """Agent can create and switch branches."""

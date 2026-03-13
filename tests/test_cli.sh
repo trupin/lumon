@@ -287,11 +287,8 @@ define helper.gather
   returns: list "results"
 
 implement helper.gather
-  let a = spawn
-    "fetch A"
-  let b = spawn
-    "fetch B"
-  return [a, b]
+  let results = spawn [{prompt: "fetch A"}, {prompt: "fetch B"}]
+  return results
 
 test mock.spawn_responses
   mock_spawn(["result_a", "result_b"])
@@ -361,7 +358,7 @@ RESP_FILE="$RESPOND_ROOT/.lumon_comm/$SESSION/ask_response.json"
 echo '"pay bill"' > "$RESP_FILE"
 
 # Second run (respond): should produce a result
-SECOND_OUT="$(cd "$RESPOND_ROOT" && run respond)"
+SECOND_OUT="$(cd "$RESPOND_ROOT" && run respond "$SESSION")"
 assert_eq "respond: result after response" \
     '{"type": "result", "value": "pay bill"}' \
     "$SECOND_OUT"

@@ -242,6 +242,15 @@ class RealGit:
         except OSError as e:
             return {"tag": "error", "value": str(e)}
 
+    def add_all(self) -> dict:
+        try:
+            result = self._run(["add", "-u"])
+            if result.returncode != 0:
+                return {"tag": "error", "value": result.stderr.strip()}
+            return {"tag": "ok"}
+        except OSError as e:
+            return {"tag": "error", "value": str(e)}
+
     def commit(self, message: str) -> dict:
         try:
             result = self._run(["commit", "-m", message])
@@ -544,6 +553,10 @@ class MemoryGit:
 
     def add(self, path: str) -> dict:
         self._staged.append(path)
+        return {"tag": "ok"}
+
+    def add_all(self) -> dict:
+        self._staged.append(".")
         return {"tag": "ok"}
 
     def commit(self, message: str) -> dict:

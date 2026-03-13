@@ -91,6 +91,19 @@ define list.head
     items: list<a> "The list"
   returns: a | none "First item or none"
 
+define list.first
+  "First item (or none if empty) — alias for list.head"
+  takes:
+    items: list<a> "The list"
+  returns: a | none "First item or none"
+
+define list.get
+  "Get item at index (or none if out of bounds)"
+  takes:
+    items: list<a> "The list"
+    index: number "Zero-based index"
+  returns: a | none "Item at index or none"
+
 define list.tail
   "All items except first"
   takes:

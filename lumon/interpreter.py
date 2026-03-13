@@ -12,13 +12,14 @@ from collections.abc import Callable
 from lumon.builtins import register_builtins
 from lumon.daemon import SuspendEvent
 from lumon.environment import Environment
-from lumon.errors import AskSignal, LumonError, ReturnSignal
+from lumon.errors import AskSignal, LumonError, ReturnSignal, SpawnBatchSignal
 from lumon.evaluator import eval_node
 from lumon.parser import parse
 from lumon.plugins import (
     discover_plugins,
     disk_manifest_namespaces,
     load_config,
+    notify_plugin_shutdown,
     split_contracts,
 )
 from lumon.serializer import serialize
@@ -171,6 +172,19 @@ def _setup_plugins(
         env.trigger_loader(plugin.alias)
 
 
+def _shutdown_plugins(env: Environment) -> None:
+    """Notify used plugins that the session is ending."""
+    if not env._used_plugins:
+        return
+    # Build instance→env_vars mapping from the environment
+    env_vars_map: dict[str, dict[str, str]] = {}
+    for fn_name, env_vars in env._plugin_env_vars.items():
+        instance = env._plugin_instances.get(fn_name, "")
+        if instance and env_vars:
+            env_vars_map[instance] = env_vars
+    notify_plugin_shutdown(env._used_plugins, env_vars_map or None)
+
+
 def interpret(
     code: str,
     *,
@@ -181,6 +195,7 @@ def interpret(
     persist: bool = False,
     plugin_executor: Callable[..., object] | None = None,
     comm_dir: str | None = None,
+    suspend_event: object | None = None,
 ) -> dict:
     """Parse, type-check, and execute Lumon code.
 
@@ -190,10 +205,27 @@ def interpret(
       {"type": "ask", "prompt": ..., "context": ..., "expects": ...}
       {"type": "spawn_batch", ...}
 
+    When *suspend_event* (a SuspendEvent) is set, ask/spawn block in-place
+    and resume when responses arrive (daemon mode).
+
+    When *responses* is set, ask/spawn consume from the queue (replay/test mode).
+
     When *comm_dir* is set, large context data for ask/spawn is written to
     files under that directory instead of being inlined in the output JSON.
     """
     env = Environment()
+    daemon = isinstance(suspend_event, SuspendEvent)
+    suspended = False
+
+    if daemon:
+        env._suspend_callback = suspend_event
+
+        def _flush_spawns(envelopes: list[dict]) -> list[object]:
+            batch_envelope = _make_spawn_batch(envelopes, env._logs, comm_dir=comm_dir)
+            return suspend_event.suspend_for_spawns(batch_envelope)  # type: ignore[union-attr]
+
+        env._spawn_flush_callback = _flush_spawns
+
     try:
         ast = parse(code)
         type_check(ast, io_backend=io_backend, git_backend=git_backend)
@@ -207,9 +239,6 @@ def interpret(
         elif plugin_executor is not None:
             env._plugin_executor = plugin_executor
         result = eval_node(ast, env)
-        pending = env.get_pending_spawns()
-        if pending:
-            return _make_spawn_batch(pending, env._logs, comm_dir=comm_dir)
         output: dict[str, object] = {"type": "result", "value": serialize(result)}
         if env._logs:
             output["logs"] = list(env._logs)
@@ -217,9 +246,6 @@ def interpret(
             _persist_blocks(code, working_dir)
         return output
     except ReturnSignal as rs:
-        pending = env.get_pending_spawns()
-        if pending:
-            return _make_spawn_batch(pending, env._logs, comm_dir=comm_dir)
         output = {"type": "result", "value": serialize(rs.value)}
         if env._logs:
             output["logs"] = list(env._logs)
@@ -227,12 +253,16 @@ def interpret(
             _persist_blocks(code, working_dir)
         return output
     except AskSignal as ask:
+        suspended = True
         envelope = ask.envelope
         if env._logs:
             envelope["logs"] = list(env._logs)
         if comm_dir is not None:
             envelope = _externalize_ask(envelope, comm_dir)
         return envelope
+    except SpawnBatchSignal as spawn:
+        suspended = True
+        return _make_spawn_batch(spawn.envelopes, env._logs, comm_dir=comm_dir)
     except LumonError as e:
         envelope = e.to_envelope()
         if env._logs:
@@ -243,24 +273,35 @@ def interpret(
         if env._logs:
             envelope["logs"] = list(env._logs)
         return envelope
+    finally:
+        if not suspended:
+            _shutdown_plugins(env)
 
 
 def _make_spawn_batch(
-    pending: list[tuple[str, dict]],
+    envelopes: list[dict],
     logs: list[object] | None = None,
     *,
     comm_dir: str | None = None,
 ) -> dict:
-    """Build a spawn_batch envelope from pending spawn requests."""
-    spawns = [envelope for _handle, envelope in pending]
+    """Build a spawn_batch envelope from spawn request envelopes."""
+    spawns = list(envelopes)
     if comm_dir is not None:
         spawns = _externalize_spawns(spawns, comm_dir)
-    if len(spawns) == 1:
-        result = {"type": "spawn_batch", **spawns[0]}
+    batch_size = len(spawns)
+    if batch_size == 1:
+        result: dict[str, object] = {"type": "spawn_batch", **spawns[0]}
     else:
         result = {"type": "spawn_batch", "spawns": spawns}
     if comm_dir is not None:
         result["session"] = os.path.basename(comm_dir)
+    result["instruction"] = (
+        f"Run {'this task' if batch_size == 1 else f'each of these {batch_size} tasks'}"
+        " in parallel using the Agent tool (subagent_type: general-purpose)."
+        " Each spawn is an independent task — do NOT run them sequentially."
+        " Write each result as JSON to its response_file, then call:"
+        f" lumon --working-dir sandbox respond {result.get('session', '<session>')}"
+    )
     if logs:
         result["logs"] = list(logs)
     return result
@@ -304,9 +345,20 @@ def _externalize_spawns(spawns: list[dict], comm_dir: str) -> list[dict]:
         if "fork" in spawn:
             lightweight["fork"] = spawn["fork"]
 
-        # Add response file path
+        # Add response file path and format hint
         response_file = os.path.join(comm_dir, f"{spawn_id}_response.json")
         lightweight["response_file"] = response_file
+        expects = spawn.get("expects")
+        if expects:
+            lightweight["format"] = (
+                f"Write a bare JSON value matching the expected type ({expects})"
+                " — do NOT wrap in an object like {{\"value\": ...}}"
+            )
+        else:
+            lightweight["format"] = (
+                "Write a bare JSON value — do NOT wrap in an object"
+                " like {\"value\": ...}"
+            )
 
         result.append(lightweight)
     return result
@@ -361,98 +413,3 @@ def cleanup_all_comm(base_dir: str = ".lumon_comm") -> None:
     """Remove the entire .lumon_comm directory (stale sessions)."""
     if os.path.isdir(base_dir):
         shutil.rmtree(base_dir)
-
-
-def interpret_with_suspend(
-    code: str,
-    *,
-    io_backend: object = None,
-    git_backend: object = None,
-    working_dir: str | None = None,
-    persist: bool = False,
-    comm_dir: str | None = None,
-    suspend_event: object | None = None,
-) -> dict:
-    """Like interpret(), but uses a SuspendEvent for daemon mode.
-
-    When suspend_event is set, ask expressions block on the event instead of
-    raising AskSignal. Spawn batches also block for responses.
-    """
-    env = Environment()
-    if isinstance(suspend_event, SuspendEvent):
-        env._suspend_callback = suspend_event
-
-    try:
-        ast = parse(code)
-        type_check(ast, io_backend=io_backend, git_backend=git_backend)
-        register_builtins(env, io_backend, git_backend)
-        if working_dir is not None:
-            env._working_dir = working_dir
-            _setup_loader(env, working_dir)
-            _setup_plugins(env, working_dir)
-        result = eval_node(ast, env)
-        pending = env.get_pending_spawns()
-        if pending:
-            batch_envelope = _make_spawn_batch(pending, env._logs, comm_dir=comm_dir)
-            if isinstance(suspend_event, SuspendEvent):
-                # Block for spawn responses
-                responses = suspend_event.suspend_for_spawns(batch_envelope)
-                # Feed responses back and continue (spawns are terminal in current model)
-                # In current Lumon, spawns collect handles and return at program end,
-                # so we just pair responses with handles
-                handle_map: dict[str, object] = {}
-                for i, (handle, _envelope) in enumerate(pending):
-                    if i < len(responses):
-                        handle_map[handle] = responses[i]
-                # Re-run with responses queued? No — spawns are collected at end.
-                # The result is the list of spawn responses.
-                output: dict[str, object] = {"type": "result", "value": serialize(list(responses))}
-                if env._logs:
-                    output["logs"] = list(env._logs)
-                if persist and working_dir is not None:
-                    _persist_blocks(code, working_dir)
-                return output
-            return batch_envelope
-        output = {"type": "result", "value": serialize(result)}
-        if env._logs:
-            output["logs"] = list(env._logs)
-        if persist and working_dir is not None:
-            _persist_blocks(code, working_dir)
-        return output
-    except ReturnSignal as rs:
-        pending = env.get_pending_spawns()
-        if pending:
-            batch_envelope = _make_spawn_batch(pending, env._logs, comm_dir=comm_dir)
-            if isinstance(suspend_event, SuspendEvent):
-                responses = suspend_event.suspend_for_spawns(batch_envelope)
-                output = {"type": "result", "value": serialize(list(responses))}
-                if env._logs:
-                    output["logs"] = list(env._logs)
-                if persist and working_dir is not None:
-                    _persist_blocks(code, working_dir)
-                return output
-            return batch_envelope
-        output = {"type": "result", "value": serialize(rs.value)}
-        if env._logs:
-            output["logs"] = list(env._logs)
-        if persist and working_dir is not None:
-            _persist_blocks(code, working_dir)
-        return output
-    except AskSignal as ask:
-        # Should not happen in daemon mode (asks block instead of raising)
-        envelope = ask.envelope
-        if env._logs:
-            envelope["logs"] = list(env._logs)
-        if comm_dir is not None:
-            envelope = _externalize_ask(envelope, comm_dir)
-        return envelope
-    except LumonError as e:
-        envelope = e.to_envelope()
-        if env._logs:
-            envelope["logs"] = list(env._logs)
-        return envelope
-    except RecursionError:
-        envelope = LumonError("Call depth limit exceeded").to_envelope()
-        if env._logs:
-            envelope["logs"] = list(env._logs)
-        return envelope

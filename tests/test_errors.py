@@ -176,11 +176,13 @@ class TestTypeNameErrors:
 
     def test_field_on_list(self, run):
         r = run("let xs = [1, 2]\nreturn xs.first")
-        assert r.type == "error"
+        assert r.type == "result"
+        assert r.value is None
 
     def test_field_on_tag(self, run):
         r = run("let t = :ok\nreturn t.name")
-        assert r.type == "error"
+        assert r.type == "result"
+        assert r.value is None
 
     def test_index_on_map(self, run):
         r = run("let m = {a: 1}\nreturn m[0]")

@@ -1,6 +1,6 @@
 [project]
 name = "lumon"
-version = "0.6.0"
+version = "0.7.0"
 description = "A minimal, safe, pseudocode-like interpreted language for AI agents"
 requires-python = ">=3.11"
 dependencies = ["lark>=1.3"]
