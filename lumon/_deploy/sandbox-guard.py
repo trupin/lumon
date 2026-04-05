@@ -157,6 +157,16 @@ def _is_within_home_subdir(path: str, subdir: str) -> bool:
     return resolved == allowed or resolved.startswith(allowed + os.sep)
 
 
+# ~/.claude/ subdirectories the agent may read and write (memory, plans, tasks, session data).
+# Everything else in ~/.claude/ (settings, hooks, mcp-servers, etc.) is off-limits for writes.
+_CLAUDE_HOME_RW_SUBDIRS = ("projects", "plans", "tasks", "todos")
+
+
+def _is_in_claude_home_rw(path: str) -> bool:
+    """Check if path is within an allowed read/write subdirectory of ~/.claude/."""
+    return any(_is_within_home_subdir(path, os.path.join(".claude", d)) for d in _CLAUDE_HOME_RW_SUBDIRS)
+
+
 def _block(reason: str) -> None:
     logging.warning("BLOCKED: %s", reason)
     print(f"BLOCKED: {reason}", file=sys.stderr)
@@ -179,24 +189,24 @@ def main() -> None:
 
     elif tool == "Write":
         file_path = tool_input.get("file_path", "")
-        if _is_within(file_path, "sandbox") or _is_within(file_path, ".claude"):
+        if _is_within(file_path, "sandbox") or _is_in_claude_home_rw(file_path):
             logging.info("ALLOWED Write: %s", file_path)
             return
-        _block(f"Write only allowed in sandbox/ and .claude/ directories.\n  Attempted: {file_path}")
+        _block(f"Write only allowed in sandbox/ and ~/.claude/{{projects,plans,tasks,todos}}/.\n  Attempted: {file_path}")
 
     elif tool == "Edit":
         file_path = tool_input.get("file_path", "")
-        if _is_within(file_path, "sandbox") or _is_within(file_path, ".claude"):
+        if _is_within(file_path, "sandbox") or _is_in_claude_home_rw(file_path):
             logging.info("ALLOWED Edit: %s", file_path)
             return
-        _block(f"Edit only allowed in sandbox/ and .claude/ directories.\n  Attempted: {file_path}")
+        _block(f"Edit only allowed in sandbox/ and ~/.claude/{{projects,plans,tasks,todos}}/.\n  Attempted: {file_path}")
 
     elif tool == "Read":
         file_path = tool_input.get("file_path", "")
-        if _is_within(file_path, ".") or _is_within_home_subdir(file_path, ".claude"):
+        if _is_within(file_path, ".") or _is_in_claude_home_rw(file_path):
             logging.info("ALLOWED Read: %s", file_path)
             return
-        _block(f"Read only allowed in current directory and ~/.claude/.\n  Attempted: {file_path}")
+        _block(f"Read only allowed in current directory and ~/.claude/{{projects,plans,tasks,todos}}/.\n  Attempted: {file_path}")
 
 
 if __name__ == "__main__":
