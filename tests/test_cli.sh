@@ -454,12 +454,27 @@ assert_eq "deploy: hook allows Edit in sandbox" \
     "" \
     "$(echo '{"tool_name": "Edit", "tool_input": {"file_path": "sandbox/foo.lumon"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
 
-# Edit hook: allowed inside .claude/ (memory)
-assert_eq "deploy: hook allows Edit in .claude" \
+# Edit hook: allowed inside ~/.claude/projects/ (memory, sessions)
+assert_eq "deploy: hook allows Edit in ~/.claude/projects" \
     "" \
-    "$(echo '{"tool_name": "Edit", "tool_input": {"file_path": ".claude/memory/MEMORY.md"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+    "$(echo '{"tool_name": "Edit", "tool_input": {"file_path": "'"$HOME"'/.claude/projects/test/memory/MEMORY.md"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
 
-# Edit hook: blocked outside sandbox and .claude
+# Edit hook: allowed inside ~/.claude/plans/
+assert_eq "deploy: hook allows Edit in ~/.claude/plans" \
+    "" \
+    "$(echo '{"tool_name": "Edit", "tool_input": {"file_path": "'"$HOME"'/.claude/plans/plan.md"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
+# Edit hook: blocked inside project .claude/ (agent config)
+assert_contains "deploy: hook blocks Edit in .claude config" \
+    "BLOCKED" \
+    "$(echo '{"tool_name": "Edit", "tool_input": {"file_path": ".claude/settings.json"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
+
+# Edit hook: blocked inside ~/.claude/ outside allowed subdirs
+assert_contains "deploy: hook blocks Edit in ~/.claude root" \
+    "BLOCKED" \
+    "$(echo '{"tool_name": "Edit", "tool_input": {"file_path": "'"$HOME"'/.claude/CLAUDE.md"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
+
+# Edit hook: blocked outside sandbox
 assert_contains "deploy: hook blocks Edit outside sandbox" \
     "BLOCKED" \
     "$(echo '{"tool_name": "Edit", "tool_input": {"file_path": "CLAUDE.md"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
@@ -474,12 +489,27 @@ assert_eq "deploy: hook allows Write in sandbox" \
     "" \
     "$(echo '{"tool_name": "Write", "tool_input": {"file_path": "sandbox/tmp/test.lumon"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
 
-# Write hook: allowed inside .claude/ (memory)
-assert_eq "deploy: hook allows Write in .claude" \
+# Write hook: allowed inside ~/.claude/projects/ (memory, sessions)
+assert_eq "deploy: hook allows Write in ~/.claude/projects" \
     "" \
-    "$(echo '{"tool_name": "Write", "tool_input": {"file_path": ".claude/memory/patterns.md"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+    "$(echo '{"tool_name": "Write", "tool_input": {"file_path": "'"$HOME"'/.claude/projects/test/memory/patterns.md"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
 
-# Write hook: blocked outside sandbox and .claude
+# Write hook: allowed inside ~/.claude/todos/
+assert_eq "deploy: hook allows Write in ~/.claude/todos" \
+    "" \
+    "$(echo '{"tool_name": "Write", "tool_input": {"file_path": "'"$HOME"'/.claude/todos/todo.md"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
+# Write hook: blocked inside project .claude/ (agent config)
+assert_contains "deploy: hook blocks Write in .claude config" \
+    "BLOCKED" \
+    "$(echo '{"tool_name": "Write", "tool_input": {"file_path": ".claude/CLAUDE.md"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
+
+# Write hook: blocked inside ~/.claude/ outside allowed subdirs
+assert_contains "deploy: hook blocks Write in ~/.claude root" \
+    "BLOCKED" \
+    "$(echo '{"tool_name": "Write", "tool_input": {"file_path": "'"$HOME"'/.claude/settings.json"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
+
+# Write hook: blocked outside sandbox
 assert_contains "deploy: hook blocks Write outside sandbox" \
     "BLOCKED" \
     "$(echo '{"tool_name": "Write", "tool_input": {"file_path": "secret.txt"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
@@ -493,12 +523,22 @@ assert_eq "deploy: hook allows Read in sandbox subdir" \
     "" \
     "$(echo '{"tool_name": "Read", "tool_input": {"file_path": "sandbox/foo.lumon"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
 
-# Read hook: allowed for ~/.claude/ tool result files
-assert_eq "deploy: hook allows Read in ~/.claude" \
+# Read hook: allowed for ~/.claude/projects/ (tool results, subagents, memory)
+assert_eq "deploy: hook allows Read in ~/.claude/projects" \
     "" \
     "$(echo '{"tool_name": "Read", "tool_input": {"file_path": "'"$HOME"'/.claude/projects/test/tool-results/abc123.txt"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
 
-# Read hook: blocked outside current directory and ~/.claude
+# Read hook: allowed for ~/.claude/tasks/
+assert_eq "deploy: hook allows Read in ~/.claude/tasks" \
+    "" \
+    "$(echo '{"tool_name": "Read", "tool_input": {"file_path": "'"$HOME"'/.claude/tasks/task.md"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1)"
+
+# Read hook: blocked for ~/.claude/ outside allowed subdirs
+assert_contains "deploy: hook blocks Read in ~/.claude root" \
+    "BLOCKED" \
+    "$(echo '{"tool_name": "Read", "tool_input": {"file_path": "'"$HOME"'/.claude/settings.json"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
+
+# Read hook: blocked outside current directory
 assert_contains "deploy: hook blocks Read outside current dir" \
     "BLOCKED" \
     "$(echo '{"tool_name": "Read", "tool_input": {"file_path": "../outside/secret.txt"}}' | python3 "$DEPLOY_ROOT/.claude/hooks/sandbox-guard.py" 2>&1 || true)"
